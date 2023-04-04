@@ -1,6 +1,7 @@
 
 mod base;
 mod sequence;
+mod waveform;
 
 //pub use crate::bases::Base;
 
@@ -11,7 +12,8 @@ mod tests {
     use crate::base::bases::GBase;
     use crate::sequence::seq::Sequence;
     use log::warn;
-    
+    use crate::waveform::wave::Kernel;
+
     #[test]
     fn it_works() {
         let base = 3;
@@ -84,4 +86,26 @@ mod tests {
         println!("{:?}", press.generate_kmers(8));
         println!("{:?}", press2.generate_kmers(8));
     }
+
+    #[test]
+    fn wave_check(){
+
+        let sd = 30;
+        let k = Kernel::new(sd as f64);
+        println!("{:?}", k.get_curve());
+        println!("{:?}", k.mul(4.0));
+
+        let kern = k.get_curve();
+        let kernb = k.mul(4.0);
+
+        println!("{}", kern.len());
+
+        assert!(kern.len() == 6*sd+1);
+
+        assert!(kern.iter().zip(kernb).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
+
+        assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
+
+    }
+
 }
