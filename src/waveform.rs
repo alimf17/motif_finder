@@ -93,10 +93,10 @@ pub mod wave{
               converted to index easily by just dividing by spacer. A bp with a 
               non-integer part in its representation is dropped in the waveform.
              */
-            point_lens = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect(); 
+            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect(); 
 
             Waveform {
-                wave: vec[0; point_lens[len(point_lens)-1]],
+                wave: vec![0.0; point_lens[point_lens.len()-1]],
                 spacer: spacer,
                 point_lens: point_lens,
                 block_lens: block_lens,
@@ -107,7 +107,7 @@ pub mod wave{
         pub fn zero(&self) -> Waveform {
 
             Waveform {
-                wave: vec[0; self.point_lens[len(self.point_lens)-1]],
+                wave: vec![0.0; self.point_lens[self.point_lens.len()-1]],
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
@@ -116,43 +116,43 @@ pub mod wave{
 
         }
 
-        pub fn place_a_peak(&mut self, peak: &Kernel, block: usize, center: usize): {
+        pub fn place_a_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
-            let half_len = (peak.len-1)/2; //Given how we construct kernels, this will never need to be rounded
+            let half_len = (peak.len()-1)/2; //Given how we construct kernels, this will never need to be rounded
             let range = self.block_lens[block];
 
             let place_bp = (half_len as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
-            let cc = (place_bp) % self.spacer; // This defines the congruence class of the kernel indices that will be necessary for the signal
+            let cc = (place_bp) % (self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
            
             let zerbase: usize = self.start_bases[block]; //This will ensure the peak is in the correct block
 
-            let min_kern_bp: usize = max(0, place_bp);
-            let nex_kern_bp: usize = min(peak.len, spacer*self.point_lens[block]+place_bp); //Technicaly, the end CAN return a negative int. 
+            let min_kern_bp: usize = max(0, place_bp) as usize;
+            let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
                                                                                      //But if it is, panicking is appropriate: 
                                                                                      //center would necessarily be much bigger than the block length
 
 
 
-            let all_kernel_inds = (min_kern_bp..nex_kern_bp).collect();
+            let all_kernel_inds: Vec<usize> = (min_kern_bp..nex_kern_bp).collect();
 
-            let need_kernel_inds = all_kernel_inds.iter().filter(|&bp| ((bp % self.spacer) == cc)).map(|f| *f as usize).collect();
+            let need_kernel_inds: Vec<usize> = all_kernel_inds.iter().filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| *f as usize).collect();
 
-            let kern_values = indb.iter().map( |i| need_kern_inds[*i] ).collect::<Vec<_>>();
+            let kern_values = need_kernel_inds.iter().map( |i| peak.get_curve()[*i] ).collect::<Vec<_>>();
 
             
             
-            let completion: usize = (cc-(peak.lean % self.spacer))%self.spacer; //This tells us how much is necessary to add to the length 
+            let completion: usize = ((cc-((peak.len() % self.spacer) as isize))%(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
                                                                                 //of the kernel to hit the next base in the cc
             
             let min_kern_cc = max(cc, place_bp);
-            let max_kern_cc = min(self.point_lens[block]*spacer+place_bp, peak.len+completion);
+            let nex_kern_cc = min(((self.point_lens[block]*self.spacer) as isize)+place_bp, ((peak.len()+completion) as isize));
 
-            let min_data: usize = (min_kern_cc-place_bp)/spacer; //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
-            let nex_data: usize = (nex_kern_cc-place_bp)/spacer; //Assume nonnegative for the same reasons as nex_kern_bp
+            let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
+            let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
 
             
 
-            let kern_change = &mut self.wave[min_data, nex_data];
+            let kern_change = &mut self.wave[min_data..nex_data];
 
             for i in 0..kern_change.len(){
                 kern_change[i] += kern_values[i];
@@ -180,14 +180,15 @@ pub mod wave{
             if self.spacer != wave2.spacer()  {
                 panic!("These signals do not add! Spacers must be equal!")
             }
-
-            other_wave = wave2.raw_wave();
+ 
+            let other_wave = wave2.raw_wave();
             
             Waveform {
-                wave: self.wave.iter().zip(other_wave).map(|a, b| a+b).collect(),
+                wave: self.wave.iter().zip(other_wave).map(|(a, b)| a+b).collect(),
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
+                start_bases: self.start_bases.clone()
             }
 
         }
@@ -198,18 +199,19 @@ pub mod wave{
 
         type Output = Waveform;
 
-        fn sub(self, rhs: f64) -> waveform {
+        fn sub(self, wave2: &Waveform) -> Waveform {
 
             if self.spacer != wave2.spacer()  {
                 panic!("These signals do not subtract! Spacers must be equal!")
             }
-            other_wave = wave2.raw_wave();
+            let other_wave = wave2.raw_wave();
             
             Waveform {
-                wave: self.wave.iter().zip(other_wave).map(|a, b| a-b).collect(),
+                wave: self.wave.iter().zip(other_wave).map(|(a, b)| a-b).collect(),
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
+                start_bases: self.start_bases.clone()
             }
 
         }
@@ -227,6 +229,7 @@ pub mod wave{
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
+                start_bases: self.start_bases.clone()
             }
         }
 
