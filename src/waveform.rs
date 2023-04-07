@@ -71,6 +71,7 @@ pub mod wave{
         spacer: usize,
         point_lens: Vec<usize>,
         start_bases: Vec<usize>,
+        start_dats: Vec<usize>,
         block_lens: Vec<usize>,
     }
     
@@ -93,30 +94,46 @@ pub mod wave{
               converted to index easily by just dividing by spacer. A bp with a 
               non-integer part in its representation is dropped in the waveform.
              */
-            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect(); 
+            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
+
+            let mut start_dats: Vec<usize> = Vec::new();
+
+            let mut size: usize = 0;
+
+            for i in 0..point_lens.len(){
+                start_dats.push(size);
+                size += point_lens[i];
+            }
+
+            let tot_L: usize = point_lens.iter().sum();
 
             Waveform {
-                wave: vec![0.0; point_lens[point_lens.len()-1]],
+                wave: vec![0.0; tot_L],
                 spacer: spacer,
                 point_lens: point_lens,
                 block_lens: block_lens,
                 start_bases: start_bases,
+                start_dats: start_dats
             }
         }
 
         pub fn zero(&self) -> Waveform {
 
+            let tot_L: usize = self.point_lens.iter().sum();
+
+            
             Waveform {
-                wave: vec![0.0; self.point_lens[self.point_lens.len()-1]],
+                wave: vec![0.0; tot_L],
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
                 start_bases: self.start_bases.clone(),
+                start_dats: self.start_dats.clone()
             }
 
         }
 
-        pub fn place_a_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
+        pub fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
             let half_len = (peak.len()-1)/2; //Given how we construct kernels, this will never need to be rounded
             let range = self.block_lens[block];
@@ -124,7 +141,7 @@ pub mod wave{
             let place_bp = (half_len as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
             let cc = (place_bp) % (self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
            
-            let zerbase: usize = self.start_bases[block]; //This will ensure the peak is in the correct block
+            let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
 
             let min_kern_bp: usize = max(0, place_bp) as usize;
             let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
@@ -141,7 +158,7 @@ pub mod wave{
 
             
             
-            let completion: usize = ((cc-((peak.len() % self.spacer) as isize))%(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
+            let completion: usize = ((cc-((peak.len() % self.spacer) as isize)).rem_euclid(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
                                                                                 //of the kernel to hit the next base in the cc
             
             let min_kern_cc = max(cc, place_bp);
@@ -152,7 +169,7 @@ pub mod wave{
 
             
 
-            let kern_change = &mut self.wave[min_data..nex_data];
+            let kern_change = &mut self.wave[(min_data+zerdat)..(nex_data+zerdat)];
 
             for i in 0..kern_change.len(){
                 kern_change[i] += kern_values[i];
@@ -162,12 +179,25 @@ pub mod wave{
 
         }
 
+
+        pub fn start_bases(&self) -> Vec<usize> {
+            self.start_bases.clone()
+        }
+
         pub fn spacer(&self) -> usize {
             self.spacer
         }
 
         pub fn raw_wave(&self) -> Vec<f64> {
             self.wave.clone()
+        }
+
+        pub fn start_dats(&self)  -> Vec<usize> {
+             self.start_dats.clone()
+        }
+
+        pub fn point_lens(&self)  -> Vec<usize> {
+            self.point_lens.clone()
         }
     }
     
@@ -188,7 +218,8 @@ pub mod wave{
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone()
+                start_bases: self.start_bases.clone(),
+                start_dats: self.start_dats.clone(),
             }
 
         }
@@ -211,7 +242,8 @@ pub mod wave{
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone()
+                start_bases: self.start_bases.clone(),
+                start_dats: self.start_dats.clone(),
             }
 
         }
@@ -229,7 +261,8 @@ pub mod wave{
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
                 block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone()
+                start_bases: self.start_bases.clone(),
+                start_dats: self.start_dats.clone(),
             }
         }
 

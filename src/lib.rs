@@ -13,6 +13,7 @@ mod tests {
     use crate::sequence::seq::Sequence;
     use log::warn;
     use crate::waveform::wave::Kernel;
+    use crate::waveform::wave::Waveform;
 
     #[test]
     fn it_works() {
@@ -90,7 +91,7 @@ mod tests {
     #[test]
     fn wave_check(){
 
-        let sd = 30;
+        let sd = 5;
         let height = 2.0;
         let k = Kernel::new(sd as f64, height);
         println!("{:?}", k.get_curve());
@@ -106,6 +107,40 @@ mod tests {
         assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
 
         assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn real_wave_check(){
+        let k = Kernel::new(5.0, 2.0);
+        let mut signal = Waveform::new(vec![84, 68, 72], vec![0, 84, 152], 5);
+
+        
+        signal.place_peak(&k, 2, 20);
+
+        println!("{:?}", signal.raw_wave());
+
+        println!("{:?}", signal.start_bases());
+
+        println!("{:?}", signal.raw_wave()[30..36].to_vec());
+
+        println!("{:?}", signal.start_dats());
+
+        println!("{:?}", signal.point_lens());
+
+        //Waves are in the correct spot
+        assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
+
+        signal.place_peak(&k, 1, 20);
+
+        //Waves are in the correct spot
+        assert!((signal.raw_wave()[21]-2.0).abs() < 1e-6);
+
+        signal.place_peak(&k, 1, 2);
+
+        //Waves are not contagious
+        assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+
+        println!("{:?}", signal.raw_wave());
 
     }
 
