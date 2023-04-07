@@ -6,7 +6,7 @@ pub mod seq {
     pub struct Sequence {
         seq_blocks: Vec<u8>,
         block_inds: Vec<usize>,
-        end_bases: Vec<usize>,
+        start_bases: Vec<usize>,
         block_lens: Vec<usize>,
     }
 
@@ -16,7 +16,7 @@ pub mod seq {
 
             let mut block_is: Vec<usize> = Vec::new();
 
-            let mut e_bases: Vec<usize> = Vec::new();
+            let mut s_bases: Vec<usize> = Vec::new();
 
             let mut block_ls: Vec<usize> = Vec::new();
 
@@ -27,6 +27,8 @@ pub mod seq {
             let mut b_len: usize = 0;
 
             for block in blocks {
+                
+                s_bases.push(b_len);
                 
                 block_is.push(p_len);
 
@@ -44,7 +46,6 @@ pub mod seq {
                 p_len += block.len()/4;
                 b_len += block.len();
 
-                e_bases.push(b_len);
                 block_ls.push(block.len());
 
 
@@ -53,7 +54,7 @@ pub mod seq {
             Sequence{
                 seq_blocks: seq_bls,
                 block_inds: block_is,
-                end_bases: e_bases,
+                start_bases: s_bases,
                 block_lens: block_ls
             }
 
