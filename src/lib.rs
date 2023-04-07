@@ -91,18 +91,19 @@ mod tests {
     fn wave_check(){
 
         let sd = 30;
-        let k = Kernel::new(sd as f64);
+        let height = 2.0;
+        let k = Kernel::new(sd as f64, height);
         println!("{:?}", k.get_curve());
-        println!("{:?}", k.mul(4.0));
+        println!("{:?}", (&k*4.0).get_curve());
 
         let kern = k.get_curve();
-        let kernb = k.mul(4.0);
+        let kernb = &k*4.0;
 
         println!("{}", kern.len());
 
         assert!(kern.len() == 6*sd+1);
 
-        assert!(kern.iter().zip(kernb).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
+        assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
 
         assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
 
