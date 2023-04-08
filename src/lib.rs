@@ -142,6 +142,58 @@ mod tests {
 
         println!("{:?}", signal.raw_wave());
 
+        let base_w = &signal*0.4;
+
+        println!("{:?}", (&signal-&base_w).raw_wave());
+
+        let ar: Vec<f64> = vec![0.9, -0.1];
+
+        let noi: Vec<f64> = signal.produce_noise(&base_w, &ar);
+
+        println!("{:?}", noi);
+
+        let raw_resid = &signal-&base_w;
+
+        let w = raw_resid.raw_wave();
+
+        for i in 0..raw_resid.raw_wave().len(){
+
+            println!("ASSSD: {:?}", raw_resid.start_dats());
+
+            let chopped = raw_resid.start_dats().iter().fold(false, |acc, ch| acc || ((i >= *ch) && (i < *ch+ar.len())));
+ 
+            println!("{}, {:?}", i, raw_resid.start_dats().iter().map(|ch| ((i >= *ch) && (i < *ch+ar.len()))).collect::<Vec<_>>());
+
+            let block_id = raw_resid.start_dats().iter().enumerate().filter(|(_, &a)| a <= i).max_by_key(|(_, &value)| value).map(|(idx, _)| idx).unwrap();
+            //This gives the index of the maximum start value that still doesn't exceed i, identifying its data block.
+
+            let block_loc = i-raw_resid.start_dats()[block_id];
+
+            if !chopped {
+
+                let start_noi = raw_resid.start_dats()[block_id]-block_id*ar.len();
+
+
+                
+                let piece: Vec<_> = w[(i-ar.len())..i].iter().rev().collect();
+
+                let sst = ar.iter().zip(piece.clone()).map(|(a, r)| a*r).sum::<f64>() as f64;
+                
+                assert!(((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)).abs() < 1e-6);
+
+            }
+
+        }
+
+
+
+
+
+
+
+
+
+
     }
 
 }
