@@ -179,6 +179,61 @@ pub mod wave{
 
         }
 
+        pub fn produce_noise(&self, data: &Waveform, ar_corrs: &Vec<f64>) -> Vec<f64> {
+            let residual = self-data;
+
+
+            let mut end_dats = residual.start_dats()[1..residual.start_dats.len()].to_vec();
+
+            let resid = residual.wave;
+            
+            end_dats.push(resid.len());
+
+            let mut len_penalties = Vec::new();
+
+            for k in 0..end_dats.len() {
+                len_penalties.push((k+1)*ar_corrs.len());
+            }
+
+            let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
+
+            let c_num = ar_corrs.len();
+
+            let l_c = ar_corrs.len();
+
+            let mut fin_noise: Vec<f64> = vec![0.0; filt_lens.iter().sum()];
+
+            for k in 0..end_dats.len(){
+
+                let sind: usize = if k == 0 {0} else {end_dats[k-1]};
+
+    
+                let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].iter().zip(resid[(sind+l_c-1)..(end_dats[k]-1)].iter()).map(|(a,b)| a-ar_corrs[0]*b).collect();
+                
+                if l_c > 1 {
+                
+                    for i in 1..l_c {
+                        block = block.iter().zip(resid[(sind+l_c-(i+1))..(end_dats[k]-(i+1))].iter()).map(|(a,b)| a-ar_corrs[i]*b).collect();
+                    }
+                }
+
+                let sind: usize = if k == 0 {0} else {filt_lens[k-1]};
+
+                let block_ref = &mut fin_noise[sind..filt_lens[k]];
+
+                for i in 0..block_ref.len(){
+
+                    block_ref[i] = block[i];
+
+                }
+
+            }
+
+            fin_noise
+
+
+        }
+
 
         pub fn start_bases(&self) -> Vec<usize> {
             self.start_bases.clone()
@@ -268,6 +323,7 @@ pub mod wave{
 
 
     }
+
 
 
 
