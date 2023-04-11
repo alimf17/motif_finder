@@ -7,6 +7,10 @@ pub mod wave{
     use std::cmp::min;
     use core::f64::consts::PI;
 
+    use statrs::distribution::StudentsT;
+    use statrs::distribution::{Continuous, ContinuousCDF};
+
+
     const WIDE: f64 = 3.0;
     const THRESH: f64 = 1e-4; //Going off of binding score now, not peak height, so it's lower
 
@@ -325,10 +329,162 @@ pub mod wave{
     }
 
 
+    pub struct Noise {
+        resids: Vec<f64>,
+        dist: StudentsT,
+    }
 
+    impl Noise {
+
+
+        pub fn new(resids: Vec<f64>, sigma_back : f64, df : f64) -> Noise {
+
+            let dist = StudentsT::new(0., sigma_back, df).unwrap();
+            Noise{ resids: resids, dist: dist}
+
+        }
+
+        pub fn resids(&self) -> Vec<f64> {
+            self.resids.clone()
+        }
+
+        //The ranks need to be 1 indexed for the AD calculation to work
+        pub fn rank(&self) -> Vec<usize> {
+
+            let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
+
+            rx.sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
+
+            let mut ranks: Vec<usize> = vec![0; rx.len()];
+
+            let mut ind = 0;
+
+            for &(i, e) in &rx {
+                ranks[i] = ind+1;
+                ind += 1;
+            }
+            
+            ranks
+        }
+
+        pub fn ad_calc(&self) -> f64 {
+
+            let mut forward: Vec<f64> = self.resids();
+            forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            let reverse: Vec<f64> = forward.iter().rev().map(|a| *a).collect();
+
+            let n = forward.len();
+
+            let inds: Vec<f64> = (0..n).map(|a| (2.0*(a as f64)+1.0)/(n as f64)).collect();
+
+            //I dedicated an inhuman amount of work trying to directly implement ln CDF here
+            //And then ran a simple numerical test and realized that I don't need to bother
+            //The statrc crate is numerically stable enough out even to +/- 200
+
+            let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
+                                          .map(|((f,r),m)| m*(self.dist.cdf(*f)+self.dist.sf(r))).sum::<f64>();
+
+
+            Ad
+        }
+
+        pub fn ad_grad(&self) -> Vec<f64> {
+
+            let ranks: Vec<f64> = self.rank().iter().map(|a| *a as f64).collect();
+
+            let forward: Vec<f64> = self.resids();
+
+            let n = forward.len();
+
+
+            let derivative: Vec<f64> = forward.iter().zip(ranks)
+                                        .map(|(&a, b)| (self.dist.pdf(a)/(self.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b+1.)/self.dist.cdf(a))))
+                                        .collect();
+
+            derivative
+
+        }
+
+        fn low_val(lA: f64) -> f64 {
+
+            const C: f64 = PI*PI/8.0;
+            let cfs = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
+
+            let expo = (0..6).map(|a| 2.0*(a as f64)-1.0).collect::<Vec<f64>>();
+ 
+            let p: f64 = cfs.iter().zip(expo)
+                            .map(|(&c, e)| c*e*lA.sqrt().powf(e-2.0)/2.0 + C*c*lA.sqrt().powf(e-4.0)).sum();
+
+            -C/lA+p.ln()
+
+        }
+
+
+        fn high_val(hA: f64) -> f64 {
+
+            (3.0/(hA*PI)).ln()/2.0-hA
+
+        }
+
+        pub fn ad_like(A: f64) -> f64 {
+
+            const A0: f64 = 2.64;
+            const k: f64 = 84.44556;
+
+            let lo = Self::low_val(A);
+            let hi = Self::high_val(A);
+
+            let w = 1.0/(1.0+(A/A0).powf(k));
+
+            w*lo+(1.0-w)*hi
+        }
+
+        pub fn ad_diff(A: f64) -> f64 {
+
+            const h: f64 = 0.00001;
+            (Self::ad_like(A+h)-Self::ad_like(A))/h
+
+        }
+
+
+
+    }
+
+    impl Mul<&Noise> for &Noise {
+
+        type Output = f64;
+
+        fn mul(self, rhs: &Noise) -> f64 {
+
+            let rhs_r = rhs.resids();
+
+            if(self.resids.len() != rhs_r.len()){
+                panic!("Residuals aren't the same length?!")
+            }
+
+            self.resids.iter().zip(rhs_r).map(|(a,b)| a*b).sum()
+        }
+    }
 
 
     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
