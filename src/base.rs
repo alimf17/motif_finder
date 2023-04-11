@@ -27,7 +27,9 @@ pub mod bases {
     }
 
 
-    fn clean_props(mut props: [ f64; BASE_L]) -> [f64; BASE_L] {
+    fn clean_props(vals: [ f64; BASE_L]) -> [f64; BASE_L] {
+
+        let mut props = vals;
 
         let norm: f64 = props.iter().sum();
 
@@ -41,7 +43,7 @@ pub mod bases {
 
     impl Base {
 
-        pub fn new(mut props: [ f64; 4]) -> Base {
+        pub fn new(props: [ f64; 4]) -> Base {
 
             let eps = 1e-12;
 
@@ -220,5 +222,44 @@ pub mod bases {
             based
 
         }
+    }
+}
+
+#[cfg(test)]
+mod tester{
+
+    use crate::base::bases::Base;
+    use crate::base::bases::GBase;
+
+    #[test]
+    fn it_works() {
+        let base = 3;
+        let try_base: Base = Base::rand_new();
+        let b = try_base.make_best(base);
+        assert_eq!(base, b.best_base());
+
+        let bc: Base = b.rev();
+
+        assert_eq!(bc.best_base(), 3-base);
+
+        let tc: Base = try_base.rev();
+
+        assert_eq!(tc.best_base(), 3-try_base.best_base());
+
+        assert!(!(tc == try_base));
+        assert!(b == b.clone());
+
+        assert!(b == b.to_gbase().to_base());
+
+
+        let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
+
+        assert!((td.rel_bind(1)-0.5_f64).abs() < 1e-6);
+        assert!((td.rel_bind(2)-1_f64).abs() < 1e-6);
+
+        let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
+
+        assert!(tg.to_base() == td);
+
     }
 }

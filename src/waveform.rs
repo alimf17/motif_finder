@@ -201,8 +201,6 @@ pub mod wave{
 
             let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
 
-            let c_num = ar_corrs.len();
-
             let l_c = ar_corrs.len();
 
             let mut fin_noise: Vec<f64> = vec![0.0; filt_lens.iter().sum()];
@@ -347,6 +345,10 @@ pub mod wave{
         pub fn resids(&self) -> Vec<f64> {
             self.resids.clone()
         }
+        
+        pub fn dist(&self) -> StudentsT {
+            self.dist.clone()
+        }
 
         //The ranks need to be 1 indexed for the AD calculation to work
         pub fn rank(&self) -> Vec<usize> {
@@ -359,7 +361,7 @@ pub mod wave{
 
             let mut ind = 0;
 
-            for &(i, e) in &rx {
+            for &(i, _) in &rx {
                 ranks[i] = ind+1;
                 ind += 1;
             }
@@ -382,7 +384,7 @@ pub mod wave{
             //The statrc crate is numerically stable enough out even to +/- 200
 
             let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
-                                          .map(|((f,r),m)| m*(self.dist.cdf(*f)+self.dist.sf(r))).sum::<f64>();
+                                          .map(|((f,r),m)| m*(self.dist.cdf(*f).ln()+self.dist.sf(r).ln())).sum::<f64>();
 
 
             Ad
@@ -398,7 +400,7 @@ pub mod wave{
 
 
             let derivative: Vec<f64> = forward.iter().zip(ranks)
-                                        .map(|(&a, b)| (self.dist.pdf(a)/(self.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b+1.)/self.dist.cdf(a))))
+                                        .map(|(&a, b)| (self.dist.pdf(a)/(self.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b-1.)/self.dist.cdf(a))))
                                         .collect();
 
             derivative
@@ -467,11 +469,169 @@ pub mod wave{
     }
 
 
+}
+
     
 
 
 
+#[cfg(test)]
+mod tests{
+    
+    use crate::waveform::wave::Kernel;
+    use crate::waveform::wave::Waveform;
+    use crate::waveform::wave::Noise;
 
+    use statrs::distribution::ContinuousCDF;
+
+    #[test]
+    fn wave_check(){
+
+        let sd = 5;
+        let height = 2.0;
+        let k = Kernel::new(sd as f64, height);
+
+        let kern = k.get_curve();
+        let kernb = &k*4.0;
+
+
+        assert!(kern.len() == 6*sd+1);
+
+        assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
+
+        assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn real_wave_check(){
+        let k = Kernel::new(5.0, 2.0);
+        let mut signal = Waveform::new(vec![84, 68, 72], vec![0, 84, 152], 5);
+
+
+        signal.place_peak(&k, 2, 20);
+
+        //Waves are in the correct spot
+        assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
+
+        signal.place_peak(&k, 1, 20);
+
+        //Waves are in the correct spot
+        assert!((signal.raw_wave()[21]-2.0).abs() < 1e-6);
+
+        signal.place_peak(&k, 1, 2);
+
+        //Waves are not contagious
+        assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+
+
+        let base_w = &signal*0.4;
+
+
+        let ar: Vec<f64> = vec![0.9, -0.1];
+
+        let noi: Vec<f64> = signal.produce_noise(&base_w, &ar);
+
+
+        let raw_resid = &signal-&base_w;
+
+        let w = raw_resid.raw_wave();
+
+        for i in 0..raw_resid.raw_wave().len(){
+
+
+            let chopped = raw_resid.start_dats().iter().fold(false, |acc, ch| acc || ((i >= *ch) && (i < *ch+ar.len())));
+
+
+            let block_id = raw_resid.start_dats().iter().enumerate().filter(|(_, &a)| a <= i).max_by_key(|(_, &value)| value).map(|(idx, _)| idx).unwrap();
+            //This gives the index of the maximum start value that still doesn't exceed i, identifying its data block.
+
+            let block_loc = i-raw_resid.start_dats()[block_id];
+
+            if !chopped {
+
+                let start_noi = raw_resid.start_dats()[block_id]-block_id*ar.len();
+
+
+
+                let piece: Vec<_> = w[(i-ar.len())..i].iter().rev().collect();
+
+                let sst = ar.iter().zip(piece.clone()).map(|(a, r)| a*r).sum::<f64>() as f64;
+
+                assert!(((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)).abs() < 1e-6);
+
+            }
+
+        }
+
+
+
+
+
+
+
+
+
+
+    }
+
+
+
+    #[test]
+    fn noise_check(){
+
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], 0.25, 2.64);
+
+        assert!(((&n1*&n2)+1.59).abs() < 1e-6);
+
+        println!("{:?}", n1.resids());
+        println!("{:?}", n1.rank());
+        println!("{}", n1.ad_calc());
+
+
+        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], 0.25, 2.64);
+
+        println!("{:?}", n1.ad_grad());
+
+        let h = 0.0000001;
+        let noise_ad = n1.ad_calc();
+        let mut noise_arr = n1.resids();
+        let noise_length = noise_arr.len();
+        for i in 0..noise_length {
+            let mut noisy = noise_arr.clone();
+            noisy[i] += h;
+            let n1_plus_h = Noise::new(noisy, 0.25, 2.64);
+            let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
+            assert!((n1.ad_grad()[i]-diff).abs() < 1e-6);
+        }
+
+        noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let mut ad_try = -(noise_length as f64);
+
+        for i in 0..noise_length {
+
+            let ln_cdf = n1.dist().cdf(noise_arr[i]).ln();
+            let ln_sf = (1.-n1.dist().cdf(noise_arr[noise_length-1-i])).ln();
+            let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
+
+            ad_try -= (mult*(ln_cdf+ln_sf));
+        }
+
+        assert!((n1.ad_calc()-ad_try).abs() < 1e-6);
+
+
+
+    }
+
+    #[test]
+    #[should_panic(expected = "Residuals aren't the same length?!")]
+    fn panic_noise() {
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], 0.25, 2.64);
+
+        let _ = &n1*&n2;
+    }
 
 
 
@@ -489,3 +649,5 @@ pub mod wave{
 
 
 }
+
+
