@@ -137,3 +137,49 @@ pub mod seq {
 
 
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::sequence::seq::Sequence;
+
+    #[test]
+    fn seq_check(){
+
+        let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3], vec![2,2,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
+
+        let press = Sequence::new(&blocked);
+
+        let arr = press.return_bases(0, 7, 5);
+
+        let supp = [0,0,0,0,3];
+
+        assert!(arr.iter().zip(supp).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+
+        let arr2 = press.return_bases(1, 1, 7);
+
+        let supp2 = [2,1,1,1,1,1,1];
+
+
+
+        assert!(arr2.iter().zip(supp2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+
+        let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2]];
+
+        let press2 = Sequence::new(&alt_block);
+
+        let atemers = press2.generate_kmers(8);
+
+        assert!(atemers.len() == 1);
+
+        let sup2 = [2,2,2,2,2,2,2,2];
+
+        assert!(atemers[0].iter().zip(sup2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+
+
+    }
+
+
+
+
+}
+
