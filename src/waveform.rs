@@ -620,6 +620,26 @@ mod tests{
 
         assert!((n1.ad_calc()-ad_try).abs() < 1e-6);
 
+        //Calculated these with the ln of the numerical derivative of the fast implementation
+        //of the pAD function in the goftest package in R
+        //This uses Marsaglia's implementation, and is only guarenteed up to 8
+        let calced_ads: [(f64, f64); 6] = [(1.0, -0.644472305368), 
+                                           (0.46, 0.026743661078),
+                                           (0.82, -0.357453548256),
+                                           (2.82, -3.221007453503),
+                                           (3.84, -4.439627768456),
+                                           (4.24, -4.865014182520)];
+
+        for pairs in calced_ads {
+
+            println!("{} {} Noise", Noise::ad_like(pairs.0), pairs.1);
+            //I'm considering 5% error mission accomplished for these
+           //We're fighting to make sure this approximation is roughly
+           //compaitble with another approximation with propogated errors
+           //This will not be an exact science
+            assert!(((Noise::ad_like(pairs.0)-pairs.1)/pairs.1).abs() < 5e-2); 
+
+        }
 
 
     }
