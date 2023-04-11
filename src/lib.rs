@@ -1,4 +1,4 @@
-
+#[allow(unused_parens)]
 mod base;
 mod sequence;
 mod waveform;
@@ -14,6 +14,7 @@ mod tests {
     use log::warn;
     use crate::waveform::wave::Kernel;
     use crate::waveform::wave::Waveform;
+    use crate::waveform::wave::Noise;
 
     #[test]
     fn it_works() {
@@ -35,7 +36,6 @@ mod tests {
 
         assert!(b == b.to_gbase().to_base());
 
-        println!("{}", b.dist(&b.to_gbase().to_base()));
 
         let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
 
@@ -66,8 +66,6 @@ mod tests {
         let supp2 = [2,1,1,1,1,1,1];
 
 
-        println!("DF");
-        println!("{:?}", arr2);
 
         assert!(arr2.iter().zip(supp2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
     
@@ -84,8 +82,6 @@ mod tests {
         assert!(atemers[0].iter().zip(sup2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
 
 
-        println!("{:?}", press.generate_kmers(8));
-        println!("{:?}", press2.generate_kmers(8));
     }
 
     #[test]
@@ -94,13 +90,10 @@ mod tests {
         let sd = 5;
         let height = 2.0;
         let k = Kernel::new(sd as f64, height);
-        println!("{:?}", k.get_curve());
-        println!("{:?}", (&k*4.0).get_curve());
 
         let kern = k.get_curve();
         let kernb = &k*4.0;
 
-        println!("{}", kern.len());
 
         assert!(kern.len() == 6*sd+1);
 
@@ -117,15 +110,10 @@ mod tests {
         
         signal.place_peak(&k, 2, 20);
 
-        println!("{:?}", signal.raw_wave());
 
-        println!("{:?}", signal.start_bases());
 
-        println!("{:?}", signal.raw_wave()[30..36].to_vec());
 
-        println!("{:?}", signal.start_dats());
 
-        println!("{:?}", signal.point_lens());
 
         //Waves are in the correct spot
         assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
@@ -140,17 +128,14 @@ mod tests {
         //Waves are not contagious
         assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
 
-        println!("{:?}", signal.raw_wave());
 
         let base_w = &signal*0.4;
 
-        println!("{:?}", (&signal-&base_w).raw_wave());
 
         let ar: Vec<f64> = vec![0.9, -0.1];
 
         let noi: Vec<f64> = signal.produce_noise(&base_w, &ar);
 
-        println!("{:?}", noi);
 
         let raw_resid = &signal-&base_w;
 
@@ -158,11 +143,9 @@ mod tests {
 
         for i in 0..raw_resid.raw_wave().len(){
 
-            println!("ASSSD: {:?}", raw_resid.start_dats());
 
             let chopped = raw_resid.start_dats().iter().fold(false, |acc, ch| acc || ((i >= *ch) && (i < *ch+ar.len())));
  
-            println!("{}, {:?}", i, raw_resid.start_dats().iter().map(|ch| ((i >= *ch) && (i < *ch+ar.len()))).collect::<Vec<_>>());
 
             let block_id = raw_resid.start_dats().iter().enumerate().filter(|(_, &a)| a <= i).max_by_key(|(_, &value)| value).map(|(idx, _)| idx).unwrap();
             //This gives the index of the maximum start value that still doesn't exceed i, identifying its data block.
@@ -195,5 +178,33 @@ mod tests {
 
 
     }
+
+
+
+    #[test]
+    fn noise_check(){
+
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], 0.25, 2.64);
+
+        assert!(((&n1*&n2)+1.59).abs() < 1e-6);
+
+        println!("{:?}", n1.resids());
+        println!("{:?}", n1.rank());
+        println!("{}", n1.ad_calc());
+
+        println!("{:?}", n1.ad_grad());
+    }
+
+    #[test]
+    #[should_panic(expected = "Residuals aren't the same length?!")]
+    fn panic_noise() {
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], 0.25, 2.64);
+
+        let a = &n1*&n2;
+    }
+
+
 
 }
