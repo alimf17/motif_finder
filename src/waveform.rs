@@ -183,7 +183,7 @@ pub mod wave{
 
         }
 
-        pub fn produce_noise(&self, data: &Waveform, ar_corrs: &Vec<f64>) -> Vec<f64> {
+        pub fn produce_noise(&self, data: &Waveform, sigma_background: f64, df: f64, ar_corrs: &Vec<f64>) -> Noise {
             let residual = self-data;
 
 
@@ -231,7 +231,7 @@ pub mod wave{
 
             }
 
-            fin_noise
+            Noise::new(fin_noise,sigma_background, df)
 
 
         }
@@ -335,9 +335,9 @@ pub mod wave{
     impl Noise {
 
 
-        pub fn new(resids: Vec<f64>, sigma_back : f64, df : f64) -> Noise {
+        pub fn new(resids: Vec<f64>, sigma_background : f64, df : f64) -> Noise {
 
-            let dist = StudentsT::new(0., sigma_back, df).unwrap();
+            let dist = StudentsT::new(0., sigma_background, df).unwrap();
             Noise{ resids: resids, dist: dist}
 
         }
@@ -529,7 +529,9 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
 
-        let noi: Vec<f64> = signal.produce_noise(&base_w, &ar);
+        let noise: Noise = signal.produce_noise(&base_w, 0.25, 2.64, &ar);
+
+        let noi: Vec<f64> = noise.resids();
 
 
         let raw_resid = &signal-&base_w;
@@ -590,6 +592,8 @@ mod tests{
 
 
         let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], 0.25, 2.64);
+        
+        assert!(n1.rank().iter().zip([5,4,3,2,1]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
 
         println!("{:?}", n1.ad_grad());
 
@@ -632,7 +636,6 @@ mod tests{
 
         for pairs in calced_ads {
 
-            println!("{} {} Noise", Noise::ad_like(pairs.0), pairs.1);
             //I'm considering 5% error mission accomplished for these
            //We're fighting to make sure this approximation is roughly
            //compaitble with another approximation with propogated errors
