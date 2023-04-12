@@ -1,10 +1,27 @@
 pub mod bases {
+    use rand::Rng;
     use rand::distributions::{Distribution, Uniform};
+    use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
+    use statrs::statistics::{Min, Max};
+    use crate::waveform::wave::{Kernel, Waveform};
+
+    use statrs::{consts, Result, StatsError};
+    use std::f64;
 
     const BASE_L: usize = 4;
     const RT: f64 =  8.31446261815324*298./4184.; //in kcal/(K*mol)
 
     const CLOSE: f64 = 1e-5;
+
+    const MIN_BASE: usize = 8;
+    const MAX_BASE: usize = 20;
+
+    const MIN_HEIGHT: f64 = 3.;
+    const MAX_HEIGHT: f64 = 30.;
+    const LOG_HEIGHT_MEAN: f64 = 10.;
+    const LOG_HEIGHT_SD: f64 = 0.25;
+
+    //BEGIN BASE
 
     pub struct Base {
         props: [ f64; BASE_L],
@@ -178,6 +195,9 @@ pub mod bases {
         }
 
     }
+    
+    //BEGIN GBASE
+
     pub struct GBase {
         best: usize,
         dgs: [ f64; BASE_L-1],
@@ -223,6 +243,154 @@ pub mod bases {
 
         }
     }
+
+    //BEGIN MOTIF
+    /* pub struct Motif {
+    
+        peak_height: f64,
+        kernel: Kernel,
+        pwm: Vec<Base>,
+
+    }
+
+    impl Motif {
+
+        pub fn new(pwm: Vec<Base>, peak_height: f64, peak_width: f64) -> Motif {
+            let kernel = Kernel::new(peak_width, peak_height);
+
+            Kernel {
+
+                kernel: kernel,
+                pwm: pwm,
+            }
+        }
+
+        pub fn from_motif(best_bases: Vec<f64>, peak_width: f64) -> Motif {
+
+
+
+        }
+
+        pub fn rand_mot(peak_width: f64) -> Motif {
+
+            let mut rng = rand::thread_rng();
+
+
+
+        }
+
+
+    } */
+
+    //BEGIN TRUNCATED LOGNORMAL
+
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    pub struct TruncatedLogNormal {
+        location: f64,
+        scale: f64,
+        min: f64, 
+        max: f64,
+    }
+
+    impl TruncatedLogNormal {
+
+        pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal> {
+            if location.is_nan() || scale.is_nan() || scale <= 0.0 || (min > max) || (max < 0.0) {
+                Err(StatsError::BadParams)
+            } else {
+                let min = if min >= 0.0 {min} else {0.0} ;
+                Ok(TruncatedLogNormal { location, scale, min, max })
+            }
+        }
+        
+    }
+
+    impl ::rand::distributions::Distribution<f64> for TruncatedLogNormal {
+        
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
+           
+            let norm: Normal = Normal::new(self.location, self.scale).unwrap();
+            let mut sample: f64 = norm.sample(rng).exp();
+            let mut valid: bool = ((sample > self.max) | (sample < self.min));
+            while !valid {
+                sample = norm.sample(rng).exp();
+                valid = ((sample > self.max) | (sample < self.min));
+            }
+            sample
+        }
+    }
+
+    impl Min<f64> for TruncatedLogNormal {
+        fn min(&self) -> f64 {
+            self.min
+        }
+    }
+
+    impl Max<f64> for TruncatedLogNormal {
+        fn max(&self) -> f64 {
+            self.max
+        }
+    }
+
+    impl ContinuousCDF<f64, f64> for TruncatedLogNormal {
+
+        fn cdf(&self, x: f64) -> f64 {
+            if x <= self.min {
+                0.0
+            } else if x >= self.max {
+                1.0
+            } else {
+
+                let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
+                lndist.cdf(x)/(lndist.cdf(self.max)-lndist.cdf(self.min))
+            }
+        }
+
+        fn sf(&self, x: f64) -> f64 {
+            if x <= self.min {
+                1.0
+            } else if x >= self.max() {
+                0.0
+            } else {
+                let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
+                lndist.sf(x)/(lndist.cdf(self.max)-lndist.cdf(self.min))
+            }
+        }
+    }
+
+
+    impl Continuous<f64, f64> for TruncatedLogNormal {
+        
+        fn pdf(&self, x: f64) -> f64 {
+            if x < self.min || x > self.max {
+                0.0
+            } else {
+                let d = (x.ln() - self.location) / self.scale;
+                let usual_density = (-0.5 * d * d).exp() / (x * consts::SQRT_2PI * self.scale);
+                let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
+                let scale_density = lndist.cdf(self.max)-lndist.cdf(self.min);
+
+                usual_density/scale_density
+
+            }
+        }
+
+        fn ln_pdf(&self, x: f64) -> f64 {
+            if x < self.min || x > self.max {
+            f64::NEG_INFINITY
+            } else {
+                let d = (x.ln() - self.location) / self.scale;
+                let usual_density = (-0.5 * d * d) - consts::LN_SQRT_2PI - (x * self.scale).ln();
+                let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
+                let scale_density = (lndist.cdf(self.max)-lndist.cdf(self.min)).ln();
+
+                usual_density-scale_density
+            }
+        }
+    }
+
+
+
 }
 
 #[cfg(test)]
@@ -230,6 +398,13 @@ mod tester{
 
     use crate::base::bases::Base;
     use crate::base::bases::GBase;
+    use crate::base::bases::TruncatedLogNormal;
+    use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
+    use statrs::statistics::{Min, Max};
+    const MIN_HEIGHT: f64 = 3.;
+    const MAX_HEIGHT: f64 = 30.;
+    const LOG_HEIGHT_MEAN: f64 = 10.0;
+    const LOG_HEIGHT_SD: f64 = 0.25;
 
     #[test]
     fn it_works() {
@@ -260,6 +435,29 @@ mod tester{
         let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
 
         assert!(tg.to_base() == td);
+
+    }
+
+    #[test]
+    fn trun_ln_normal_tests() {
+
+        let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+
+        let free_dist: LogNormal = LogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD).unwrap();
+
+        assert!((dist.pdf(6.0)-dist.ln_pdf(6.0).exp()).abs() < 1e-6);
+
+        let val1: f64 = 3.0;
+        let val2: f64 = 15.0;
+
+        assert!(((free_dist.pdf(val1)/free_dist.pdf(val2))-(dist.pdf(val1)/dist.pdf(val2))).abs() < 1e-6);
+        assert!(((free_dist.cdf(val1)/free_dist.cdf(val2))-(dist.cdf(val1)/dist.cdf(val2))).abs() < 1e-6);
+
+        assert!(dist.ln_pdf(MAX_HEIGHT+1.0).is_infinite() && dist.ln_pdf(MAX_HEIGHT+1.0) < 0.0);
+
+        let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, -1.0, MAX_HEIGHT).unwrap();
+
+        assert!(dist.min().abs() < 1e-6);
 
     }
 }
