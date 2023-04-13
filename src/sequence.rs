@@ -1,6 +1,6 @@
 pub mod seq {
 
-    use itertools::Itertools;
+    use itertools::{all, Itertools};
     use std::collections::HashMap;
 
     pub struct Sequence {
@@ -62,6 +62,16 @@ pub mod seq {
 
         }
 
+        pub fn new_manual(seq_blocks: Vec<u8>, block_inds: Vec<usize>,start_bases: Vec<usize>, block_lens: Vec<usize>) -> Sequence {
+
+            Sequence{
+                seq_blocks: seq_blocks,
+                block_inds: block_inds,
+                start_bases: start_bases,
+                block_lens: block_lens
+            }
+
+        }
 
         
         pub fn generate_kmers(&self, len: usize) -> Vec<Vec<usize>> {
@@ -96,11 +106,11 @@ pub mod seq {
         
         }
 
-        fn code_to_bases(coded: u8) -> [usize; 4] {
+        fn code_to_bases(coded: u8) -> Vec<usize> {
 
             const PLACE_VALS: [u8; 4] = [64, 16, 4, 1];
 
-            let mut V: [usize; 4] = (PLACE_VALS.iter().map(|&a| ((coded/a) as usize)).collect::<Vec<usize>>()).try_into().expect("slice with incorrect length");
+            let mut V: Vec<usize> = (PLACE_VALS.iter().map(|&a| ((coded/a) as usize)).collect::<Vec<usize>>());
 
             for i in 0..3 { //Remember, we don't want to touch the 0th element
                 V[3-i] -= V[2-i]*4;
@@ -117,17 +127,16 @@ pub mod seq {
 
             let all_coded = &self.seq_blocks[start_dec..end_dec];
 
-            let all_bases_iter = all_coded.iter().map(|&a| Self::code_to_bases(a));
-
+            
             let mut all_bases = vec![];
 
-            for item in all_bases_iter {
-                all_bases.extend(item.to_vec());
+            for a in all_coded {
+                all_bases.append(&mut Self::code_to_bases(*a));
             }
 
             let new_s = start_id % 4;
 
-            let ret: Vec<usize> = all_bases[new_s..(new_s+num_bases)].try_into().expect("slice with incorrect length");
+            let ret: Vec<usize> = all_bases[new_s..(new_s+num_bases)].to_vec();
 
             ret
 
