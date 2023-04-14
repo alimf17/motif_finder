@@ -1,12 +1,12 @@
 pub mod seq {
 
-    use itertools::{all, Itertools};
+    use std::mem::size_of_val;
     use std::collections::HashMap;
+    use itertools::{all, Itertools};
 
     pub struct Sequence {
         seq_blocks: Vec<u8>,
         block_inds: Vec<usize>,
-        start_bases: Vec<usize>,
         block_lens: Vec<usize>,
     }
 
@@ -54,21 +54,19 @@ pub mod seq {
             Sequence{
                 seq_blocks: seq_bls,
                 block_inds: block_is,
-                start_bases: s_bases,
-                block_lens: block_ls
+                block_lens: block_ls,
             }
 
 
 
         }
 
-        pub fn new_manual(seq_blocks: Vec<u8>, block_inds: Vec<usize>,start_bases: Vec<usize>, block_lens: Vec<usize>) -> Sequence {
+        pub fn new_manual(seq_blocks: Vec<u8>, block_inds: Vec<usize>, block_lens: Vec<usize>) -> Sequence {
 
             Sequence{
                 seq_blocks: seq_blocks,
                 block_inds: block_inds,
-                start_bases: start_bases,
-                block_lens: block_lens
+                block_lens: block_lens,
             }
 
         }
@@ -77,27 +75,35 @@ pub mod seq {
         pub fn generate_kmers(&self, len: usize) -> Vec<Vec<usize>> {
 
 
-            let mut unel: Vec<Vec<usize>> = Vec::new();
-
-            for i in 0..self.block_lens.len() {
                 
-                if self.block_lens[i] >= len {
-                   
-                    for j in 0..(self.block_lens[i]-len+1){
-                        unel.push(self.return_bases(i, j, len));
+                let mut unel: Vec<Vec<usize>> = Vec::new();
+
+                for i in 0..self.block_lens.len() {
+                    
+                    if self.block_lens[i] >= len {
+                       
+                        for j in 0..(self.block_lens[i]-len+1){
+                            unel.push(self.return_bases(i, j, len));
+                        }
+
                     }
 
                 }
 
-            }
-
-            unel = unel.into_iter().unique().collect();
-
-            unel
-
+                unel = unel.into_iter().unique().collect();
+                unel
+            
+          
         }
 
 
+        pub fn seq_blocks(&self) -> Vec<u8> {
+            self.seq_blocks.clone()
+        }
+
+        pub fn block_lens(&self) -> Vec<usize> {
+            self.block_lens.clone()
+        }
 
         fn bases_to_code(bases: &[usize ; 4]) -> u8 {
 
@@ -127,12 +133,14 @@ pub mod seq {
 
             let all_coded = &self.seq_blocks[start_dec..end_dec];
 
-            
-            let mut all_bases = vec![];
+            let all_bases: Vec<_> = all_coded.iter().map(|a| Self::code_to_bases(*a)).flatten().collect();
 
-            for a in all_coded {
-                all_bases.append(&mut Self::code_to_bases(*a));
-            }
+            
+            //let mut all_bases = vec![];
+
+            //for a in all_coded {
+            //    all_bases.append(&mut Self::code_to_bases(*a));
+            //}
 
             let new_s = start_id % 4;
 
@@ -141,6 +149,21 @@ pub mod seq {
             ret
 
         }
+
+        pub fn kmer_in_seq(&self, kmer: Vec<usize>) -> bool {
+
+            /* self.block_lens.iter().map(|b| (0..*b).map(|i| self.return_bases(*b, i, kmer.len()).iter().
+                                                      zip(&kmer).map(|(p, q)| p == q).fold(true, |r, s| r && s)).
+                                                      fold(false, |d, e| d || e)).fold(false, |d, e| d || e) */
+
+            let kmer_coll = self.generate_kmers(kmer.len());
+            println!("size of kmer collection {}", size_of_val(&*kmer_coll));
+            kmer_coll.contains(&kmer)
+
+
+
+        }
+
     
     }
 
@@ -150,13 +173,17 @@ pub mod seq {
 #[cfg(test)]
 mod tests {
     use crate::sequence::seq::Sequence;
+    use std::time::{Duration, Instant};
+    use rand::Rng;
+    use rand::distributions::{Distribution, Uniform};
+
 
     #[test]
     fn seq_check(){
 
         let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3], vec![2,2,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
 
-        let press = Sequence::new(&blocked);
+        let mut press = Sequence::new(&blocked);
 
         let arr = press.return_bases(0, 7, 5);
 
@@ -174,7 +201,7 @@ mod tests {
 
         let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2]];
 
-        let press2 = Sequence::new(&alt_block);
+        let mut press2 = Sequence::new(&alt_block);
 
         let atemers = press2.generate_kmers(8);
 
@@ -186,6 +213,37 @@ mod tests {
 
 
     }
+
+    #[test]
+    fn seq_check2(){
+
+        let mut rng = fastrand::Rng::new();
+
+        let block_n: usize = 300;
+        let u8_per_block: usize = 250;
+        let bp_per_block: usize = u8_per_block*4;
+        let bp: usize = block_n*bp_per_block;
+        let u8_count: usize = u8_per_block*block_n;
+
+        let start_gen = Instant::now();
+        let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
+        let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_lens: Vec<usize> = (0..block_n).map(|_| u8_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
+
+        let kmer_c = sequence.generate_kmers(20);
+
+        let start = Instant::now();
+
+
+        let in_it = sequence.kmer_in_seq(vec![1usize;20]);
+
+        let duration = start_gen.elapsed();
+        println!("Done search {} bp {:?}", bp, duration);
+    }
+
 
 
 

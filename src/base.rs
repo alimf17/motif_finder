@@ -1,10 +1,12 @@
 pub mod bases {
     use rand::Rng;
+    use rand::seq::SliceRandom;
     use rand::distributions::{Distribution, Uniform};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
     use crate::waveform::wave::{Kernel, Waveform};
-
+    use crate::sequence::seq::Sequence;
+    use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
     use std::f64;
     use std::fmt;
@@ -261,12 +263,14 @@ pub mod bases {
         peak_height: f64,
         kernel: Kernel,
         pwm: Vec<Base>,
+        poss: bool,
 
     }
 
     impl Motif {
 
         //GENERATORS
+        //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
         pub fn new(pwm: Vec<Base>, peak_height: f64, peak_width: f64) -> Motif {
             let kernel = Kernel::new(peak_width, peak_height);
 
@@ -274,16 +278,18 @@ pub mod bases {
                 peak_height: peak_height,
                 kernel: kernel,
                 pwm: pwm,
+                poss: true,
             }
         }
 
-        pub fn from_motif(best_bases: Vec<usize>, peak_width: f64) -> Motif {
+ 
+        //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
+        pub fn from_motif(best_bases: Vec<usize>, peak_width: f64, seq: &Sequence) -> Motif {
 
             let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
             let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
-
             let mut rng = rand::thread_rng();
 
             let sign: f64 = rng.gen();
@@ -293,25 +299,26 @@ pub mod bases {
 
             let kernel = Kernel::new(peak_width, peak_height);
 
+            let poss = seq.kmer_in_seq(best_bases);
+
             Motif {
                 peak_height: peak_height,
                 kernel: kernel,
                 pwm: pwm,
+                poss: poss,
             }
 
 
         }
 
-        pub fn rand_mot(peak_width: f64) -> Motif {
+        pub fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &Sequence) -> Motif {
+
+            let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
+
+            let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
             let mut rng = rand::thread_rng();
 
-            let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
-
-            let pwm: Vec<Base> = (0..num_bases).map(|_| Base::rand_new()).collect();
-
-            let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
-            
             let sign: f64 = rng.gen();
             let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
@@ -323,7 +330,22 @@ pub mod bases {
                 peak_height: peak_height,
                 kernel: kernel,
                 pwm: pwm,
+                poss: true,
             }
+
+
+        }
+        //TODO: make sure that this takes a sequence reference variable and that we pull our random motif from there
+        pub fn rand_mot(peak_width: f64, seq: &Sequence) -> Motif {
+
+            let mut rng = rand::thread_rng();
+
+            let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+            let mot = (seq.generate_kmers(num_bases).choose(&mut rng)).unwrap().clone();
+
+            Self::from_motif(mot, peak_width, &seq)
+
 
         }
 
@@ -348,6 +370,29 @@ pub mod bases {
             self.kernel.get_sd()
         }
 
+        pub fn len(&self) -> usize {
+            self.pwm.len()
+        }
+
+        //PRIORS
+
+        pub fn pwm_prior(&self) -> f64 {
+
+            //TODO: Insert check for possibility of PWM if I can't guarentee it
+            //ALSO TODO: Try to guarentee possibility of PWM
+
+            if self.poss {-(self.pwm.len() as f64)*gamma::ln_gamma(BASE_L as f64)} else {-f64::INFINITY}
+        }
+
+        pub fn height_prior(&self) -> f64 {
+
+            TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap().ln_pdf(self.peak_height)
+
+
+        }
+
+
+        //BINDING FUNCTIONS
         pub fn prop_binding(&self, kmer: &Vec<usize>) -> (f64, bool) {
 
             //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
@@ -367,6 +412,19 @@ pub mod bases {
 
         }
 
+        pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+
+            let block_chunks = seq.block_lens();
+            let blocks = (0..block_chunks.len());
+            let inds = block_chunks.iter().map(|b| (0..(4*b-self.len()))).collect::<Vec<_>>();
+            let binds = blocks.zip(inds.iter())
+            .flat_map(|(l, i)| i.clone().map(move |j| self.prop_binding(&seq.return_bases(l, j, self.len())))).collect::<Vec<_>>();
+
+
+
+            (binds.iter().map(|b| b.0).collect::<Vec<_>>(), binds.iter().map(|b| b.1).collect::<Vec<_>>())
+
+        }
 
     }
 
@@ -523,12 +581,15 @@ mod tester{
     use crate::sequence::seq::Sequence;
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max};
+    use statrs::function::gamma;
     use rand::Rng;
     use rand::distributions::{Distribution, Uniform};
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
     const LOG_HEIGHT_MEAN: f64 = 2.30258509299; //This is ~ln(10). Can't use ln in a constant
     const LOG_HEIGHT_SD: f64 = 0.25;
+
+    const BASE_L: usize = 4;
 
     #[test]
     fn it_works() {
@@ -593,7 +654,31 @@ mod tester{
     #[test]
     fn motif_establish_tests() {
 
-        let motif: Motif = Motif::rand_mot(20.);
+
+        let mut rng = fastrand::Rng::new();
+
+        let block_n: usize = 300;
+        let u8_per_block: usize = 250;
+        let bp_per_block: usize = u8_per_block*4;
+        let bp: usize = block_n*bp_per_block;
+        let u8_count: usize = u8_per_block*block_n;
+
+        let start_gen = Instant::now();
+        let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let block_lens: Vec<usize> = (0..block_n).map(|_| u8_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
+        let duration = start_gen.elapsed();
+        println!("Done gen {} bp {:?}", bp, duration);
+
+
+        println!("{} gamma", gamma::gamma(4.));
+        println!("{} gamma", gamma::ln_gamma(4.));
+
+        let motif: Motif = Motif::rand_mot(20., &sequence);
 
         println!("{}", motif);
 
@@ -611,46 +696,22 @@ mod tester{
         for base in &matrix {
             println!("{:?}", base.show());
         }
+        
+        assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        let mut rng = rand::thread_rng();
+        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
 
-        let start_gen = Instant::now();
-        let blocks: Vec<u8> = (0..875000).map(|_| rng.gen::<u8>()).collect();
-        let block_inds: Vec<usize> = (0..280).map(|a| a*3125).collect();
-        let start_bases: Vec<usize> = (0..280).map(|a| a*12500).collect();
-        let block_lens: Vec<usize> = (0..280).map(|_| 3125).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, start_bases,block_lens);
-        let duration = start_gen.elapsed();
-        println!("Done gen {:?}", duration);
+        assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
 
-        let mut mot = sequence.return_bases(0, 0, nbases);
-        let (mut bind, mut rev) = motif.prop_binding(&mot);
         let start = Instant::now();
-        for block in 0..280 {
-            for ind in 0..(3125-nbases) {
-                mot = sequence.return_bases(block, ind, nbases);
-                (bind, rev) = motif.prop_binding(&mot);
 
-                if (block == 230) && (ind == 2345) {
-                   let mut bindy: f64 = 0.0;
-                   if rev {
-                       bindy = mot.iter().enumerate()
-                          .map(|(a, &b)| motif.rev_complement()[a].rel_bind(b).ln()).sum::<f64>().exp();
-                   } else{
-                       bindy = mot.iter().enumerate()
-                          .map(|(a, &b)| motif.pwm()[a].rel_bind(b).ln()).sum::<f64>().exp();
-                   }
 
-                   assert!((bindy-bind).abs() < 1e-6);
+        let binds = motif.return_bind_score(&sequence);
 
-                }
-            }
-        }
         let duration = start.elapsed();
 
-        println!("Time elapsed in expensive_function() is: {:?}", duration);
-           
+        println!("Time elapsed in bind_score() is: {:?}", duration);
 
-
+        println!("Length bind is: {}", binds.0.len());
     }
 }
