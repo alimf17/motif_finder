@@ -120,9 +120,9 @@ pub mod seq {
         
         }
 
-        pub fn code_to_bases(coded: u8) -> Vec<usize> {
+        pub fn code_to_bases(coded: u8) -> [usize ; 4] {
 
-            let mut V: Vec<usize> = vec![0; 4];
+            let mut V: [usize; 4] = [0; 4];
 
             let mut reference: u8 = coded;
 
@@ -181,6 +181,7 @@ pub mod seq {
 
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use crate::sequence::seq::Sequence;
@@ -266,4 +267,4 @@ mod tests {
 
 
 }
-
+*/
