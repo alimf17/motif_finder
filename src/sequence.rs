@@ -3,6 +3,9 @@ pub mod seq {
     use std::mem::size_of_val;
     use std::collections::HashMap;
     use itertools::{all, Itertools};
+    
+    //const PLACE_VALS: [u8; 4] = [64, 16, 4, 1];
+    const PLACE_VALS: [u8; 4] = [1, 4, 16, 64];
 
     pub struct Sequence {
         seq_blocks: Vec<u8>,
@@ -63,6 +66,8 @@ pub mod seq {
 
         pub fn new_manual(seq_blocks: Vec<u8>, block_inds: Vec<usize>, block_lens: Vec<usize>) -> Sequence {
 
+
+
             Sequence{
                 seq_blocks: seq_blocks,
                 block_inds: block_inds,
@@ -105,21 +110,27 @@ pub mod seq {
             self.block_lens.clone()
         }
 
-        fn bases_to_code(bases: &[usize ; 4]) -> u8 {
+        pub fn block_inds(&self) -> Vec<usize> {
+            self.block_inds.clone()
+        }
 
-            const PLACE_VALS: [usize; 4] = [64, 16, 4, 1];
+        pub fn bases_to_code(bases: &[usize ; 4]) -> u8 {
+
             bases.iter().zip(PLACE_VALS).map(|(&a, b)| a*b as usize).sum::<usize>() as u8
         
         }
 
-        fn code_to_bases(coded: u8) -> Vec<usize> {
+        pub fn code_to_bases(coded: u8) -> Vec<usize> {
 
-            const PLACE_VALS: [u8; 4] = [64, 16, 4, 1];
+            let mut V: Vec<usize> = vec![0; 4];
 
-            let mut V: Vec<usize> = (PLACE_VALS.iter().map(|&a| ((coded/a) as usize)).collect::<Vec<usize>>());
+            let mut reference: u8 = coded;
 
-            for i in 0..3 { //Remember, we don't want to touch the 0th element
-                V[3-i] -= V[2-i]*4;
+            for i in 0..4 { 
+
+                V[i] = (0b00000011 & reference) as usize;
+                reference = reference >> 2; 
+
             }
 
             V
@@ -179,11 +190,17 @@ mod tests {
 
 
     #[test]
-    fn seq_check(){
+    fn specific_seq(){
 
         let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3], vec![2,2,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
 
         let mut press = Sequence::new(&blocked);
+
+        let bases = [0,1,2,3];
+
+        let rebases = Sequence::code_to_bases(Sequence::bases_to_code(&bases));
+
+        println!("{:?}, {:?}", bases, rebases);
 
         let arr = press.return_bases(0, 7, 5);
 
