@@ -409,8 +409,6 @@ pub mod bases {
 
             let bind: f64 = if reverse {bind_reverse} else {bind_forward};
 
-            let loss: f64 = if reverse {bind_forward} else {bind_reverse};
-
             return (bind, reverse)
 
         }
@@ -474,6 +472,7 @@ pub mod bases {
             let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
 
             let seq_frame = 1+(self.len()/4);
+            let off = self.len() % 4;
 
             //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
 
@@ -509,23 +508,25 @@ pub mod bases {
                         *current_data = *current_data >> 2;
                         base_push += 1;
                     }
+                    base_push %= 4;
                 }
                 
-                base_push %= 4;
 
                 ind = 4*block_starts[i];
 
-                for j in (self.len()/4+1-continue_from_coded)..(block_lens[i]/4) {
+                for j in (self.len()/4)..((block_lens[i]/4)) {
                     current_data = &mut coded_sequence[block_starts[i]+j];
                     while (base_push < 4) && (4*j+base_push < block_lens[i]) {
-
                         (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store[0..self.len()]);
                         store.rotate_left(1);
                         store[self.len()-1] = (0b00000011 & *current_data) as usize;
                         *current_data = *current_data >> 2;
-                        base_push += 1;
                         ind+=1;
+                        //println!("In method {} {} {} {} {} ", 4*j+base_push , block_lens[i]+off-self.len(), ind, base_push, 4*(block_starts[i]+j)+base_push);
+                        base_push += 1;
                     }
+
+                    base_push = 0;
                 }
 
 
@@ -706,7 +707,7 @@ mod tester{
 
     const BASE_L: usize = 4;
 
-    /*
+    
     #[test]
     fn it_works() {
         let base = 3;
@@ -765,7 +766,7 @@ mod tester{
 
         assert!(dist.min().abs() < 1e-6);
 
-    } */
+    } 
 
     #[test]
     fn motif_establish_tests() {
@@ -773,8 +774,8 @@ mod tester{
 
         let mut rng = fastrand::Rng::new();
 
-        let block_n: usize = 300;
-        let u8_per_block: usize = 250;
+        let block_n: usize = 20;
+        let u8_per_block: usize = 5000;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -794,7 +795,7 @@ mod tester{
         println!("{} gamma", gamma::gamma(4.));
         println!("{} gamma", gamma::ln_gamma(4.));
 
-        let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,8), 20., &sequence);
+        let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence);
 
         println!("{}", motif);
 
@@ -819,17 +820,26 @@ mod tester{
 
         //assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
 
-        for i in 0..10 {
         let start = Instant::now();
 
 
         let binds = motif.return_bind_score(&sequence);
 
         let duration = start.elapsed();
-
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
         println!("Length bind is: {}", binds.0.len());
+
+        for i in 0..block_n {
+            for j in 0..(bp_per_block-motif.len()) {
+
+                let test_against = motif.prop_binding(&sequence.return_bases(i, j, motif.len()));
+                assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
+                assert!(binds.1[i*bp_per_block+j] == test_against.1);
+
+
+            }
         }
+
     }
 }
