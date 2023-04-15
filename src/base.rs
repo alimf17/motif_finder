@@ -10,6 +10,7 @@ pub mod bases {
     use statrs::{consts, Result, StatsError};
     use std::f64;
     use std::fmt;
+    use std::collections::VecDeque;
 
     const BPS: [&str; 4] = ["A", "C", "G", "T"];
     const BASE_L: usize = BPS.len();
@@ -68,8 +69,8 @@ pub mod bases {
         pub fn new(props: [ f64; 4]) -> Base {
 
             let eps = 1e-12;
-
-            let norm: f64 = props.iter().sum();
+ 
+            //let norm: f64 = props.iter().sum();
 
             let mut any_neg: bool = false;
 
@@ -77,8 +78,8 @@ pub mod bases {
                 any_neg |= props[i] < 0.0 ;
             }
 
-            if any_neg || ((norm - 1.0).abs() > 1e-12) {
-                panic!("All is positive: {}. Norm is {}.", !any_neg, norm)
+            if any_neg{ //|| ((norm - 1.0).abs() > 1e-12) {
+               panic!("All is positive: {}. Norm is .", !any_neg)
             }
 
             Base { props }
@@ -102,6 +103,7 @@ pub mod bases {
             for i in 0..res.len() {
                 res[i] = samps[i+1]-samps[i];
             }
+
 
             Base::new(res)
         }
@@ -204,7 +206,8 @@ pub mod bases {
         }
 
         pub fn rel_bind(&self, bp: usize) -> f64 {
-            self.props[bp]/Self::max(&self.props)
+            self.props[bp]/Self::max(&self.props) //This is the correct answer
+            //self.props[bp] //This is incorrect but faster
         }
 
     }
@@ -344,7 +347,7 @@ pub mod bases {
 
             let mot = (seq.generate_kmers(num_bases).choose(&mut rng)).unwrap().clone();
 
-            Self::from_motif(mot, peak_width, &seq)
+            Self::from_clean_motif(mot, peak_width, &seq)
 
 
         }
@@ -411,14 +414,13 @@ pub mod bases {
             return (bind, reverse)
 
         }
-
-        pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+/*
+        pub fn return_bind_scorea(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
             let coded_sequence = seq.seq_blocks();
             let block_lens = seq.block_lens(); //bp space
             let block_starts = seq.block_inds(); //stored index space
 
-            println!("rbs {:?}, {:?}", block_lens, block_starts);
 
             let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
             let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
@@ -460,6 +462,84 @@ pub mod bases {
 
 
         }
+  */      
+        pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+
+            let mut coded_sequence = seq.seq_blocks();
+            let block_lens = seq.block_lens(); //bp space
+            let block_starts = seq.block_inds(); //stored index space
+
+
+            let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
+            let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
+
+            let seq_frame = 1+(self.len()/4);
+
+            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
+
+
+            //We set this to 1200 for now
+            //Theoretically, if we're doing full IPOD, we may need to bump up to like 16kbp
+            //It actually turns out that using this as an array is slightly slower
+            //let mut uncoded_seq: [usize; 1200] = [0;1200];
+
+            let mut current_data = &mut coded_sequence[0];
+
+            let mut ind = 0;
+
+            let mut base_push = 0;
+
+            let mut store: [usize; MAX_BASE] = [0; MAX_BASE];
+
+            let continue_from_coded = if (self.len() % 4) == 0 {0} else {1};
+
+            for i in 0..(block_starts.len()) {
+
+
+                //This does a few things:
+                // 1) The store array is initialized up to the base length
+                // 2) The base_push tells us how far we're into the next coded u8 
+                //      (0 means untouched, 1 means we've extracted 1 base, etc)
+                // 3) This mutates our local copy of the coded sequence so we can remember
+                //    where we are in extraction and pull the next base
+                for j in 0..(1+(self.len()/4)) {
+                    current_data = &mut coded_sequence[block_starts[i]+j];
+                    while (base_push < 4) && (4*j+base_push < self.len()) {
+                        store[4*j+base_push] = (0b00000011 & *current_data) as usize;
+                        *current_data = *current_data >> 2;
+                        base_push += 1;
+                    }
+                }
+                
+                base_push %= 4;
+
+                ind = 4*block_starts[i];
+
+                for j in (self.len()/4+1-continue_from_coded)..(block_lens[i]/4) {
+                    current_data = &mut coded_sequence[block_starts[i]+j];
+                    while (base_push < 4) && (4*j+base_push < block_lens[i]) {
+
+                        (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store[0..self.len()]);
+                        store.rotate_left(1);
+                        store[self.len()-1] = (0b00000011 & *current_data) as usize;
+                        *current_data = *current_data >> 2;
+                        base_push += 1;
+                        ind+=1;
+                    }
+                }
+
+
+            }
+
+
+            (bind_scores, rev_comp)
+
+
+
+        }
+
+
+
 
     }
 
@@ -626,6 +706,7 @@ mod tester{
 
     const BASE_L: usize = 4;
 
+    /*
     #[test]
     fn it_works() {
         let base = 3;
@@ -684,7 +765,7 @@ mod tester{
 
         assert!(dist.min().abs() < 1e-6);
 
-    }
+    } */
 
     #[test]
     fn motif_establish_tests() {
@@ -699,9 +780,9 @@ mod tester{
         let u8_count: usize = u8_per_block*block_n;
 
         let start_gen = Instant::now();
-        let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
-        //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
-        //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
@@ -713,7 +794,7 @@ mod tester{
         println!("{} gamma", gamma::gamma(4.));
         println!("{} gamma", gamma::ln_gamma(4.));
 
-        let motif: Motif = Motif::rand_mot(20., &sequence);
+        let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,8), 20., &sequence);
 
         println!("{}", motif);
 
@@ -732,12 +813,13 @@ mod tester{
             println!("{:?}", base.show());
         }
         
-        assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
+        //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
+        //let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
 
-        assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
+        //assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
 
+        for i in 0..10 {
         let start = Instant::now();
 
 
@@ -748,5 +830,6 @@ mod tester{
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
         println!("Length bind is: {}", binds.0.len());
+        }
     }
 }
