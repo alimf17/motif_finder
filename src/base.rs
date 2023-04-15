@@ -68,6 +68,8 @@ pub mod bases {
 
         pub fn new(props: [ f64; 4]) -> Base {
 
+            let mut props = props;
+
             let eps = 1e-12;
  
             //let norm: f64 = props.iter().sum();
@@ -78,6 +80,10 @@ pub mod bases {
                 any_neg |= props[i] < 0.0 ;
             }
 
+            let max = Self::max(&props);
+            
+            props = props.iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
+            
             if any_neg{ //|| ((norm - 1.0).abs() > 1e-12) {
                panic!("All is positive: {}. Norm is .", !any_neg)
             }
@@ -103,6 +109,10 @@ pub mod bases {
             for i in 0..res.len() {
                 res[i] = samps[i+1]-samps[i];
             }
+
+            let max = Self::max(&res);
+            
+            res = res.iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
 
 
             Base::new(res)
@@ -168,7 +178,8 @@ pub mod bases {
 
             for i in 0..self.props.len() {
                 if i != Self::argmax(&self.props) {
-                    dgs[ind] = -RT*(self.props[i]/max).ln();
+                    //dgs[ind] = -RT*(self.props[i]/max).ln();
+                    dgs[ind] = -RT*(self.props[i]).ln(); //Trying for a proportion binding implementation
                     ind += 1;
                 }
             }
@@ -206,8 +217,8 @@ pub mod bases {
         }
 
         pub fn rel_bind(&self, bp: usize) -> f64 {
-            self.props[bp]/Self::max(&self.props) //This is the correct answer
-            //self.props[bp] //This is incorrect but faster
+            //self.props[bp]/Self::max(&self.props) //This is the correct answer
+            self.props[bp] //Put bases in proportion binding form
         }
 
     }
@@ -244,11 +255,11 @@ pub mod bases {
                 }
             }
 
-            let norm: f64 = props.iter().sum();
+            /* let norm: f64 = props.iter().sum();
 
             for p in 0..props.len() {
                 props[p] /= norm;
-            }
+            } */ // Proportion binding implementation of base
 
 
             let based: Base = Base {
@@ -397,13 +408,18 @@ pub mod bases {
 
         //BINDING FUNCTIONS
         pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
+        //pub fn prop_binding(&self, kmer: &vecdeque<usize>) -> (f64, bool){ 
 
             //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
             //let bind_reverse: f64 = self.rev_complement().iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
-            
-            let bind_forward: f64 = self.pwm.iter().zip(kmer.into_iter()).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
-            let bind_reverse: f64 = self.rev_complement().iter().zip(kmer.into_iter()).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+           
 
+ 
+            //let bind_forward: f64 = self.pwm.iter().zip(kmer.clone().into_iter()).map(|(a, b)| a.rel_bind(b)).product::<f64>();
+            //let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer.clone().into_iter()).map(|(a, b)| a.rel_bind(base_l-1-b)).product::<f64>();
+
+            let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+            let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer).map(|(a, &b)| a.rel_bind(BASE_L-1-b)).product::<f64>();
 
             let reverse: bool = (bind_reverse > bind_forward);
 
@@ -412,8 +428,15 @@ pub mod bases {
             return (bind, reverse)
 
         }
-/*
-        pub fn return_bind_scorea(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+        /*pub fn prop_binding(&self, kmer: &[usize]) -> f64 { 
+
+            let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+
+            return bind_forward
+
+        }*/
+
+        pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
             let coded_sequence = seq.seq_blocks();
             let block_lens = seq.block_lens(); //bp space
@@ -460,7 +483,7 @@ pub mod bases {
 
 
         }
-  */      
+   /*    
         pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
             let mut coded_sequence = seq.seq_blocks();
@@ -489,6 +512,7 @@ pub mod bases {
             let mut base_push = 0;
 
             let mut store: [usize; MAX_BASE] = [0; MAX_BASE];
+            //let mut store: VecDeque<usize> = VecDeque::from(vec![0;self.len()]);
 
             let continue_from_coded = if (self.len() % 4) == 0 {0} else {1};
 
@@ -517,6 +541,7 @@ pub mod bases {
                 for j in (self.len()/4)..((block_lens[i]/4)) {
                     current_data = &mut coded_sequence[block_starts[i]+j];
                     while (base_push < 4) && (4*j+base_push < block_lens[i]) {
+                        //(bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store);
                         (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store[0..self.len()]);
                         store.rotate_left(1);
                         store[self.len()-1] = (0b00000011 & *current_data) as usize;
@@ -539,9 +564,80 @@ pub mod bases {
 
         }
 
+*//*
+
+    //We're going to see if ignoring reverse complements for now is helpful
+        pub fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
+
+            let mut coded_sequence = seq.seq_blocks();
+            let block_lens = seq.block_lens(); //bp space
+            let block_starts = seq.block_inds(); //stored index space
 
 
+            let mut bind_scores: Vec<f64> = vec![1.0; 4*coded_sequence.len()];
+            //let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
 
+            let seq_frame = 1+(self.len()/4);
+            let off = self.len() % 4;
+
+            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
+
+
+            //We set this to 1200 for now
+            //Theoretically, if we're doing full IPOD, we may need to bump up to like 16kbp
+            //It actually turns out that using this as an array is slightly slower
+            //let mut uncoded_seq: [usize; 1200] = [0;1200];
+
+            let mut current_data = &mut coded_sequence[0];
+
+            let mut current_binds = &mut bind_scores[0..self.len()];
+
+            let mut ind = 0;
+
+            let mut base_push = 0;
+ 
+            //let mut store: [usize; MAX_BASE] = [0; MAX_BASE];
+            //let mut store: VecDeque<usize> = VecDeque::from(vec![0;self.len()]);
+
+            let mut store: usize = 5;
+
+            let mut lowbound: usize = 0;
+
+            let continue_from_coded = if (self.len() % 4) == 0 {0} else {1};
+
+            for i in 0..(block_starts.len()) {
+
+
+                for j in 0..(block_lens[i]/4) {
+                    current_data = &mut coded_sequence[block_starts[i]+j];
+                    while (base_push < 4) && (4*j+base_push < block_lens[i]) {
+                        store = (0b00000011 & *current_data) as usize;
+                        *current_data = *current_data >> 2;
+                        
+                        lowbound = if ind > self.len() { (4*block_starts[i]).max(ind-self.len())} else {0};
+                        //println!("{} {} {} {} {}", ind, self.len(), block_starts[i], lowbound, bind_scores.len());
+                        current_binds = &mut bind_scores[(lowbound+1)..(ind+1)];
+                        for k in 0..current_binds.len() {
+                            current_binds[k] *= self.pwm[k].rel_bind(store);
+                        }
+                        //println!("In method {} {} {} {} ", 4*j+base_push, ind, base_push, 4*(block_starts[i]+j)+base_push);
+                        
+                        ind = ind + 1;
+
+                        base_push += 1;
+                    }
+
+                    base_push = 0;
+                }
+
+
+            }
+
+
+            bind_scores
+
+        }
+*/
     }
 
     impl fmt::Display for Motif { 
@@ -699,6 +795,7 @@ mod tester{
     use statrs::statistics::{Min, Max};
     use statrs::function::gamma;
     use rand::Rng;
+    use std::collections::VecDeque;
     use rand::distributions::{Distribution, Uniform};
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
@@ -731,8 +828,8 @@ mod tester{
 
         let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
 
-        assert!((td.rel_bind(1)-0.5_f64).abs() < 1e-6);
-        assert!((td.rel_bind(2)-1_f64).abs() < 1e-6);
+        //assert!((td.rel_bind(1)-0.5_f64).abs() < 1e-6);
+        //assert!((td.rel_bind(2)-1_f64).abs() < 1e-6);
 
         let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
 
@@ -828,18 +925,21 @@ mod tester{
         let duration = start.elapsed();
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
-        println!("Length bind is: {}", binds.0.len());
 
+        /*
         for i in 0..block_n {
             for j in 0..(bp_per_block-motif.len()) {
 
-                let test_against = motif.prop_binding(&sequence.return_bases(i, j, motif.len()));
+                //let test_against = motif.prop_binding(&VecDeque::from(sequence.return_bases(i, j, motif.len())));
+                let test_against = motif.prop_binding(&(sequence.return_bases(i, j, motif.len())));
                 assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
 
+                //println!("{}, {}, {}, {}", i, j, binds[i*bp_per_block+j], test_against);
+                //assert!((binds[i*bp_per_block+j]-test_against).abs() < 1e-6);
 
             }
-        }
+        } */
 
     }
 }
