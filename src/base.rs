@@ -393,13 +393,13 @@ pub mod bases {
 
 
         //BINDING FUNCTIONS
-        pub fn prop_binding(&self, kmer: &Vec<usize>) -> (f64, bool) {
+        pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
 
             //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
             //let bind_reverse: f64 = self.rev_complement().iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
             
-            let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
-            let bind_reverse: f64 = self.rev_complement().iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+            let bind_forward: f64 = self.pwm.iter().zip(kmer.into_iter()).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+            let bind_reverse: f64 = self.rev_complement().iter().zip(kmer.into_iter()).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
 
 
             let reverse: bool = (bind_reverse > bind_forward);
@@ -414,15 +414,50 @@ pub mod bases {
 
         pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
-            let block_chunks = seq.block_lens();
-            let blocks = (0..block_chunks.len());
-            let inds = block_chunks.iter().map(|b| (0..(4*b-self.len()))).collect::<Vec<_>>();
-            let binds = blocks.zip(inds.iter())
-            .flat_map(|(l, i)| i.clone().map(move |j| self.prop_binding(&seq.return_bases(l, j, self.len())))).collect::<Vec<_>>();
+            let coded_sequence = seq.seq_blocks();
+            let block_lens = seq.block_lens(); //bp space
+            let block_starts = seq.block_inds(); //stored index space
+
+            println!("rbs {:?}, {:?}", block_lens, block_starts);
+
+            let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
+            let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
+
+            let seq_frame = 1+(self.len()/4);
+
+            let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
+
+            let mut ind = 0;
+
+            let mut store = Sequence::code_to_bases(coded_sequence[0]);
+
+            for i in 0..(block_starts.len()) {
+
+                let actual_frame = &mut uncoded_seq[0..block_lens[i]];
+
+                for jd in 0..(block_lens[i]/4) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..4 {
+                        actual_frame[4*jd+k] = store[k];
+                    }
+
+                }
+
+                for j in 0..((block_lens[i])-self.len()) {
+
+                    ind = 4*block_starts[i]+j; 
+                    
+                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&actual_frame[j..(j+self.len())]);
+
+                }
+
+            }
 
 
+            (bind_scores, rev_comp)
 
-            (binds.iter().map(|b| b.0).collect::<Vec<_>>(), binds.iter().map(|b| b.1).collect::<Vec<_>>())
+
 
         }
 
@@ -669,7 +704,7 @@ mod tester{
         //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let block_lens: Vec<usize> = (0..block_n).map(|_| u8_per_block).collect();
+        let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
