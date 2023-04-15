@@ -153,6 +153,7 @@ pub mod seq {
             //    all_bases.append(&mut Self::code_to_bases(*a));
             //}
 
+
             let new_s = start_id % 4;
 
             let ret: Vec<usize> = all_bases[new_s..(new_s+num_bases)].to_vec();
@@ -181,7 +182,6 @@ pub mod seq {
 
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use crate::sequence::seq::Sequence;
@@ -267,4 +267,4 @@ mod tests {
 
 
 }
-*/
+
