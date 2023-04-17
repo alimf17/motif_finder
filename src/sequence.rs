@@ -106,6 +106,10 @@ pub mod seq {
             self.seq_blocks.clone()
         }
 
+        pub fn coded_place(&self, i: usize) -> u8 {
+            self.seq_blocks[i]
+        }
+
         pub fn block_lens(&self) -> Vec<usize> {
             self.block_lens.clone()
         }
