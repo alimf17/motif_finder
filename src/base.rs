@@ -30,7 +30,7 @@ pub mod bases {
     //BEGIN BASE
 
     pub struct Base {
-        props: [ f64; BASE_L],
+        pub props: [ f64; BASE_L],
     }
 
     impl Clone for Base {
@@ -408,18 +408,20 @@ pub mod bases {
 
         //BINDING FUNCTIONS
         pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
-        //pub fn prop_binding(&self, kmer: &vecdeque<usize>) -> (f64, bool){ 
+        //pub fn prop_binding(&self, kmer: &vecdeque<usize>) -> (f64, bool) 
 
-            //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
-            //let bind_reverse: f64 = self.rev_complement().iter().zip(kmer).map(|(a, &b)| a.rel_bind(b).ln()).sum::<f64>().exp();
            
 
- 
-            //let bind_forward: f64 = self.pwm.iter().zip(kmer.clone().into_iter()).map(|(a, b)| a.rel_bind(b)).product::<f64>();
-            //let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer.clone().into_iter()).map(|(a, b)| a.rel_bind(base_l-1-b)).product::<f64>();
+            //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.props[b]).product::<f64>();
+            //let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer).map(|(a, &b)| a.props[BASE_L-1-b]).product::<f64>();
 
-            let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
-            let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer).map(|(a, &b)| a.rel_bind(BASE_L-1-b)).product::<f64>();
+            let mut bind_forward: f64 = 1.0;
+            let mut bind_reverse: f64 = 1.0;
+
+            for i in 0..self.len() {
+                bind_forward *= self.pwm[i].props[kmer[i]];
+                bind_reverse *= self.pwm[self.len()-1-i].props[BASE_L-1-kmer[self.len()-1-i]];
+            }
 
             let reverse: bool = (bind_reverse > bind_forward);
 
@@ -483,161 +485,44 @@ pub mod bases {
 
 
         }
-   /*    
-        pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+       
 
-            let mut coded_sequence = seq.seq_blocks();
-            let block_lens = seq.block_lens(); //bp space
-            let block_starts = seq.block_inds(); //stored index space
-
-
-            let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
-            let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
-
-            let seq_frame = 1+(self.len()/4);
-            let off = self.len() % 4;
-
-            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
-
-
-            //We set this to 1200 for now
-            //Theoretically, if we're doing full IPOD, we may need to bump up to like 16kbp
-            //It actually turns out that using this as an array is slightly slower
-            //let mut uncoded_seq: [usize; 1200] = [0;1200];
-
-            let mut current_data = &mut coded_sequence[0];
-
-            let mut ind = 0;
-
-            let mut base_push = 0;
-
-            let mut store: [usize; MAX_BASE] = [0; MAX_BASE];
-            //let mut store: VecDeque<usize> = VecDeque::from(vec![0;self.len()]);
-
-            let continue_from_coded = if (self.len() % 4) == 0 {0} else {1};
-
-            for i in 0..(block_starts.len()) {
-
-
-                //This does a few things:
-                // 1) The store array is initialized up to the base length
-                // 2) The base_push tells us how far we're into the next coded u8 
-                //      (0 means untouched, 1 means we've extracted 1 base, etc)
-                // 3) This mutates our local copy of the coded sequence so we can remember
-                //    where we are in extraction and pull the next base
-                for j in 0..(1+(self.len()/4)) {
-                    current_data = &mut coded_sequence[block_starts[i]+j];
-                    while (base_push < 4) && (4*j+base_push < self.len()) {
-                        store[4*j+base_push] = (0b00000011 & *current_data) as usize;
-                        *current_data = *current_data >> 2;
-                        base_push += 1;
-                    }
-                    base_push %= 4;
-                }
+        //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
+        //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
+        //      as true will have binding scores of 0
+        pub fn base_check(&self, rev_comp: &Vec<bool>, bp: usize, motif_pos: usize, SEQ: &Sequence) -> Vec<bool> {
                 
+            let coded_sequence = SEQ.seq_blocks();
+            let block_lens = SEQ.block_lens(); //bp space
+            let block_starts = SEQ.block_inds(); //stored index space
 
-                ind = 4*block_starts[i];
+            let rev_pos = self.len()-1-motif_pos;
 
-                for j in (self.len()/4)..((block_lens[i]/4)) {
-                    current_data = &mut coded_sequence[block_starts[i]+j];
-                    while (base_push < 4) && (4*j+base_push < block_lens[i]) {
-                        //(bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store);
-                        (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&store[0..self.len()]);
-                        store.rotate_left(1);
-                        store[self.len()-1] = (0b00000011 & *current_data) as usize;
-                        *current_data = *current_data >> 2;
-                        ind+=1;
-                        //println!("In method {} {} {} {} {} ", 4*j+base_push , block_lens[i]+off-self.len(), ind, base_push, 4*(block_starts[i]+j)+base_push);
-                        base_push += 1;
-                    }
+            let forward_bp = bp as u8;
+            let comp_bp = (BASE_L-1-bp) as u8;
 
-                    base_push = 0;
-                }
+            let bp_to_look_for: Vec<u8> = rev_comp.iter().map(|&a| if a {comp_bp} else {forward_bp}).collect();
 
+            let bp_lead: Vec<usize> = rev_comp.iter().enumerate().map(|(i, &r)| if r {(i+rev_pos)} else {(i+motif_pos)}).collect();
 
-            }
+            let loc_coded_lead: Vec<usize> = bp_lead.iter().map(|b| b/4).collect();
+            //This finds 3-mod_4(pos) with bit operations. Faster than (motif_pos & 3) ^ 3 for larger ints
+            //Note that we DO need the inverse in Z4. The u8 bases are coded backwards, where the 4^3 place is the last base
+            
+            const MASKS: [u8; 4] = [0b11000000, 0b00110000, 0b00001100, 0b00000011];
+            const SHIFT_BASE_BY: [u8; 4] = [6, 4, 2, 0];
 
+            loc_coded_lead.iter().zip(bp_lead).zip(bp_to_look_for).map(|((&c, s), b)| 
+                                                if (c < coded_sequence.len()) { //Have to check if leading base is over the sequence edge
+                                                    //This 
+                                                   ((coded_sequence[c] & MASKS[s-4*c]) >> SHIFT_BASE_BY[s-4*c]) == b
+                                                } else { false }).collect::<Vec<bool>>()
 
-            (bind_scores, rev_comp)
-
-
-
+    
         }
 
-*//*
-
-    //We're going to see if ignoring reverse complements for now is helpful
-        pub fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
-
-            let mut coded_sequence = seq.seq_blocks();
-            let block_lens = seq.block_lens(); //bp space
-            let block_starts = seq.block_inds(); //stored index space
-
-
-            let mut bind_scores: Vec<f64> = vec![1.0; 4*coded_sequence.len()];
-            //let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
-
-            let seq_frame = 1+(self.len()/4);
-            let off = self.len() % 4;
-
-            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
-
-
-            //We set this to 1200 for now
-            //Theoretically, if we're doing full IPOD, we may need to bump up to like 16kbp
-            //It actually turns out that using this as an array is slightly slower
-            //let mut uncoded_seq: [usize; 1200] = [0;1200];
-
-            let mut current_data = &mut coded_sequence[0];
-
-            let mut current_binds = &mut bind_scores[0..self.len()];
-
-            let mut ind = 0;
-
-            let mut base_push = 0;
- 
-            //let mut store: [usize; MAX_BASE] = [0; MAX_BASE];
-            //let mut store: VecDeque<usize> = VecDeque::from(vec![0;self.len()]);
-
-            let mut store: usize = 5;
-
-            let mut lowbound: usize = 0;
-
-            let continue_from_coded = if (self.len() % 4) == 0 {0} else {1};
-
-            for i in 0..(block_starts.len()) {
-
-
-                for j in 0..(block_lens[i]/4) {
-                    current_data = &mut coded_sequence[block_starts[i]+j];
-                    while (base_push < 4) && (4*j+base_push < block_lens[i]) {
-                        store = (0b00000011 & *current_data) as usize;
-                        *current_data = *current_data >> 2;
-                        
-                        lowbound = if ind > self.len() { (4*block_starts[i]).max(ind-self.len())} else {0};
-                        //println!("{} {} {} {} {}", ind, self.len(), block_starts[i], lowbound, bind_scores.len());
-                        current_binds = &mut bind_scores[(lowbound+1)..(ind+1)];
-                        for k in 0..current_binds.len() {
-                            current_binds[k] *= self.pwm[k].rel_bind(store);
-                        }
-                        //println!("In method {} {} {} {} ", 4*j+base_push, ind, base_push, 4*(block_starts[i]+j)+base_push);
-                        
-                        ind = ind + 1;
-
-                        base_push += 1;
-                    }
-
-                    base_push = 0;
-                }
-
-
-            }
-
-
-            bind_scores
-
-        }
-*/
+   
+        
     }
 
     impl fmt::Display for Motif { 
@@ -871,8 +756,8 @@ mod tester{
 
         let mut rng = fastrand::Rng::new();
 
-        let block_n: usize = 20;
-        let u8_per_block: usize = 5000;
+        let block_n: usize = 200;
+        let u8_per_block: usize = 4375;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -925,8 +810,12 @@ mod tester{
         let duration = start.elapsed();
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
+        let start = Instant::now();
+        let checked = motif.base_check(&binds.1, 2, 4, &sequence);
+        let duration = start.elapsed();
+        println!("Time elapsed in check is: {:?}", duration);
 
-        /*
+        
         for i in 0..block_n {
             for j in 0..(bp_per_block-motif.len()) {
 
@@ -935,11 +824,7 @@ mod tester{
                 assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
 
-                //println!("{}, {}, {}, {}", i, j, binds[i*bp_per_block+j], test_against);
-                //assert!((binds[i*bp_per_block+j]-test_against).abs() < 1e-6);
-
             }
-        } */
-
+        } 
     }
 }
