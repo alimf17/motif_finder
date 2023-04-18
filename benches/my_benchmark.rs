@@ -14,6 +14,7 @@ fn main() {
     let bp: usize = block_n*bp_per_block;
     let u8_count: usize = u8_per_block*block_n;
 
+    let random_try: Vec<f64> = vec![0.0; bp];
     //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
     let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
     let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();

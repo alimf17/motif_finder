@@ -11,6 +11,7 @@ pub mod seq {
         seq_blocks: Vec<u8>,
         block_inds: Vec<usize>,
         block_lens: Vec<usize>,
+        max_len: usize,
     }
 
     impl Sequence {
@@ -29,6 +30,9 @@ pub mod seq {
 
             let mut b_len: usize = 0;
 
+            let mut max_len: usize = 0;
+
+            
             for block in blocks {
                 
                 s_bases.push(b_len);
@@ -51,6 +55,7 @@ pub mod seq {
 
                 block_ls.push(block.len());
 
+                max_len = if block.len() > max_len {block.len()} else {max_len};
 
             }
 
@@ -58,6 +63,7 @@ pub mod seq {
                 seq_blocks: seq_bls,
                 block_inds: block_is,
                 block_lens: block_ls,
+                max_len: max_len,
             }
 
 
@@ -67,11 +73,13 @@ pub mod seq {
         pub fn new_manual(seq_blocks: Vec<u8>, block_inds: Vec<usize>, block_lens: Vec<usize>) -> Sequence {
 
 
+            let max_len: usize = *block_lens.iter().max().unwrap();
 
             Sequence{
                 seq_blocks: seq_blocks,
                 block_inds: block_inds,
                 block_lens: block_lens,
+                max_len: max_len,
             }
 
         }
@@ -112,6 +120,10 @@ pub mod seq {
 
         pub fn block_lens(&self) -> Vec<usize> {
             self.block_lens.clone()
+        }
+        
+        pub fn max_len(&self) -> usize {
+            self.max_len
         }
 
         pub fn block_inds(&self) -> Vec<usize> {

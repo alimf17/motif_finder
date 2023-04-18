@@ -30,7 +30,7 @@ pub mod bases {
     //BEGIN BASE
 
     pub struct Base {
-        pub props: [ f64; BASE_L],
+       props: [ f64; BASE_L],
     }
 
     impl Clone for Base {
@@ -408,19 +408,14 @@ pub mod bases {
 
         //BINDING FUNCTIONS
         pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
-        //pub fn prop_binding(&self, kmer: &vecdeque<usize>) -> (f64, bool) 
-
-           
-
-            //let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.props[b]).product::<f64>();
-            //let bind_reverse: f64 = self.pwm.iter().rev().zip(kmer).map(|(a, &b)| a.props[BASE_L-1-b]).product::<f64>();
+            
 
             let mut bind_forward: f64 = 1.0;
             let mut bind_reverse: f64 = 1.0;
 
             for i in 0..self.len() {
-                bind_forward *= self.pwm[i].props[kmer[i]];
-                bind_reverse *= self.pwm[self.len()-1-i].props[BASE_L-1-kmer[self.len()-1-i]];
+                bind_forward *= self.pwm[i].rel_bind(kmer[i]);
+                bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-kmer[self.len()-1-i]);
             }
 
             let reverse: bool = (bind_reverse > bind_forward);
@@ -447,10 +442,12 @@ pub mod bases {
 
             let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
             let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
+            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
+
+            let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
 
             let seq_frame = 1+(self.len()/4);
 
-            let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
 
             let mut ind = 0;
 
@@ -487,6 +484,7 @@ pub mod bases {
         }
        
 
+        //TODO: Decide if this actually belongs as a Sequence method, not a motif method
         //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
         //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
         //      as true will have binding scores of 0
@@ -509,8 +507,8 @@ pub mod bases {
             //This finds 3-mod_4(pos) with bit operations. Faster than (motif_pos & 3) ^ 3 for larger ints
             //Note that we DO need the inverse in Z4. The u8 bases are coded backwards, where the 4^3 place is the last base
             
-            const MASKS: [u8; 4] = [0b11000000, 0b00110000, 0b00001100, 0b00000011];
-            const SHIFT_BASE_BY: [u8; 4] = [6, 4, 2, 0];
+            const MASKS: [u8; 4] = [0b00000011, 0b00001100, 0b00110000, 0b11000000];
+            const SHIFT_BASE_BY: [u8; 4] = [0, 2, 4, 6];
 
             loc_coded_lead.iter().zip(bp_lead).zip(bp_to_look_for).map(|((&c, s), b)| 
                                                 if (c < coded_sequence.len()) { //Have to check if leading base is over the sequence edge
@@ -767,12 +765,10 @@ mod tester{
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
-
 
         println!("{} gamma", gamma::gamma(4.));
         println!("{} gamma", gamma::ln_gamma(4.));
@@ -796,14 +792,83 @@ mod tester{
             println!("{:?}", base.show());
         }
         
-        //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
+        assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        //let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
+        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
 
-        //assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
+        assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
+
+
+        let best_mot = motif.best_motif();
+
+        let bindy = motif.prop_binding(&best_mot);
+
+        assert!(((bindy.0-1.0).abs() < 1e-6) && !bindy.1);
+
+        let rev_best = best_mot.iter().rev().map(|a| BASE_L-1-a).collect::<Vec<usize>>();
+
+        let bindy = motif.prop_binding(&rev_best);
+        
+        assert!(((bindy.0-1.0).abs() < 1e-6) && bindy.1);
+
+        let pwm = motif.pwm();
+
+        for i in 0..motif.len() {
+            for j in 0..BASE_L {
+
+                let mut for_mot = best_mot.clone();
+                for_mot[i] = j;
+                let mut rev_mot = rev_best.clone();
+                rev_mot[motif.len()-1-i] = BASE_L-1-j;
+
+                let defect: f64 = pwm[i].rel_bind(j);
+
+                let bindy = motif.prop_binding(&for_mot);
+                let rbind = motif.prop_binding(&rev_mot);
+
+                assert!(((bindy.0-defect).abs() < 1e-6) && !bindy.1);
+                assert!(((rbind.0-defect).abs() < 1e-6) && rbind.1);
+
+            }
+        }
+
+
+        let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
+        let small_inds: Vec<usize> = vec![0, 6]; 
+        let small_lens: Vec<usize> = vec![24, 24]; 
+        let small: Sequence = Sequence::new_manual(small_block, small_inds, small_lens);
+
+
+        let rev_comp: Vec<bool> = (0..48).map(|_| rng.bool()).collect();
+
+        let checked = motif.base_check(&rev_comp, 0, 4, &small);
+
+        let forward: Vec<bool> = vec![true, false, false, true, true, false, false, false, true, true, false, false, true, false, false, false, true, true, true, false, true, false, true, false, true, true, false, false, true, false, true, false, true, false, false, false, true, false, true, false, true, true, false, false, false, false, false, false];
+
+        let reverse: Vec<bool> = vec![true, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false];
+
+        let correct: Vec<bool> = rev_comp.iter().enumerate().map(|(a, &b)| if b {reverse[a]} else {forward[a]}).collect();
+
+        println!("correct: {:?}", correct);
+        println!("checked: {:?}", checked);
+
+
+
+        for i in 0..2 {
+            for j in 0..24 {
+
+                let ind = if rev_comp[24*i+j] { j+motif.len()-1-4 } else {j+4}; 
+                if ind < 24 {
+                    let bp = small.return_bases(i, ind, 1)[0];
+                    let matcher = if rev_comp[24*i+j] { bp == 3 } else { bp == 0};
+                    println!("start loc: {}, bp: {}, ind: {}, rev: {}, matcher: {}, checked: {}", 24*i+j, bp, ind, rev_comp[24*i+j], matcher, checked[24*i+j]);
+                    assert!(checked[24*i+j] == matcher);
+                }
+            }
+        }
+
 
         let start = Instant::now();
-
 
         let binds = motif.return_bind_score(&sequence);
 
