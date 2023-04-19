@@ -451,9 +451,9 @@ pub mod bases {
 
             let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
 
-            let seq_ptr = uncoded_seq.as_mut_ptr();
-            let bind_ptr = bind_scores.as_mut_ptr();
-            let comp_ptr = rev_comp.as_mut_ptr();
+            //let seq_ptr = uncoded_seq.as_mut_ptr();
+            //let bind_ptr = bind_scores.as_mut_ptr();
+            //let comp_ptr = rev_comp.as_mut_ptr();
 
             let seq_frame = 1+(self.len()/4);
 
@@ -462,10 +462,10 @@ pub mod bases {
 
             let mut store = Sequence::code_to_bases(coded_sequence[0]);
 
-            let mut bind_forward: f64 = 1.0;
-            let mut bind_reverse: f64 = 1.0;
+            //let mut bind_forward: f64 = 1.0;
+            //let mut bind_reverse: f64 = 1.0;
             
-            let ilen: isize = self.len() as isize;
+            //let ilen: isize = self.len() as isize;
             for i in 0..(block_starts.len()) {
 
 
@@ -479,28 +479,16 @@ pub mod bases {
 
                 }
 
-                for j in 0..((block_lens[i])-self.len()) as isize {
+                for j in 0..((block_lens[i])-self.len()) {
 
-                    //ind = 4*block_starts[i]+(j as usize);
+                    ind = 4*block_starts[i]+(j as usize);
                     //
-                    ind = j+4*(block_starts[i] as isize);
-                    bind_forward = 1.0;
-                    bind_reverse = 1.0;
+                    //ind = j+4*(block_starts[i] as isize);
+                    //bind_forward = 1.0;
+                    //bind_reverse = 1.0;
 
-                    unsafe { //Ranges are, apparently, slow as crap. I am going to work with the raw pointers
-                             //Hence, this is PEAK unsafe
-                        
 
-                        for k in 0..self.len() as isize {
-                            bind_forward *= self.pwm[k as usize].rel_bind(*seq_ptr.offset(j+k));
-                            bind_reverse *= self.pwm[k as usize].rel_bind(BASE_L-1-*seq_ptr.offset(j+ilen-1-k));
-                        }
-
-                        (*bind_ptr.offset(ind), *comp_ptr.offset(ind)) = (if (bind_reverse > bind_forward) {bind_reverse} else {bind_forward}, (bind_reverse > bind_forward)); 
-                       // (bind_scores[ind], rev_comp[ind]) = self.prop_binding(mot);
-                    }
-                
-
+                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
                 }
 
             }
