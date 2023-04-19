@@ -466,6 +466,9 @@ pub mod bases {
             //let mut bind_reverse: f64 = 1.0;
             
             //let ilen: isize = self.len() as isize;
+
+            {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
             for i in 0..(block_starts.len()) {
 
 
@@ -491,6 +494,7 @@ pub mod bases {
                     (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
                 }
 
+            }
             }
 
 
@@ -556,6 +560,7 @@ fn print_type_of<T: ?Sized>(_: &T) {
                 for j in 0..lens[i] {
                     if bind_score_floats[starts[i]+j] > THRESH {
                         actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]*self.peak_height);
+                        //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                         occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
                     }
                 }
@@ -775,6 +780,7 @@ mod tester{
     use statrs::function::gamma;
     use rand::Rng;
     use std::collections::VecDeque;
+    use crate::waveform::wave::Waveform;
     use rand::distributions::{Distribution, Uniform};
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
@@ -847,6 +853,7 @@ mod tester{
     #[test]
     fn motif_establish_tests() {
 
+        std::env::set_var("RUST_BACKTRACE", "1");
 
         let mut rng = fastrand::Rng::new();
 
@@ -862,14 +869,26 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
+        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens.clone());
+        let wave: Waveform = Waveform::create_zero(block_lens, start_bases, 5);
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma::gamma(4.));
         println!("{} gamma", gamma::ln_gamma(4.));
 
+        //println!("{:?}", wave.raw_wave());
+
         let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence);
+
+        let start = Instant::now();
+
+        let binds = motif.generate_waveform(&wave, &sequence);
+
+        let duration = start.elapsed();
+
+        println!("Time elapsed in generate_waveform() is: {:?}", duration);
 
         println!("{}", motif);
 
@@ -931,7 +950,8 @@ mod tester{
 
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
-        let small_lens: Vec<usize> = vec![24, 24]; 
+        let small_lens: Vec<usize> = vec![24, 24];
+        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], small_lens.clone(), vec![0, 25], 5);
         let small: Sequence = Sequence::new_manual(small_block, small_inds, small_lens);
 
 
