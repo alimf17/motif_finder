@@ -27,6 +27,8 @@ pub mod bases {
     const LOG_HEIGHT_SD: f64 = 0.25;
 
     const PROB_POS_PEAK: f64 = 0.9;
+
+    const THRESH: f64 = 1e-4;
     //BEGIN BASE
 
     pub struct Base {
@@ -410,6 +412,8 @@ pub mod bases {
         pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
             
 
+            //let kmer: Vec<usize> = kmer_slice.to_vec();
+
             let mut bind_forward: f64 = 1.0;
             let mut bind_reverse: f64 = 1.0;
 
@@ -453,6 +457,9 @@ pub mod bases {
 
             let mut store = Sequence::code_to_bases(coded_sequence[0]);
 
+            let mut bind_forward: f64 = 1.0;
+            let mut bind_reverse: f64 = 1.0;
+            
             for i in 0..(block_starts.len()) {
 
                 let actual_frame = &mut uncoded_seq[0..block_lens[i]];
@@ -470,6 +477,7 @@ pub mod bases {
 
                     ind = 4*block_starts[i]+j; 
                     
+
                     (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&actual_frame[j..(j+self.len())]);
 
                 }
@@ -519,6 +527,82 @@ pub mod bases {
     
         }
 
+
+        pub fn generate_waveform(&self, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.zero();
+
+            let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = DATA.start_bases();
+
+            let lens = SEQ.block_lens();
+
+            let (bind_score_floats, bind_score_revs) = self.return_bind_score(&SEQ);
+
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..lens[i] {
+                    if bind_score_floats[starts[i]+j] > THRESH {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]*self.peak_height);
+                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                    }
+                }
+            }
+
+            occupancy_trace
+
+        }
+
+        pub fn no_height_waveform(&self, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.zero();
+
+            let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = DATA.start_bases();
+
+            let lens = SEQ.block_lens();
+
+            let (bind_score_floats, bind_score_revs) = self.return_bind_score(&SEQ);
+
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..lens[i] {
+                    if bind_score_floats[starts[i]+j] > THRESH {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]);
+                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                    }
+                }
+            }
+
+            occupancy_trace
+
+        }
+        
+        pub fn only_pos_waveform(&self,bp: usize, motif_pos: usize, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.zero();
+
+            let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = DATA.start_bases();
+
+            let lens = SEQ.block_lens();
+
+            let (bind_score_floats, bind_score_revs) = self.return_bind_score(&SEQ);
+
+            let checked = self.base_check(&bind_score_revs, bp, motif_pos, &SEQ);
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..lens[i] {
+                    if checked[starts[i]+j] && (bind_score_floats[starts[i]+j] > THRESH) {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]*self.peak_height);
+                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                    }
+                }
+            }
+
+            occupancy_trace
+
+        }
    
         
     }
