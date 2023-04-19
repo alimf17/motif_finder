@@ -81,7 +81,7 @@ pub mod wave{
     
     impl Waveform {
 
-        pub fn new(block_lens: Vec<usize>, start_bases: Vec<usize>, spacer: usize) -> Waveform {
+        pub fn new(start_data: Vec<f64>, block_lens: Vec<usize>, start_bases: Vec<usize>, spacer: usize) -> Waveform {
 
 
             /*We require that all data begin with the 0th base for mainly this reason
@@ -98,6 +98,31 @@ pub mod wave{
               converted to index easily by just dividing by spacer. A bp with a 
               non-integer part in its representation is dropped in the waveform.
              */
+            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
+
+            let mut start_dats: Vec<usize> = Vec::new();
+
+            let mut size: usize = 0;
+
+            for i in 0..point_lens.len(){
+                start_dats.push(size);
+                size += point_lens[i];
+            }
+
+            let tot_L: usize = point_lens.iter().sum();
+
+            Waveform {
+                wave: start_data,
+                spacer: spacer,
+                point_lens: point_lens,
+                block_lens: block_lens,
+                start_bases: start_bases,
+                start_dats: start_dats
+            }
+        }
+
+        pub fn create_zero(block_lens: Vec<usize>, start_bases: Vec<usize>, spacer: usize) -> Waveform {
+           
             let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
 
             let mut start_dats: Vec<usize> = Vec::new();
@@ -171,12 +196,16 @@ pub mod wave{
             let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
             let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
 
+            let w = self.wave.len();
             
 
             let kern_change = &mut self.wave[(min_data+zerdat)..(nex_data+zerdat)];
 
+            if kern_values.len() > 0 {
             for i in 0..kern_change.len(){
+                //println!("{} {} {} {} {} {} peak", i, min_data, nex_data, kern_values.len(), kern_change.len(), w);
                 kern_change[i] += kern_values[i];
+            }
             }
             
            
