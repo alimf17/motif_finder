@@ -221,6 +221,7 @@ pub mod bases {
         pub fn rel_bind(&self, bp: usize) -> f64 {
             //self.props[bp]/Self::max(&self.props) //This is the correct answer
             self.props[bp] //Put bases in proportion binding form
+            
         }
 
     }
@@ -326,6 +327,7 @@ pub mod bases {
 
 
         }
+
 
         pub fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &Sequence) -> Motif {
 
@@ -446,9 +448,12 @@ pub mod bases {
 
             let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
             let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
-            //let mut uncoded_seq: Vec<usize> = vec![0; *(block_lens.iter().max().unwrap())];
 
             let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
+
+            let seq_ptr = uncoded_seq.as_mut_ptr();
+            let bind_ptr = bind_scores.as_mut_ptr();
+            let comp_ptr = rev_comp.as_mut_ptr();
 
             let seq_frame = 1+(self.len()/4);
 
@@ -460,29 +465,46 @@ pub mod bases {
             let mut bind_forward: f64 = 1.0;
             let mut bind_reverse: f64 = 1.0;
             
+            let ilen: isize = self.len() as isize;
             for i in 0..(block_starts.len()) {
 
-                let actual_frame = &mut uncoded_seq[0..block_lens[i]];
 
                 for jd in 0..(block_lens[i]/4) {
 
                     store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
                     for k in 0..4 {
-                        actual_frame[4*jd+k] = store[k];
+                        uncoded_seq[4*jd+k] = store[k];
+                        //actual_frame[4*jd+k] = store[k];
                     }
 
                 }
 
-                for j in 0..((block_lens[i])-self.len()) {
+                for j in 0..((block_lens[i])-self.len()) as isize {
 
-                    ind = 4*block_starts[i]+j; 
-                    
+                    //ind = 4*block_starts[i]+(j as usize);
+                    //
+                    ind = j+4*(block_starts[i] as isize);
+                    bind_forward = 1.0;
+                    bind_reverse = 1.0;
 
-                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&actual_frame[j..(j+self.len())]);
+                    unsafe { //Ranges are, apparently, slow as crap. I am going to work with the raw pointers
+                             //Hence, this is PEAK unsafe
+                        
+
+                        for k in 0..self.len() as isize {
+                            bind_forward *= self.pwm[k as usize].rel_bind(*seq_ptr.offset(j+k));
+                            bind_reverse *= self.pwm[k as usize].rel_bind(BASE_L-1-*seq_ptr.offset(j+ilen-1-k));
+                        }
+
+                        (*bind_ptr.offset(ind), *comp_ptr.offset(ind)) = (if (bind_reverse > bind_forward) {bind_reverse} else {bind_forward}, (bind_reverse > bind_forward)); 
+                       // (bind_scores[ind], rev_comp[ind]) = self.prop_binding(mot);
+                    }
+                
 
                 }
 
             }
+
 
 
             (bind_scores, rev_comp)
@@ -491,7 +513,9 @@ pub mod bases {
 
         }
        
-
+fn print_type_of<T: ?Sized>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
+}
         //TODO: Decide if this actually belongs as a Sequence method, not a motif method
         //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
         //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
