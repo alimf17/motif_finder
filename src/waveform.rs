@@ -81,7 +81,16 @@ pub mod wave{
     
     impl Waveform {
 
-        pub fn new(start_data: Vec<f64>, block_lens: Vec<usize>, start_bases: Vec<usize>, spacer: usize) -> Waveform {
+        /*
+           This function has several additional constraints:
+
+           The start_data must be organized in accordance with spacer and block_lens.
+           The vector block_lens specifies the length of each block
+
+
+           */
+        pub fn new(start_data: Vec<f64>, block_lens: Vec<usize>, spacer: usize) -> Waveform {
+
 
 
             /*We require that all data begin with the 0th base for mainly this reason
@@ -99,6 +108,13 @@ pub mod wave{
               non-integer part in its representation is dropped in the waveform.
              */
             let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
+
+            let mut start_bases: Vec<usize> = vec![0;block_lens.len()];
+
+
+            for i in 1..block_lens.len(){
+                start_bases.push(start_bases[i-1]+block_lens[i-1]);
+            }
 
             let mut start_dats: Vec<usize> = Vec::new();
 
@@ -146,7 +162,7 @@ pub mod wave{
             }
         }
 
-        pub fn zero(&self) -> Waveform {
+        pub fn derive_zero(&self) -> Waveform {
 
             let tot_L: usize = self.point_lens.iter().sum();
 
