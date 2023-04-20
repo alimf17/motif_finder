@@ -412,7 +412,9 @@ pub mod bases {
 
 
         //BINDING FUNCTIONS
-        pub fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
+
+        //If kmer is not the same length as the pwm, this will produce undefined behavior
+        pub unsafe fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
             
 
             //let kmer: Vec<usize> = kmer_slice.to_vec();
@@ -422,8 +424,8 @@ pub mod bases {
 
             unsafe{
             for i in 0..self.len() {
-                bind_forward *= self.pwm[i].rel_bind(kmer[i]);
-                bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-kmer[self.len()-1-i]);
+                bind_forward *= self.pwm[i].rel_bind(*kmer.get_unchecked(i));
+                bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
             }
             }
 
@@ -497,7 +499,7 @@ pub mod bases {
                     let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
 
                     
-                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(binding_borrow); 
+                    (bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) }; 
                     //(bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
                 }
 
@@ -560,15 +562,23 @@ pub mod bases {
 
             let (bind_score_floats, bind_score_revs) = self.return_bind_score(&SEQ);
 
+            let mut count: usize = 0;
+
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
                     if bind_score_floats[starts[i]+j] > THRESH {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]*self.peak_height);
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]) ;
                         //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
-                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                        unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
+                                                                                             //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
+               
+                                                                                             //has zeros where we can be going over the motif length
+                        count+=1;
                     }
                 }
             }
+
+            println!("num peaks {}", count);
 
             occupancy_trace
 
@@ -589,8 +599,8 @@ pub mod bases {
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
                     if bind_score_floats[starts[i]+j] > THRESH {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]);
-                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]/self.peak_height);
+                        unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                     }
                 }
             }
@@ -615,8 +625,8 @@ pub mod bases {
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
                     if checked[starts[i]+j] && (bind_score_floats[starts[i]+j] > THRESH) {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]*self.peak_height);
-                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); //Note: this technically means that we round down if the motif length is even
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]);
+                        unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                     }
                 }
             }
@@ -867,6 +877,7 @@ mod tester{
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
 
+        println!("DF");
         let start_gen = Instant::now();
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
@@ -920,13 +931,13 @@ mod tester{
 
         let best_mot = motif.best_motif();
 
-        let bindy = motif.prop_binding(&best_mot);
+        let bindy = unsafe{ motif.prop_binding(&best_mot) };
 
         assert!(((bindy.0-1.0).abs() < 1e-6) && !bindy.1);
 
         let rev_best = best_mot.iter().rev().map(|a| BASE_L-1-a).collect::<Vec<usize>>();
 
-        let bindy = motif.prop_binding(&rev_best);
+        let bindy = unsafe {motif.prop_binding(&rev_best) };
         
         assert!(((bindy.0-1.0).abs() < 1e-6) && bindy.1);
 
@@ -942,15 +953,42 @@ mod tester{
 
                 let defect: f64 = unsafe{ pwm[i].rel_bind(j)} ;
 
-                let bindy = motif.prop_binding(&for_mot);
-                let rbind = motif.prop_binding(&rev_mot);
+                
+                let bindy = unsafe{ motif.prop_binding(&for_mot)};
+                let rbind = unsafe{ motif.prop_binding(&rev_mot) };
 
+                
                 assert!(((bindy.0-defect).abs() < 1e-6) && !bindy.1);
                 assert!(((rbind.0-defect).abs() < 1e-6) && rbind.1);
 
             }
         }
 
+        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
+        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens.clone());
+        let wave: Waveform = Waveform::create_zero(block_lens, start_bases, 5);
+        
+        let wave_block: Vec<u8> = vec![2,0,0,0, 170, 170, 170, 170, 170, 170, 170, 170,170, 170, 170, 170, 170, 170, 170]; 
+        let wave_inds: Vec<usize> = vec![0, 9]; 
+        let wave_starts: Vec<usize> = vec![0, 36];
+        let wave_lens: Vec<usize> = vec![36, 40];
+        let wave_wave: Waveform = Waveform::create_zero(wave_lens.clone(), wave_starts.clone(),1);
+        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_inds, wave_lens);
+
+        let theory_base = [1.0, 1e-5, 1e-5, 0.2];
+
+        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
+
+
+        println!("DF");
+        let little_motif: Motif = Motif::new(mat, 10.0, 1.0);
+
+        print!("{}", little_motif);
+        println!("{:?}",little_motif.generate_waveform(&wave_wave, &wave_seq).raw_wave());
 
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
@@ -1005,7 +1043,7 @@ mod tester{
             for j in 0..(bp_per_block-motif.len()) {
 
                 //let test_against = motif.prop_binding(&VecDeque::from(sequence.return_bases(i, j, motif.len())));
-                let test_against = motif.prop_binding(&(sequence.return_bases(i, j, motif.len())));
+                let test_against = unsafe{ motif.prop_binding(&(sequence.return_bases(i, j, motif.len())))};
                 assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
 

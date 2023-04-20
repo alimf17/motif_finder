@@ -14,6 +14,7 @@ pub mod wave{
     const WIDE: f64 = 3.0;
     const THRESH: f64 = 1e-4; //Going off of binding score now, not peak height, so it's lower
 
+    #[derive(Clone)]
     pub struct Kernel{
 
         peak_width: f64,
@@ -56,9 +57,9 @@ pub mod wave{
             self.peak_width
         }
 
-        pub fn get_curve(&self) -> Vec<f64> {
+        pub fn get_curve(&self) -> &Vec<f64> {
 
-            self.kernel.clone()
+            &self.kernel
         
         }
 
@@ -152,6 +153,7 @@ pub mod wave{
 
             let tot_L: usize = point_lens.iter().sum();
 
+            println!("TOT {}", tot_L);
             Waveform {
                 wave: vec![0.0; tot_L],
                 spacer: spacer,
@@ -178,12 +180,14 @@ pub mod wave{
 
         }
 
-        pub fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
+        //block must be less than the number of blocks
+        //center must be less than the number of bps in the blockth block
+        pub unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
-            let half_len = (peak.len()-1)/2; //Given how we construct kernels, this will never need to be rounded
-            let range = self.block_lens[block];
 
-            let place_bp = (half_len as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
+
+                       //Given how we construct kernels, this will never need to be rounded
+            let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
             let cc = (place_bp) % (self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
            
             let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
@@ -195,12 +199,9 @@ pub mod wave{
 
 
 
-            let all_kernel_inds: Vec<usize> = (min_kern_bp..nex_kern_bp).collect();
+           
 
-            let need_kernel_inds: Vec<usize> = all_kernel_inds.iter().filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| *f as usize).collect();
-
-            let kern_values = need_kernel_inds.iter().map( |i| peak.get_curve()[*i] ).collect::<Vec<_>>();
-
+            let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
             
             
             let completion: usize = ((cc-((peak.len() % self.spacer) as isize)).rem_euclid(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
@@ -215,7 +216,7 @@ pub mod wave{
             let w = self.wave.len();
             
 
-            let kern_change = &mut self.wave[(min_data+zerdat)..(nex_data+zerdat)];
+            let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
 
             if kern_values.len() > 0 {
             for i in 0..kern_change.len(){
@@ -282,8 +283,8 @@ pub mod wave{
         }
 
 
-        pub fn start_bases(&self) -> Vec<usize> {
-            self.start_bases.clone()
+        pub fn start_bases(&self) -> &Vec<usize> {
+            &self.start_bases
         }
 
         pub fn spacer(&self) -> usize {
@@ -368,9 +369,26 @@ pub mod wave{
             }
         }
 
+/*
+   
+        fn mul(self, rhs: f64) -> Waveform {
 
+            let mut wave = vec![0.0; self.wave.len()];
+            for i in 0..wave.len(){
+                wave[i] = self.wave[i]*rhs;
+            }
+
+            Waveform{
+                wave: wave, 
+                spacer: self.spacer,
+                point_lens: self.point_lens.clone(),
+                block_lens: self.block_lens.clone(),
+                start_bases: self.start_bases.clone(),
+                start_dats: self.start_dats.clone(),
+            }
+        }
+*/
     }
-
 
     pub struct Noise {
         resids: Vec<f64>,
