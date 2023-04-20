@@ -218,9 +218,10 @@ pub mod bases {
 
         }
 
-        pub fn rel_bind(&self, bp: usize) -> f64 {
+        //bp MUST be less than the BASE_L and nonnegative, or else this will produce undefined behavior
+        pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
             //self.props[bp]/Self::max(&self.props) //This is the correct answer
-            self.props[bp] //Put bases in proportion binding form
+            *self.props.get_unchecked(bp) //Put bases in proportion binding form
             
         }
 
@@ -419,9 +420,11 @@ pub mod bases {
             let mut bind_forward: f64 = 1.0;
             let mut bind_reverse: f64 = 1.0;
 
+            unsafe{
             for i in 0..self.len() {
                 bind_forward *= self.pwm[i].rel_bind(kmer[i]);
                 bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-kmer[self.len()-1-i]);
+            }
             }
 
             let reverse: bool = (bind_reverse > bind_forward);
@@ -490,8 +493,12 @@ pub mod bases {
                     //bind_forward = 1.0;
                     //bind_reverse = 1.0;
 
+                    
+                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
 
-                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
+                    
+                    (bind_scores[ind], rev_comp[ind]) = self.prop_binding(binding_borrow); 
+                    //(bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
                 }
 
             }
@@ -505,9 +512,6 @@ pub mod bases {
 
         }
        
-fn print_type_of<T: ?Sized>(_: &T) {
-    println!("{}", std::any::type_name::<T>())
-}
         //TODO: Decide if this actually belongs as a Sequence method, not a motif method
         //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
         //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
@@ -546,7 +550,7 @@ fn print_type_of<T: ?Sized>(_: &T) {
 
         pub fn generate_waveform(&self, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
 
-            let mut occupancy_trace: Waveform = DATA.zero();
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
@@ -572,7 +576,7 @@ fn print_type_of<T: ?Sized>(_: &T) {
 
         pub fn no_height_waveform(&self, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
 
-            let mut occupancy_trace: Waveform = DATA.zero();
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
@@ -597,7 +601,7 @@ fn print_type_of<T: ?Sized>(_: &T) {
         
         pub fn only_pos_waveform(&self,bp: usize, motif_pos: usize, DATA: &Waveform, SEQ: &Sequence) -> Waveform {
 
-            let mut occupancy_trace: Waveform = DATA.zero();
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
@@ -936,7 +940,7 @@ mod tester{
                 let mut rev_mot = rev_best.clone();
                 rev_mot[motif.len()-1-i] = BASE_L-1-j;
 
-                let defect: f64 = pwm[i].rel_bind(j);
+                let defect: f64 = unsafe{ pwm[i].rel_bind(j)} ;
 
                 let bindy = motif.prop_binding(&for_mot);
                 let rbind = motif.prop_binding(&rev_mot);
@@ -951,7 +955,7 @@ mod tester{
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
-        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], small_lens.clone(), vec![0, 25], 5);
+        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], small_lens.clone(), 5);
         let small: Sequence = Sequence::new_manual(small_block, small_inds, small_lens);
 
 
