@@ -138,8 +138,8 @@ pub mod seq {
         }
 
 
-        pub fn seq_blocks(&self) -> Vec<u8> {
-            self.seq_blocks.clone()
+        pub fn seq_blocks(&self) -> &Vec<u8> {
+            &self.seq_blocks
         }
 
         pub fn coded_place(&self, i: usize) -> u8 {
