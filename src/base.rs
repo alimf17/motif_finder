@@ -12,14 +12,14 @@ pub mod bases {
     use std::fmt;
     use std::collections::VecDeque;
 
-    const BPS: [&str; 4] = ["A", "C", "G", "T"];
-    const BASE_L: usize = BPS.len();
+    pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
+    pub const BASE_L: usize = BPS.len();
     const RT: f64 =  8.31446261815324*298./4184.; //in kcal/(K*mol)
 
     const CLOSE: f64 = 1e-5;
 
-    const MIN_BASE: usize = 8;
-    const MAX_BASE: usize = 20;
+    pub const MIN_BASE: usize = 8;
+    pub const MAX_BASE: usize = 20;
 
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
@@ -276,20 +276,21 @@ pub mod bases {
     }
 
     //BEGIN MOTIF
-    pub struct Motif {
+    pub struct Motif<'a> {
     
         peak_height: f64,
         kernel: Kernel,
         pwm: Vec<Base>,
         poss: bool,
+        seq: &'a Sequence,
 
     }
 
-    impl Motif {
+    impl<'a> Motif<'a> {
 
         //GENERATORS
         //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-        pub fn new(pwm: Vec<Base>, peak_height: f64, peak_width: f64) -> Motif {
+        pub unsafe fn raw_pwm(pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
             let kernel = Kernel::new(peak_width, peak_height);
 
             Motif {
@@ -297,12 +298,13 @@ pub mod bases {
                 kernel: kernel,
                 pwm: pwm,
                 poss: true,
+                seq: seq,
             }
         }
 
  
         //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-        pub fn from_motif(best_bases: Vec<usize>, peak_width: f64, seq: &Sequence) -> Motif {
+        pub fn from_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
             let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
@@ -324,13 +326,17 @@ pub mod bases {
                 kernel: kernel,
                 pwm: pwm,
                 poss: poss,
+                seq: seq,
             }
 
 
         }
 
 
-        pub fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &Sequence) -> Motif {
+        //Safety: best_bases must appear as a subsequence in seq at least once.
+        //        WARNING: failing this safety check will NOT make everything crash and burn. 
+        //        THIS WILL BREAK SILENTLY IF SAFETY GUARENTEES ARE NOT KEPT
+        pub unsafe fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
             let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
@@ -350,12 +356,13 @@ pub mod bases {
                 kernel: kernel,
                 pwm: pwm,
                 poss: true,
+                seq: seq,
             }
 
 
         }
         //TODO: make sure that this takes a sequence reference variable and that we pull our random motif from there
-        pub fn rand_mot(peak_width: f64, seq: &Sequence) -> Motif {
+        pub fn rand_mot(peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
             let mut rng = rand::thread_rng();
 
@@ -363,8 +370,9 @@ pub mod bases {
 
             let mot = (seq.generate_kmers(num_bases).choose(&mut rng)).unwrap().clone();
 
-            Self::from_clean_motif(mot, peak_width, &seq)
-
+            unsafe {
+                Self::from_clean_motif(mot, peak_width, &seq)
+            }
 
         }
 
@@ -638,7 +646,7 @@ pub mod bases {
         
     }
 
-    impl fmt::Display for Motif { 
+    impl fmt::Display for Motif<'_> { 
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             const DIGITS: usize = 5;
             
@@ -885,7 +893,7 @@ mod tester{
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         let wave: Waveform = Waveform::create_zero(block_lens, start_bases, 5);
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
@@ -895,7 +903,7 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence);
+        let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
 
         let start = Instant::now();
 
@@ -969,7 +977,7 @@ mod tester{
         let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks,  block_lens.clone());
         let wave: Waveform = Waveform::create_zero(block_lens, start_bases, 5);
         
         let wave_block: Vec<u8> = vec![2,0,0,0, 170, 170, 170, 170, 170, 170, 170, 170,170, 170, 170, 170, 170, 170, 170]; 
@@ -977,7 +985,7 @@ mod tester{
         let wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
         let wave_wave: Waveform = Waveform::create_zero(wave_lens.clone(), wave_starts.clone(),1);
-        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_inds, wave_lens);
+        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
@@ -985,7 +993,7 @@ mod tester{
 
 
         println!("DF");
-        let little_motif: Motif = Motif::new(mat, 10.0, 1.0);
+        let little_motif: Motif = unsafe{Motif::raw_pwm(mat, 10.0, 1.0, &wave_seq)};
 
         print!("{}", little_motif);
         println!("{:?}",little_motif.generate_waveform(&wave_wave, &wave_seq).raw_wave());
@@ -994,7 +1002,7 @@ mod tester{
         let small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
         let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], small_lens.clone(), 5);
-        let small: Sequence = Sequence::new_manual(small_block, small_inds, small_lens);
+        let small: Sequence = Sequence::new_manual(small_block, small_lens);
 
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.bool()).collect();

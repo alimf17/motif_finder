@@ -32,9 +32,9 @@ fn main() {
     let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
     let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
     let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-    let sequence: Sequence = Sequence::new_manual(blocks, block_inds, block_lens);
+    let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
-    let motif: Motif = Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence);
+    let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
 
     let binds = motif.return_bind_score(&sequence);
 
