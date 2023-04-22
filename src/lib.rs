@@ -36,7 +36,7 @@ fn main() {
 
     let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
 
-    let binds = motif.return_bind_score(&sequence);
+    let binds = motif.return_bind_score();
 
 }
 
