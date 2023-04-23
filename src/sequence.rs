@@ -14,7 +14,7 @@ pub mod seq {
 
     pub struct Sequence {
         seq_blocks: Vec<u8>,
-        block_inds: Vec<usize>,
+        block_u8_starts: Vec<usize>,
         block_lens: Vec<usize>,
         max_len: usize,
     }
@@ -74,7 +74,7 @@ pub mod seq {
 
             Sequence{
                 seq_blocks: seq_bls,
-                block_inds: block_is,
+                block_u8_starts: block_is,
                 block_lens: block_ls,
                 max_len: max_len,
             }
@@ -87,11 +87,11 @@ pub mod seq {
         //          Failure to uphold this will result in this panicking for your own good.
         pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> Sequence {
 
-            let mut block_inds: Vec<usize> = vec![0];
+            let mut block_u8_starts: Vec<usize> = vec![0];
 
             for i in 0..(block_lens.len()-1) {
                 if block_lens[i] >= MAX_BASE && block_lens[i] % BP_PER_U8 == 0{
-                    block_inds.push(block_inds[i]+block_lens[i]/BP_PER_U8);
+                    block_u8_starts.push(block_u8_starts[i]+block_lens[i]/BP_PER_U8);
                 } else {
                     panic!("All blocks must be longer than your maximum possible motif size and divisible by {}!", BP_PER_U8);
                 }
@@ -105,7 +105,7 @@ pub mod seq {
 
             Sequence{
                 seq_blocks: seq_blocks,
-                block_inds: block_inds,
+                block_u8_starts: block_u8_starts,
                 block_lens: block_lens,
                 max_len: max_len,
             }
@@ -154,8 +154,8 @@ pub mod seq {
             self.max_len
         }
 
-        pub fn block_inds(&self) -> Vec<usize> {
-            self.block_inds.clone()
+        pub fn block_u8_starts(&self) -> Vec<usize> {
+            self.block_u8_starts.clone()
         }
 
         pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
@@ -183,8 +183,8 @@ pub mod seq {
 
         pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<usize> {
 
-            let start_dec = self.block_inds[block_id]+(start_id/BP_PER_U8);
-            let end_dec = self.block_inds[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
+            let start_dec = self.block_u8_starts[block_id]+(start_id/BP_PER_U8);
+            let end_dec = self.block_u8_starts[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
 
             let all_coded = &self.seq_blocks[start_dec..end_dec];
 
@@ -291,7 +291,7 @@ mod tests {
         let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
-        let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (0..block_n).map(|_| bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
