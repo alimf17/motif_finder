@@ -7,6 +7,7 @@ pub mod wave{
     use std::cmp::min;
     use core::f64::consts::PI;
 
+    use crate::sequence::seq::Sequence;
     use statrs::distribution::StudentsT;
     use statrs::distribution::{Continuous, ContinuousCDF};
 
@@ -71,27 +72,26 @@ pub mod wave{
 
     }
 
-    pub struct Waveform {
+    pub struct Waveform<'a> {
         wave: Vec<f64>,
         spacer: usize,
         point_lens: Vec<usize>,
-        start_bases: Vec<usize>,
         start_dats: Vec<usize>,
-        block_lens: Vec<usize>,
+        seq: &'a Sequence,
     }
     
-    impl Waveform {
+    impl<'a> Waveform<'a> {
 
         /*
-           This function has several additional constraints:
+           This function has an additional constraint:
 
-           The start_data must be organized in accordance with spacer and block_lens.
-           The vector block_lens specifies the length of each block
-
-
+           The start_data must be organized in accordance with spacer and sequence.
+           In particular, each block must have 1+floor((block length-1)/spacer) data points
+           HOWEVER, this initializer only knows TO panic if the total number of data points
+           cannot be reconciled with seq and spacer. If you have one too MANY points in one
+           block and one too FEW points in another, this will NOT know to break. 
            */
-        pub fn new(start_data: Vec<f64>, block_lens: Vec<usize>, spacer: usize) -> Waveform {
-
+        pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
 
 
             /*We require that all data begin with the 0th base for mainly this reason
@@ -108,13 +108,10 @@ pub mod wave{
               converted to index easily by just dividing by spacer. A bp with a 
               non-integer part in its representation is dropped in the waveform.
              */
-            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
+            let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| 1+((a-1)/spacer)).collect();
 
-            let mut start_bases: Vec<usize> = vec![0;block_lens.len()];
-
-
-            for i in 1..block_lens.len(){
-                start_bases.push(start_bases[i-1]+block_lens[i-1]);
+            if point_lens.iter().sum::<usize>() != start_data.len() {
+                panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
             }
 
             let mut start_dats: Vec<usize> = Vec::new();
@@ -132,15 +129,14 @@ pub mod wave{
                 wave: start_data,
                 spacer: spacer,
                 point_lens: point_lens,
-                block_lens: block_lens,
-                start_bases: start_bases,
-                start_dats: start_dats
+                start_dats: start_dats,
+                seq: seq,
             }
         }
 
-        pub fn create_zero(block_lens: Vec<usize>, start_bases: Vec<usize>, spacer: usize) -> Waveform {
+        pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
            
-            let point_lens: Vec<usize> = block_lens.iter().map(|a| 1+((a-1)/spacer)).collect();
+            let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| 1+((a-1)/spacer)).collect();
 
             let mut start_dats: Vec<usize> = Vec::new();
 
@@ -158,9 +154,8 @@ pub mod wave{
                 wave: vec![0.0; tot_L],
                 spacer: spacer,
                 point_lens: point_lens,
-                block_lens: block_lens,
-                start_bases: start_bases,
-                start_dats: start_dats
+                start_dats: start_dats,
+                seq: seq,
             }
         }
 
@@ -173,9 +168,8 @@ pub mod wave{
                 wave: vec![0.0; tot_L],
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
-                block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone(),
-                start_dats: self.start_dats.clone()
+                start_dats: self.start_dats.clone(),
+                seq: self.seq,
             }
 
         }
@@ -186,7 +180,7 @@ pub mod wave{
 
 
 
-                       //Given how we construct kernels, this will never need to be rounded
+            //Given how we construct kernels, this will never need to be rounded
             let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
             let cc = (place_bp) % (self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
            
@@ -196,10 +190,6 @@ pub mod wave{
             let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
                                                                                      //But if it is, panicking is appropriate: 
                                                                                      //center would necessarily be much bigger than the block length
-
-
-
-           
 
             let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
             
@@ -219,10 +209,10 @@ pub mod wave{
             let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
 
             if kern_values.len() > 0 {
-            for i in 0..kern_change.len(){
-                //println!("{} {} {} {} {} {} peak", i, min_data, nex_data, kern_values.len(), kern_change.len(), w);
-                kern_change[i] += kern_values[i];
-            }
+                for i in 0..kern_change.len(){
+                    //println!("{} {} {} {} {} {} peak", i, min_data, nex_data, kern_values.len(), kern_change.len(), w);
+                    kern_change[i] += kern_values[i];
+                }
             }
             
            
@@ -283,9 +273,6 @@ pub mod wave{
         }
 
 
-        pub fn start_bases(&self) -> &Vec<usize> {
-            &self.start_bases
-        }
 
         pub fn spacer(&self) -> usize {
             self.spacer
@@ -302,16 +289,21 @@ pub mod wave{
         pub fn point_lens(&self)  -> Vec<usize> {
             self.point_lens.clone()
         }
+
+        pub fn seq(&self) -> &Sequence {
+            self.seq
+        }
+
     }
     
-    impl Add<&Waveform> for &Waveform {
+    impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {
 
-        type Output = Waveform;
+        type Output = Waveform<'a>;
 
-        fn add(self, wave2: &Waveform) -> Waveform {
+        fn add(self, wave2: &'b Waveform) -> Waveform<'a> {
 
-            if self.spacer != wave2.spacer()  {
-                panic!("These signals do not add! Spacers must be equal!")
+            if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
+                panic!("These signals do not add! Spacers must be equal and waves must point to the same sequence!");
             }
  
             let other_wave = wave2.raw_wave();
@@ -320,74 +312,52 @@ pub mod wave{
                 wave: self.wave.iter().zip(other_wave).map(|(a, b)| a+b).collect(),
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
-                block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone(),
                 start_dats: self.start_dats.clone(),
+                seq: self.seq,
             }
 
         }
 
     }
     
-    impl Sub<&Waveform> for &Waveform {
+    impl<'a, 'b> Sub<&'b Waveform<'b>> for &'a Waveform<'a> {
 
-        type Output = Waveform;
+        type Output = Waveform<'a>;
 
-        fn sub(self, wave2: &Waveform) -> Waveform {
+        fn sub(self, wave2: &'b Waveform<'b>) -> Waveform<'a> {
 
-            if self.spacer != wave2.spacer()  {
-                panic!("These signals do not subtract! Spacers must be equal!")
-            }
+        if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
+                panic!("These signals do not add! Spacers must be equal and waves must point to the same sequence!");
+        }
             let other_wave = wave2.raw_wave();
             
             Waveform {
                 wave: self.wave.iter().zip(other_wave).map(|(a, b)| a-b).collect(),
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
-                block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone(),
                 start_dats: self.start_dats.clone(),
+                seq: self.seq,
             }
 
         }
 
     }
 
-    impl Mul<f64> for &Waveform {
+    impl<'a> Mul<f64> for &'a Waveform<'a> {
 
-        type Output = Waveform;
+        type Output = Waveform<'a>;
 
-        fn mul(self, rhs: f64) -> Waveform {
-
+        fn mul(self, rhs: f64) -> Waveform<'a> {
+            
             Waveform{
                 wave: self.wave.iter().map(|a| a*rhs).collect(),
                 spacer: self.spacer,
                 point_lens: self.point_lens.clone(),
-                block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone(),
                 start_dats: self.start_dats.clone(),
+                seq: self.seq,
             }
         }
 
-/*
-   
-        fn mul(self, rhs: f64) -> Waveform {
-
-            let mut wave = vec![0.0; self.wave.len()];
-            for i in 0..wave.len(){
-                wave[i] = self.wave[i]*rhs;
-            }
-
-            Waveform{
-                wave: wave, 
-                spacer: self.spacer,
-                point_lens: self.point_lens.clone(),
-                block_lens: self.block_lens.clone(),
-                start_bases: self.start_bases.clone(),
-                start_dats: self.start_dats.clone(),
-            }
-        }
-*/
     }
 
     pub struct Noise {
@@ -537,13 +507,14 @@ pub mod wave{
     
 
 
-/*
+
 #[cfg(test)]
 mod tests{
     
     use crate::waveform::wave::Kernel;
     use crate::waveform::wave::Waveform;
     use crate::waveform::wave::Noise;
+    use crate::sequence::seq::Sequence;
 
     use statrs::distribution::ContinuousCDF;
 
@@ -568,8 +539,10 @@ mod tests{
     #[test]
     fn real_wave_check(){
         let k = Kernel::new(5.0, 2.0);
-        let mut signal = Waveform::new(vec![84, 68, 72], vec![0, 84, 152], 5);
+        let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
+        let mut signal = Waveform::create_zero(&seq, 5);
 
+        unsafe{
 
         signal.place_peak(&k, 2, 20);
 
@@ -586,6 +559,7 @@ mod tests{
         //Waves are not contagious
         assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
 
+        }
 
         let base_w = &signal*0.4;
 
@@ -736,4 +710,4 @@ mod tests{
 
 }
 
-*/
+

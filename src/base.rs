@@ -461,7 +461,7 @@ pub mod bases {
             //let seq = self.seq;
             let coded_sequence = self.seq.seq_blocks();
             let block_lens = self.seq.block_lens(); //bp space
-            let block_starts = self.seq.block_inds(); //stored index space
+            let block_starts = self.seq.block_u8_starts(); //stored index space
 
 
             let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
@@ -563,13 +563,13 @@ pub mod bases {
 
 
 
-        pub fn generate_waveform(&self, DATA: &Waveform) -> Waveform {
+        pub fn generate_waveform(&'a self, DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-            let starts = DATA.start_bases();
+            let starts = self.seq.block_u8_starts();
 
             let lens = self.seq.block_lens();
 
@@ -579,8 +579,8 @@ pub mod bases {
 
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
-                    if bind_score_floats[starts[i]+j] > THRESH {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]) ;
+                    if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
                         //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                                                                                              //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
@@ -597,13 +597,13 @@ pub mod bases {
 
         }
 
-        pub fn no_height_waveform(&self, DATA: &Waveform) -> Waveform {
+        pub fn no_height_waveform(&'a self, DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-            let starts = DATA.start_bases();
+            let starts = self.seq.block_u8_starts();
 
             let lens = self.seq.block_lens();
 
@@ -611,8 +611,8 @@ pub mod bases {
 
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
-                    if bind_score_floats[starts[i]+j] > THRESH {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]/self.peak_height);
+                    if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                     }
                 }
@@ -622,13 +622,13 @@ pub mod bases {
 
         }
         
-        pub fn only_pos_waveform(&self,bp: usize, motif_pos: usize, DATA: &Waveform) -> Waveform {
+        pub fn only_pos_waveform(&'a self,bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
 
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-            let starts = DATA.start_bases();
+            let starts = self.seq.block_u8_starts();
 
             let lens = self.seq.block_lens();
 
@@ -637,8 +637,8 @@ pub mod bases {
             let checked = self.base_check(&bind_score_revs, bp, motif_pos);
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
-                    if checked[starts[i]+j] && (bind_score_floats[starts[i]+j] > THRESH) {
-                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]+j]);
+                    if checked[starts[i]+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
+                        actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                     }
                 }
@@ -895,11 +895,11 @@ mod tester{
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_inds: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
-        let wave: Waveform = Waveform::create_zero(block_lens, start_bases, 5);
+        let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
 
@@ -981,8 +981,8 @@ mod tester{
         let wave_inds: Vec<usize> = vec![0, 9]; 
         let wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
-        let wave_wave: Waveform = Waveform::create_zero(wave_lens.clone(), wave_starts.clone(),1);
         let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
+        let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
@@ -998,8 +998,8 @@ mod tester{
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
-        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], small_lens.clone(), 5);
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
+        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
         let wave_motif: Motif = unsafe{Motif::raw_pwm(mat, 10.0, 1.0, &small)};
@@ -1017,7 +1017,7 @@ mod tester{
         println!("correct: {:?}", correct);
         println!("checked: {:?}", checked);
 
-        println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_inds(), small.return_bases(0, 0, 24));
+        println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_u8_starts(), small.return_bases(0, 0, 24));
         println!("blocks in seq: {:?}", wave_motif.seq().seq_blocks());
 
 
