@@ -208,7 +208,7 @@ pub mod wave{
             let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
 
             if kern_values.len() > 0 {
-                println!("{} {} {} {} {} peak",min_data+zerdat, nex_data+zerdat, kern_values.len(), kern_change.len(), w);
+                //println!("{} {} {} {} {} peak",min_data+zerdat, nex_data+zerdat, kern_values.len(), kern_change.len(), w);
                 for i in 0..kern_change.len(){
                     kern_change[i] += kern_values[i];
                 }

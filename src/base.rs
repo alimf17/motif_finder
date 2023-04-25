@@ -644,7 +644,7 @@ pub mod bases {
             let checked = self.base_check(&bind_score_revs, bp, motif_pos);
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
-                    if checked[starts[i]+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
+                    if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
                         actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                     }
@@ -1028,6 +1028,8 @@ mod tester{
         println!("blocks in seq: {:?}", wave_motif.seq().seq_blocks());
 
 
+
+        //TESTING base_check()
         for i in 0..2 {
             for j in 0..24 {
 
@@ -1058,7 +1060,7 @@ mod tester{
 
 
         //TESTING return_bind_score()
-       /* 
+        
         for i in 0..block_n {
             for j in 0..(bp_per_block-motif.len()) {
 
@@ -1068,14 +1070,21 @@ mod tester{
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
 
             }
-        }*/
-
+        }
 
         //TESTING generate_waveform() 
 
 
         let wave_main = motif.generate_waveform(&wave);
+        let wave_noh = motif.no_height_waveform(&wave);
         let wave_gen: Vec<f64> = wave_main.raw_wave();
+        let wave_sho: Vec<f64> = wave_noh.raw_wave();
+
+        let checked = motif.base_check(&binds.1, 3, 6);
+
+        let wave_filter = motif.only_pos_waveform(3, 6, &wave);
+
+        let raw_filter: Vec<f64> = wave_filter.raw_wave();
 
         let point_lens = wave_main.point_lens();
         start_bases.push(bp);
@@ -1088,8 +1097,9 @@ mod tester{
 
         let kernel_mid = (kernel_check.len()-1)/2;
 
-        println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
+        //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
+        println!("filts {:?}", checked.iter().enumerate().filter(|(_, &b)| b).map(|(a, _)| a).collect::<Vec<_>>());
         for i in 0..block_n {
             for j in 0..point_lens[i] {
 
@@ -1097,20 +1107,27 @@ mod tester{
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
                 let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > THRESH).collect::<Vec<_>>();
 
+                let relevant_filt = (cut_low..cut_high).filter(|&a| (binds.0[a] > THRESH) & checked[a]).collect::<Vec<_>>();
+
                 if relevant_binds.len() > 0 {
 
-                    println!("pos {}, height {}, mid {},  rels {:?}, scores {:?}.", start_bases[i]+space*j, motif.peak_height(), kernel_mid, relevant_binds, relevant_binds.iter().map(|&a| binds.0[a]).collect::<Vec<_>>());
                     let mut score: f64 = 0.0;
+                    let mut filt_score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
                         score += binds.0[relevant_binds[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
                     }
-                    println!("{} out {} blocks. {} out of {} points in block. Generated {}, predicted {}.", i, block_n, j, start_dats[i], wave_gen[start_dats[i]+j], score);
-                    println!("DFD");
+                    for k in 0..relevant_filt.len() {
+                        filt_score += binds.0[relevant_filt[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_filt[k]+half_len)];
+                    }
                     assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
+                    assert!((wave_sho[start_dats[i]+j]-score/motif.peak_height()).abs() < 1e-6);
+
+                    assert!((raw_filter[start_dats[i]+j]-filt_score).abs() < 1e-6);
 
                 } else {
-                    println!("{} out {} blocks. {} out of {} points in block. Generated {}, predicted 0!", i, block_n, j, start_dats[i], wave_gen[start_dats[i]+j]);
                     assert!(wave_gen[start_dats[i]+j].abs() < 1e-6);
+                    assert!((wave_sho[start_dats[i]+j]).abs() < 1e-6);
+                    assert!(raw_filter[start_dats[i]+j].abs() < 1e-6);
                 }
 
 
