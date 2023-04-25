@@ -28,7 +28,7 @@ pub mod bases {
 
     const PROB_POS_PEAK: f64 = 0.9;
 
-    const THRESH: f64 = 1e-4;
+    pub const THRESH: f64 = 1e-4;
     //BEGIN BASE
 
     pub struct Base {
@@ -393,6 +393,11 @@ pub mod bases {
         pub fn peak_height(&self) -> f64 {
             self.peak_height
         }
+
+        pub fn raw_kern(&self) -> &Vec<f64> {
+            self.kernel.get_curve()
+        }
+
         pub fn peak_width(&self) -> f64 {
             self.kernel.get_sd()
         }
@@ -563,6 +568,7 @@ pub mod bases {
 
 
 
+        //NOTE: if DATA does not point to the same sequence that self does, this will break. HARD. 
         pub fn generate_waveform(&'a self, DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
@@ -578,14 +584,15 @@ pub mod bases {
             let mut count: usize = 0;
 
             for i in 0..starts.len() { //Iterating over each block
-                for j in 0..lens[i] {
+                for j in 0..(lens[i]-(self.len()-1)/2) {
                     if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                         actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
                         //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                                                                                              //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
-               
                                                                                              //has zeros where we can be going over the motif length
+
+                        //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
                         count+=1;
                     }
                 }
@@ -800,8 +807,8 @@ mod tester{
     use crate::base::bases::Base;
     use crate::base::bases::GBase;
     use crate::base::bases::TruncatedLogNormal;
-    use crate::base::bases::Motif;
-    use crate::sequence::seq::Sequence;
+    use crate::base::bases::{Motif, THRESH};
+    use crate::sequence::seq::{Sequence, BP_PER_U8};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max};
     use statrs::function::gamma;
@@ -897,7 +904,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
@@ -1049,7 +1056,9 @@ mod tester{
         let duration = start.elapsed();
         println!("Time elapsed in check is: {:?}", duration);
 
-        
+
+        //TESTING return_bind_score()
+       /* 
         for i in 0..block_n {
             for j in 0..(bp_per_block-motif.len()) {
 
@@ -1059,6 +1068,56 @@ mod tester{
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
 
             }
-        } 
+        }*/
+
+
+        //TESTING generate_waveform() 
+
+
+        let wave_main = motif.generate_waveform(&wave);
+        let wave_gen: Vec<f64> = wave_main.raw_wave();
+
+        let point_lens = wave_main.point_lens();
+        start_bases.push(bp);
+        let start_dats = wave_main.start_dats();
+        let space: usize = wave_main.spacer();
+
+        let half_len: usize = (motif.len()-1)/2;
+        
+        let kernel_check = motif.raw_kern();
+
+        let kernel_mid = (kernel_check.len()-1)/2;
+
+        println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
+
+        for i in 0..block_n {
+            for j in 0..point_lens[i] {
+
+                let cut_low = if space*j >= kernel_mid+half_len {start_bases[i]+space*j-(kernel_mid+half_len)} else {start_bases[i]} ;
+                let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
+                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > THRESH).collect::<Vec<_>>();
+
+                if relevant_binds.len() > 0 {
+
+                    println!("pos {}, height {}, mid {},  rels {:?}, scores {:?}.", start_bases[i]+space*j, motif.peak_height(), kernel_mid, relevant_binds, relevant_binds.iter().map(|&a| binds.0[a]).collect::<Vec<_>>());
+                    let mut score: f64 = 0.0;
+                    for k in 0..relevant_binds.len() {
+                        score += binds.0[relevant_binds[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                    }
+                    println!("{} out {} blocks. {} out of {} points in block. Generated {}, predicted {}.", i, block_n, j, start_dats[i], wave_gen[start_dats[i]+j], score);
+                    println!("DFD");
+                    assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
+
+                } else {
+                    println!("{} out {} blocks. {} out of {} points in block. Generated {}, predicted 0!", i, block_n, j, start_dats[i], wave_gen[start_dats[i]+j]);
+                    assert!(wave_gen[start_dats[i]+j].abs() < 1e-6);
+                }
+
+
+            }
+        }
+
+
+
     }
 }

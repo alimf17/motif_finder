@@ -13,7 +13,6 @@ pub mod wave{
 
 
     const WIDE: f64 = 3.0;
-    const THRESH: f64 = 1e-4; //Going off of binding score now, not peak height, so it's lower
 
     #[derive(Clone)]
     pub struct Kernel{
@@ -182,7 +181,7 @@ pub mod wave{
 
             //Given how we construct kernels, this will never need to be rounded
             let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
-            let cc = (place_bp) % (self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
+            let cc = (place_bp).rem_euclid(self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
            
             let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
 
@@ -209,11 +208,11 @@ pub mod wave{
             let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
 
             if kern_values.len() > 0 {
+                println!("{} {} {} {} {} peak",min_data+zerdat, nex_data+zerdat, kern_values.len(), kern_change.len(), w);
                 for i in 0..kern_change.len(){
-                    //println!("{} {} {} {} {} {} peak", i, min_data, nex_data, kern_values.len(), kern_change.len(), w);
                     kern_change[i] += kern_values[i];
                 }
-            }
+            } 
             
            
 
@@ -276,6 +275,10 @@ pub mod wave{
 
         pub fn spacer(&self) -> usize {
             self.spacer
+        }
+
+        pub fn read_wave(&self) -> &Vec<f64> {
+            &self.wave
         }
 
         pub fn raw_wave(&self) -> Vec<f64> {
