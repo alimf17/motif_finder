@@ -2,7 +2,7 @@
     use rand::Rng;
     use rand::seq::SliceRandom;
     use rand::distributions::{Distribution, Uniform};
-    use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
+    use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
     use crate::waveform::wave::{Kernel, Waveform};
     use crate::sequence::seq::{Sequence, BP_PER_U8};
@@ -41,6 +41,8 @@
     static DGIBBS_CUTOFF: Lazy<f64> = Lazy::new(|| -RT*THRESH.ln());
     static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
     static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| (CONVERSION_MARGIN/RT).exp());
+
+    static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
     //BEGIN BASE
 
@@ -141,21 +143,39 @@
 
  
         //TODO: Change this to sample a "dirichlet" distribution, but normalized to the maximum
-        //      This is done by sampling exp(1) distributions and normalizing by max
+        //      This is done by sampling exp(1) distributions and normalizing by the maximum
+        //      Sampling directly from the Dirichlet implementation in statrs was a pain with our constraints
         pub fn rand_new() -> Base {
 
             let mut rng = rand::thread_rng();
-            let die = Uniform::from(*PROP_CUTOFF..*PROP_UPPER_CUTOFF);
+            //let die = Uniform::from(*PROP_CUTOFF..*PROP_UPPER_CUTOFF);
 
-            let mut res : [f64; BASE_L] = [0.0, 0.0, 0.0, 1.0];
+            let mut att: [f64; BASE_L] = [0.0; BASE_L];
 
-            for i in 0..(res.len()-1) {
-                res[i] = die.sample(&mut rng);
+            for i in 0..att.len() {
+                att[i] = (*BASE_DIST).sample(&mut rng);
             }
 
-            res.shuffle(&mut rng); //This is guarenteed to return a vector of positive floats with the proper base requirements 
+            let att_sum: f64 = att.iter().sum();
 
-            unsafe {Base::proper_new(res) }
+            //The code from here until the unsafe line is us ABSOLUTELY GUARENTEEING that we fulfill the safety requirements of proper_new
+            let max: f64 = Self::max(&att);
+
+            let mut maxes = att.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>();
+
+            let max_ind: usize = *maxes.choose(&mut rng).unwrap();
+
+
+            
+            for i in 0..att.len() {
+                if i == max_ind {
+                    att[i] = 1.0;
+                } else {
+                    att[i] =  (att[i]/att_sum)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF;
+                }
+            }
+
+            unsafe {Base::proper_new(att) }
         }
 
         pub fn from_bp(best: usize) -> Base {
@@ -468,9 +488,7 @@
 
         pub fn pwm_prior(&self) -> f64 {
 
-            //TODO: Insert check for possibility of PWM if I can't guarentee it
-            //ALSO TODO: Try to guarentee possibility of PWM
-
+            //TODO: recalculate this prior to account for the odd scaling I use
             if self.poss {-(self.pwm.len() as f64)*gamma::ln_gamma(BASE_L as f64)} else {-f64::INFINITY}
         }
 
