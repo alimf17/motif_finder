@@ -312,6 +312,7 @@ dependencies = [
  "fastrand",
  "itertools",
  "log",
+ "once_cell",
  "rand",
  "statrs",
 ]

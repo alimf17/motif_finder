@@ -1,4 +1,4 @@
-pub mod bases {
+//pub mod bases {
     use rand::Rng;
     use rand::seq::SliceRandom;
     use rand::distributions::{Distribution, Uniform};
@@ -10,11 +10,13 @@ pub mod bases {
     use statrs::{consts, Result, StatsError};
     use std::f64;
     use std::fmt;
-    use std::collections::VecDeque;
+    use std::collections::{VecDeque, HashMap};
+
+    use once_cell::sync::Lazy;
 
     pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
     pub const BASE_L: usize = BPS.len();
-    const RT: f64 =  8.31446261815324*298./4184.; //in kcal/(K*mol)
+    const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
     const CLOSE: f64 = 1e-5;
 
@@ -23,7 +25,7 @@ pub mod bases {
 
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
-    const LOG_HEIGHT_MEAN: f64 = 2.30258509299; //This is ~ln(10). Can't use ln in a constant
+    const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
     const LOG_HEIGHT_SD: f64 = 0.25;
 
     const PROB_POS_PEAK: f64 = 0.9;
@@ -36,8 +38,9 @@ pub mod bases {
     //These numbers were empirically determined, not theoretically. 
     const CONVERSION_MARGIN: f64 = 1e-6;
     const REFLECTOR: f64 = 15.0;
-    const DGIBBS_CUTOFF: f64 = 4.0;
-
+    static DGIBBS_CUTOFF: Lazy<f64> = Lazy::new(|| -RT*THRESH.ln());
+    static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
+    static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| (CONVERSION_MARGIN/RT).exp());
 
     //BEGIN BASE
 
@@ -78,6 +81,7 @@ pub mod bases {
 
     impl Base {
 
+        //Note: This will break if all the bindings are zeros
         pub fn new(props: [ f64; 4]) -> Base {
 
             let mut props = props;
@@ -95,7 +99,27 @@ pub mod bases {
             let max = Self::max(&props);
             
             props = props.iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
-            
+
+            let mut rng = rand::thread_rng();
+            //We can rely on perfect float equality because max copies its result
+            let mut maxes = props.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>(); 
+            let mut one_max = (maxes.len() == 1);
+           
+
+            //We just want to decrement the maximum slightly
+            //Our implementation breaks if there are two best bases
+            while !one_max {
+                let ind: usize = *maxes.choose(&mut rng).unwrap();
+                props[ind] = *PROP_UPPER_CUTOFF;
+                maxes = props.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>();
+                one_max = (maxes.len() == 1);
+            }
+
+           
+            for i in 0..props.len() {
+                if props[i] < *PROP_CUTOFF {props[i] = *PROP_CUTOFF }
+            }
+
             if any_neg{ //|| ((norm - 1.0).abs() > 1e-12) {
                panic!("All is positive: {}. Norm is .", !any_neg)
             }
@@ -103,31 +127,35 @@ pub mod bases {
             Base { props }
         }
 
+
+        //Safety: props must be an array with 
+        //      1) exactly one element = 1.0
+        //      2) all other elements between *PROP_CUTOFF and *PROP_UPPER_CUTOFF
+        //Otherwise, this WILL break. HARD. And in ways I can't determine
+        pub unsafe fn proper_new(props: [ f64; 4]) -> Base {
+            Base { props }
+        }
+
+
+
+
+ 
+        //TODO: Change this to sample a "dirichlet" distribution, but normalized to the maximum
+        //      This is done by sampling exp(1) distributions and normalizing by max
         pub fn rand_new() -> Base {
 
             let mut rng = rand::thread_rng();
-            let die = Uniform::from(0.0..1.0);
+            let die = Uniform::from(*PROP_CUTOFF..*PROP_UPPER_CUTOFF);
 
-            let mut samps : [ f64; BASE_L+1] = [0.0, 0.0, 0.0, 0.0,1.0];
+            let mut res : [f64; BASE_L] = [0.0, 0.0, 0.0, 1.0];
 
-            for i in 1..(samps.len()-1) {
-                samps[i] = die.sample(&mut rng);
+            for i in 0..(res.len()-1) {
+                res[i] = die.sample(&mut rng);
             }
 
-            samps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            res.shuffle(&mut rng); //This is guarenteed to return a vector of positive floats with the proper base requirements 
 
-            let mut res : [f64; BASE_L] = [0.0, 0.0, 0.0, 0.0];
-
-            for i in 0..res.len() {
-                res[i] = samps[i+1]-samps[i];
-            }
-
-            let max = Self::max(&res);
-            
-            res = res.iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
-
-
-            Base::new(res)
+            unsafe {Base::proper_new(res) }
         }
 
         pub fn from_bp(best: usize) -> Base {
@@ -196,7 +224,7 @@ pub mod bases {
                 }
             }
 
-            let prelim_dg = dgs.iter().map(|&a| (a-CONVERSION_MARGIN)/(DGIBBS_CUTOFF-CONVERSION_MARGIN)).collect::<Vec<f64>>();
+            let prelim_dg = dgs.iter().map(|&a| (a-CONVERSION_MARGIN)/(*DGIBBS_CUTOFF-CONVERSION_MARGIN)).collect::<Vec<f64>>();
 
             dgs = prelim_dg.iter().map(|a| (a/(1.0-a)).ln()).collect::<Vec<f64>>().try_into().unwrap();
                                                
@@ -261,7 +289,7 @@ pub mod bases {
 
  
 
-            let mut prop_pre = self.dgs.iter().map(|&a| CONVERSION_MARGIN+((DGIBBS_CUTOFF-CONVERSION_MARGIN)/(1.0+((-a).exp())))).collect::<Vec<f64>>();
+            let mut prop_pre = self.dgs.iter().map(|&a| CONVERSION_MARGIN+((*DGIBBS_CUTOFF-CONVERSION_MARGIN)/(1.0+((-a).exp())))).collect::<Vec<f64>>();
 
             let mut props = [0.0_f64 ; BASE_L];
 
@@ -634,6 +662,8 @@ pub mod bases {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
 
+            //let base_kernel = &self.kernel*(1.0/self.peak_height);
+            //let mut actual_kernel: Kernel = &base_kernel*1.0;
             let mut actual_kernel: Kernel = &self.kernel*1.0;
 
             let starts = self.seq.block_u8_starts();
@@ -645,6 +675,7 @@ pub mod bases {
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..lens[i] {
                     if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
+                        //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                         actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                     }
@@ -678,6 +709,64 @@ pub mod bases {
             }
 
             occupancy_trace
+
+        }
+
+        //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
+        //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
+        unsafe fn no_height_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
+
+            let base_kernel = &self.kernel*(1.0/self.peak_height);
+            let mut actual_kernel: Kernel = &base_kernel*1.0;
+            //let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = self.seq.block_u8_starts();
+
+            let lens = self.seq.block_lens();
+
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..lens[i] {
+                    if  (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
+                        //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
+                        actual_kernel = &base_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
+                        unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
+                    }
+                }
+            }
+
+            occupancy_trace
+
+
+
+        }
+        //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
+        //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
+        unsafe fn only_pos_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
+
+            let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = self.seq.block_u8_starts();
+
+            let lens = self.seq.block_lens();
+
+            let checked = self.base_check(&binds.1, bp, motif_pos);
+
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..lens[i] {
+                    if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
+                        actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]);
+                        unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
+                    }
+                }
+            }
+
+            occupancy_trace
+
+
 
         }
    
@@ -716,9 +805,13 @@ pub mod bases {
     }
 
 
-    pub struct Hmc_Motif<'a> {
+    //We made this private for a reason
+    struct Hmc_Motif<'a> {
     
-        tr_motif: Vec<f64>,
+        moveable_height: f64,
+        moveable_motif: Vec<f64>,
+        positions: Vec<usize>,
+        bp_inds: Vec<usize>,
         pos_height: bool,
         best_motif: Vec<usize>,
         kernel: Kernel,
@@ -737,12 +830,30 @@ pub mod bases {
             let poss = mot.poss();
             let seq = mot.seq();
 
-            let mut tr_motif: Vec<f64> = vec![mot.peak_height().abs()];
+            let pre_height: f64 = (mot.peak_height().abs()-MIN_HEIGHT)/(MAX_HEIGHT-MIN_HEIGHT);
+            let moveable_height: f64 = (pre_height/(1.0-pre_height)).ln();
 
-            tr_motif.extend(mot.pwm().iter().map(|a| a.to_gbase().deltas()).flatten().collect::<Vec<f64>>());
+
+            let moveable_motif = mot.pwm().iter().map(|a| a.to_gbase().deltas()).flatten().collect::<Vec<f64>>();
+
+            let positions: Vec<usize> = (0..mot.len()).flat_map(|n| std::iter::repeat(n).take(BASE_L-1)).collect();
+
+            let base_vec: Vec<usize> = (0..BASE_L).collect();
+
+            let mut fake_rem: Vec<usize> = (0..(BASE_L-1)).collect();
+
+            let bp_inds: Vec<usize> = best_motif.iter().flat_map(|n| { fake_rem = base_vec.clone();
+                                                                     fake_rem.remove(*n);
+                                                                     fake_rem.clone()} )
+                                                       .collect();
+
 
             Hmc_Motif {
-                tr_motif: tr_motif,
+
+                moveable_height: moveable_height,
+                moveable_motif: moveable_motif,
+                positions: positions,
+                bp_inds: bp_inds,
                 pos_height: pos_height, 
                 best_motif: best_motif,
                 kernel: kernel,
@@ -751,9 +862,6 @@ pub mod bases {
             }
         }
 
-        fn gradient_compatible(original: Vec<f64>, ) {
-
-        }
 
 
 
@@ -871,16 +979,17 @@ pub mod bases {
 
 
 
-}
+//}
 
 #[cfg(test)]
 mod tester{
 
     use std::time::{Duration, Instant};
-    use crate::base::bases::Base;
+    /*use crate::base::bases::Base;
     use crate::base::bases::GBase;
     use crate::base::bases::TruncatedLogNormal;
-    use crate::base::bases::{Motif, THRESH};
+    use crate::base::bases::{Motif, THRESH};*/
+    use super::*;
     use crate::sequence::seq::{Sequence, BP_PER_U8};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max};
@@ -915,7 +1024,9 @@ mod tester{
         assert!(!(tc == try_base));
         assert!(b == b.clone());
 
-       assert!(b == b.to_gbase().to_base());
+      
+        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(&b.to_gbase().to_base()));
+        assert!(b == b.to_gbase().to_base());
 
 
         //let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
@@ -1150,13 +1261,17 @@ mod tester{
 
 
         let wave_main = motif.generate_waveform(&wave);
+        let start0 = Instant::now();
         let wave_noh = motif.no_height_waveform(&wave);
+        let duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let wave_sho: Vec<f64> = wave_noh.raw_wave();
 
         let checked = motif.base_check(&binds.1, 3, 6);
 
+        let start = Instant::now();
         let wave_filter = motif.only_pos_waveform(3, 6, &wave);
+        let duration = start.elapsed();
 
         let raw_filter: Vec<f64> = wave_filter.raw_wave();
 
@@ -1173,6 +1288,27 @@ mod tester{
 
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
+        let start2 = Instant::now();
+        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, 3, 6, &wave)};
+        let duration2 = start2.elapsed();
+
+        let start3 = Instant::now();
+        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, 3, 6, &wave)};
+        let duration3 = start3.elapsed();
+
+        let unsafe_sho = just_divide.raw_wave();
+
+        println!("Time in raw filter {:?}. Time in unsafe filter {:?}. Time spent in safe divide: {:?}. Time spent in divide {:?}", duration, duration2, duration0, duration3);
+        let unsafe_raw_filter = unsafe_filter.raw_wave();
+
+        assert!(unsafe_raw_filter.len() == raw_filter.len());
+        assert!((unsafe_raw_filter.iter().zip(&raw_filter).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
+
+        assert!(unsafe_sho.len() == wave_sho.len());
+        assert!((unsafe_sho.iter().zip(&wave_sho).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
+        
+        println!("unsafe filter same as filter when properly made");
+                
         //println!("filts {:?}", checked.iter().enumerate().filter(|(_, &b)| b).map(|(a, _)| a).collect::<Vec<_>>());
         for i in 0..block_n {
             for j in 0..point_lens[i] {

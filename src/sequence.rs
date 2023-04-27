@@ -4,7 +4,7 @@ pub mod seq {
     use std::collections::HashMap;
     use itertools::{all, Itertools};
 
-    use crate::base::bases::{BASE_L, MAX_BASE}; //I don't want to get caught in a loop of use statements
+    use crate::base::{BASE_L, MAX_BASE}; //I don't want to get caught in a loop of use statements
     
     //const PLACE_VALS: [u8; 4] = [64, 16, 4, 1];
     pub const BP_PER_U8: usize = 8*2/BASE_L; //Number of bits per u8*2/number of bases to disambuguate

@@ -3,10 +3,11 @@ mod base;
 mod sequence;
 mod waveform;
 
-use crate::base::bases::Base;
+/*use crate::base::bases::Base;
 use crate::base::bases::GBase;
 use crate::base::bases::TruncatedLogNormal;
-use crate::base::bases::Motif;
+use crate::base::bases::Motif;*/
+use crate::base::*;
 use crate::sequence::seq::Sequence;
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
 use statrs::statistics::{Min, Max};
