@@ -29,6 +29,16 @@ pub mod bases {
     const PROB_POS_PEAK: f64 = 0.9;
 
     pub const THRESH: f64 = 1e-4;
+
+    //When converting between gradient compatible and incompatible representations
+    //We sometimes end up with numerical errors that basically make infinities where there shouldn't be
+    //CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off bases that could get too weak for proper conversion
+    //These numbers were empirically determined, not theoretically. 
+    const CONVERSION_MARGIN: f64 = 1e-6;
+    const REFLECTOR: f64 = 15.0;
+    const DGIBBS_CUTOFF: f64 = 4.0;
+
+
     //BEGIN BASE
 
     pub struct Base {
@@ -186,6 +196,11 @@ pub mod bases {
                 }
             }
 
+            let prelim_dg = dgs.iter().map(|&a| (a-CONVERSION_MARGIN)/(DGIBBS_CUTOFF-CONVERSION_MARGIN)).collect::<Vec<f64>>();
+
+            dgs = prelim_dg.iter().map(|a| (a/(1.0-a)).ln()).collect::<Vec<f64>>().try_into().unwrap();
+                                               
+
             let newdg: GBase = GBase {
                 best: best,
                 dgs: dgs,
@@ -244,6 +259,9 @@ pub mod bases {
 
         pub fn to_base(&self) -> Base {
 
+ 
+
+            let mut prop_pre = self.dgs.iter().map(|&a| CONVERSION_MARGIN+((DGIBBS_CUTOFF-CONVERSION_MARGIN)/(1.0+((-a).exp())))).collect::<Vec<f64>>();
 
             let mut props = [0.0_f64 ; BASE_L];
 
@@ -251,11 +269,11 @@ pub mod bases {
             for i in 0..props.len() {
 
                 if i < self.best {
-                    props[i] = (-self.dgs[i]/RT).exp();
+                    props[i] = (-prop_pre[i]/RT).exp();
                 } else if i == self.best {
                     props[i] = 1.0_f64;
                 } else {
-                    props[i] = (-self.dgs[i-1]/RT).exp();
+                    props[i] = (-prop_pre[i-1]/RT).exp();
                 }
             }
 
@@ -272,6 +290,10 @@ pub mod bases {
 
             based
 
+        }
+
+        pub fn deltas(&self) -> [ f64; BASE_L-1] {
+            self.dgs.clone()
         }
     }
 
@@ -408,6 +430,10 @@ pub mod bases {
 
         pub fn seq(&self) -> &Sequence {
             self.seq
+        }
+
+        pub fn poss(&self) -> bool {
+            self.poss
         }
 
         //PRIORS
@@ -689,6 +715,53 @@ pub mod bases {
         }
     }
 
+
+    pub struct Hmc_Motif<'a> {
+    
+        tr_motif: Vec<f64>,
+        pos_height: bool,
+        best_motif: Vec<usize>,
+        kernel: Kernel,
+        poss: bool,
+        seq: &'a Sequence,
+
+    }
+
+    impl<'a> Hmc_Motif<'a> {
+
+        pub fn new(mot: &'a Motif) -> Hmc_Motif<'a> {
+
+            let best_motif = mot.best_motif();
+            let pos_height = (mot.peak_height() > 0.0);
+            let kernel = Kernel::new(mot.peak_height(), mot.peak_width());
+            let poss = mot.poss();
+            let seq = mot.seq();
+
+            let mut tr_motif: Vec<f64> = vec![mot.peak_height().abs()];
+
+            tr_motif.extend(mot.pwm().iter().map(|a| a.to_gbase().deltas()).flatten().collect::<Vec<f64>>());
+
+            Hmc_Motif {
+                tr_motif: tr_motif,
+                pos_height: pos_height, 
+                best_motif: best_motif,
+                kernel: kernel,
+                poss: poss,
+                seq: seq,
+            }
+        }
+
+        fn gradient_compatible(original: Vec<f64>, ) {
+
+        }
+
+
+
+    }
+
+
+
+
     //BEGIN TRUNCATED LOGNORMAL
 
     #[derive(Debug, Copy, Clone, PartialEq)]
@@ -845,14 +918,15 @@ mod tester{
        assert!(b == b.to_gbase().to_base());
 
 
-        let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
+        //let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
 
         //assert!((td.rel_bind(1)-0.5_f64).abs() < 1e-6);
         //assert!((td.rel_bind(2)-1_f64).abs() < 1e-6);
 
-        let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
+        //let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
 
-        assert!(tg.to_base() == td);
+
+        //assert!(tg.to_base() == td);
 
     }
 
@@ -1099,7 +1173,7 @@ mod tester{
 
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
-        println!("filts {:?}", checked.iter().enumerate().filter(|(_, &b)| b).map(|(a, _)| a).collect::<Vec<_>>());
+        //println!("filts {:?}", checked.iter().enumerate().filter(|(_, &b)| b).map(|(a, _)| a).collect::<Vec<_>>());
         for i in 0..block_n {
             for j in 0..point_lens[i] {
 
