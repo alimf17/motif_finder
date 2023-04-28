@@ -1008,7 +1008,7 @@ mod tester{
     use crate::base::bases::TruncatedLogNormal;
     use crate::base::bases::{Motif, THRESH};*/
     use super::*;
-    use crate::sequence::seq::{Sequence, BP_PER_U8};
+    use crate::sequence::{Sequence, BP_PER_U8};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max};
     use statrs::function::gamma;

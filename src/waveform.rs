@@ -517,7 +517,7 @@ mod tests{
     use crate::waveform::wave::Kernel;
     use crate::waveform::wave::Waveform;
     use crate::waveform::wave::Noise;
-    use crate::sequence::seq::Sequence;
+    use crate::sequence::Sequence;
 
     use statrs::distribution::ContinuousCDF;
 
