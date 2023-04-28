@@ -40,7 +40,7 @@
     const REFLECTOR: f64 = 15.0;
     static DGIBBS_CUTOFF: Lazy<f64> = Lazy::new(|| -RT*THRESH.ln());
     static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
-    static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| (CONVERSION_MARGIN/RT).exp());
+    static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| (-CONVERSION_MARGIN/RT).exp());
 
     static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
