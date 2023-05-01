@@ -8,7 +8,7 @@ use crate::base::bases::GBase;
 use crate::base::bases::TruncatedLogNormal;
 use crate::base::bases::Motif;*/
 use crate::base::*;
-use crate::sequence::seq::Sequence;
+use crate::sequence::Sequence;
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
 use statrs::statistics::{Min, Max};
 use statrs::function::gamma;

@@ -7,7 +7,7 @@ pub mod wave{
     use std::cmp::min;
     use core::f64::consts::PI;
 
-    use crate::sequence::seq::Sequence;
+    use crate::sequence::Sequence;
     use statrs::distribution::StudentsT;
     use statrs::distribution::{Continuous, ContinuousCDF};
 
