@@ -442,7 +442,7 @@
 
             let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
-            let mot = (seq.generate_kmers(num_bases).choose(&mut rng)).unwrap().clone();
+            let mot = seq.random_valid_motif(num_bases);
 
             unsafe {
                 Self::from_clean_motif(mot, peak_width, &seq)

@@ -37,7 +37,7 @@ pub struct Sequence {
               will likely want to run on a 64 bit system, for hardware limitation
               reasons. If you manage to reach those limitations on a 64 bit system, 
               why on EARTH are you shoving in tens of millions of 
-              Paris Japonica genome equivalents into this????
+              Paris japonica genome equivalents into this????
 */
 impl Sequence {
     
@@ -228,13 +228,6 @@ impl Sequence {
         self.kmer_nums[&k]
     }
 
-    fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
-
-        let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (BITS_PER_BP.pow(a as u32)) as u64).collect();
-
-        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()
-
-    }
 
 
     pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
@@ -254,6 +247,34 @@ impl Sequence {
             V[i] = (U8_BITMASK & reference) as usize;
             reference = reference >> 2; 
 
+        }
+
+        V
+
+    }
+    
+    fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
+
+        let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (2u64.pow((a*BITS_PER_BP) as u32)) as u64).collect();
+
+        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()
+
+    }
+
+
+    //Safety: This has no way to know whether you have the right kmer length.
+    //        Ensure you match the correct kmer length to this u64 or it will
+    //        silently give you an incorrect result.
+    unsafe fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
+
+        let mut V: Vec<usize> = vec![0; len];
+
+        let mut reference: u64 = coded_kmer;
+
+        for i in 0..len {
+
+            V[i] = (U64_BITMASK & reference) as usize;
+            reference = reference >> 2;
         }
 
         V
@@ -301,7 +322,7 @@ impl Sequence {
         let unique_kmer_ptr = self.kmer_dict[&kmer.len()].as_ptr();
 
         let mut lowbound: isize = 0;
-        let mut upbound: isize = self.kmer_dict[&kmer.len()].len() as isize;
+        let mut upbound: isize = self.kmer_nums[&kmer.len()] as isize;
         let mut midcheck: isize = (upbound+lowbound)/2;
 
         let mut found = false;
@@ -347,7 +368,29 @@ impl Sequence {
 
     }
 
+    //This gives the id of the kmers in the HashMap vector that are under the hamming distance threshold
+    pub fn all_kmers_within_hamming(&self, kmer: &Vec<usize>, threshold: usize) -> Vec<usize> {
 
+        let u64_kmer: u64 = Self::kmer_to_u64(kmer);
+
+        let len: usize = kmer.len();
+
+        self.kmer_dict[&len].iter().enumerate()
+                           .filter(|(_, &b)| Self::u64_kmers_within_hamming(u64_kmer, b, threshold))
+                           .map(|(a, _)| a).collect::<Vec<usize>>()                    
+
+    }
+
+
+    pub fn random_valid_motif(&self, len: usize) -> Vec<usize>{
+
+        let mut rng = rand::thread_rng();
+
+        let mot_id: usize = rng.gen_range(0..(self.kmer_nums[&len]));
+
+        unsafe {Self::u64_to_kmer(self.kmer_dict[&len][mot_id], len)}
+
+    }
 
 }
 
@@ -396,9 +439,13 @@ mod tests {
 
         assert!(atemers.len() == 1);
 
-        let sup2 = [2,2,2,2,2,2,2,2];
+        let sup2 = Sequence::kmer_to_u64(&vec![2,2,2,2,2,2,2,2]);
 
-        assert!(atemers[0].iter().zip(sup2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+        assert!(atemers[0] == sup2);
+        println!("sup2 {:?}", atemers);
+        assert!(atemers[0] == 43690u64);
+
+        assert!(atemers[0] == unsafe{Sequence::kmer_to_u64(&Sequence::u64_to_kmer(atemers[0], 8))});
 
 
     }
