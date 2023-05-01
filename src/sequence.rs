@@ -321,22 +321,51 @@ impl Sequence {
 
         let unique_kmer_ptr = self.kmer_dict[&kmer.len()].as_ptr();
 
-        let mut lowbound: isize = 0;
-        let mut upbound: isize = self.kmer_nums[&kmer.len()] as isize;
-        let mut midcheck: isize = (upbound+lowbound)/2;
-
         let mut found = false;
+       
+        let mut lowbound: isize = 0;
+        let mut upbound: isize = (self.kmer_nums[&kmer.len()]-1) as isize;
+        let mut midcheck: isize = (upbound+lowbound)/2;
         
+
         unsafe {
 
-            found = found || (*unique_kmer_ptr.offset(lowbound) == look_for);
-            found = found || (*unique_kmer_ptr.offset(upbound) == look_for);
+            found = found || (unique_kmer_ptr.offset(lowbound) == &look_for);
+            found = found || (unique_kmer_ptr.offset(upbound) == &look_for);
 
             let mut terminate = found; 
             while !terminate {
-                found =  (*unique_kmer_ptr.offset(midcheck) == look_for);
+                found =  (unique_kmer_ptr.offset(midcheck) == &look_for);
                 if !found {
-                    if(*unique_kmer_ptr.offset(midcheck) > look_for) {
+                    if(unique_kmer_ptr.offset(midcheck) > &look_for) {
+                        upbound = midcheck-1;
+                    } else {
+                        lowbound = midcheck+1;
+                    }
+                    midcheck = (upbound+lowbound)/2;
+                    terminate = (upbound < lowbound);
+
+                } else {
+                    terminate = true;
+                }
+            }
+        
+        } 
+       
+       /* 
+        let mut lowbound: usize = 0;
+        let mut upbound: usize = self.kmer_nums[&kmer.len()] as usize;
+        let mut midcheck: usize = (upbound+lowbound)/2;
+
+        unsafe{
+            found = found || (*self.kmer_dict[&kmer.len()].get_unchecked(lowbound) == look_for);
+            found = found || (*self.kmer_dict[&kmer.len()].get_unchecked(upbound-1) == look_for);
+
+            let mut terminate = found;
+            while !terminate {
+                found =  (*self.kmer_dict[&kmer.len()].get_unchecked(midcheck) == look_for);
+                if !found {
+                    if(*self.kmer_dict[&kmer.len()].get_unchecked(midcheck) > look_for) {
                         upbound = midcheck;
                     } else {
                         lowbound = midcheck;
@@ -348,8 +377,9 @@ impl Sequence {
                     terminate = true;
                 }
             }
-        
         }
+        */
+
         found
     }
 
@@ -456,7 +486,7 @@ mod tests {
         let mut rng = fastrand::Rng::new();
 
         let block_n: usize = 300;
-        let u8_per_block: usize = 250;
+        let u8_per_block: usize = 2500;
         let bp_per_block: usize = u8_per_block*BP_PER_U8;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -476,7 +506,7 @@ mod tests {
 
         let in_it = sequence.kmer_in_seq(vec![1usize;20]);
 
-        let duration = start_gen.elapsed();
+        let duration = start.elapsed();
         println!("Done search {} bp {:?}", bp, duration);
     }
 
