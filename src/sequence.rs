@@ -6,12 +6,13 @@ use rand::Rng;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a loop of use statements
 
-//const PLACE_VALS: [u8; 4] = [64, 16, 4, 1];
-pub const BP_PER_U8: usize = 8*2/BASE_L; //Number of bits per u8*2/number of bases to disambuguate
+const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole 
+pub const BP_PER_U8: usize = 8/BITS_PER_BP; 
 const PLACE_VALS: [u8; BP_PER_U8] = [1, 4, 16, 64]; //NOTICE: this only works when BASE_L == 4. 
                                             //Because a u8 contains 8 bits of information (duh)
                                             //And it requires exactly two bits disabmiguate 4 things. 
-
+const U8_BITMASK: u8 = 3u8; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
+const U64_BITMASK: u64 = 3u64;
 
 //I promise you, you only every want to use the constructors we have provided you
 //You do NOT want to try to initialize this manually. 
@@ -27,10 +28,17 @@ pub struct Sequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
-    kmer_dict: HashMap<usize, Vec<usize>>,
+    kmer_dict: HashMap<usize, Vec<u64>>,
     kmer_nums: HashMap<usize, usize>
 }
 
+
+/*Minor note: if your blocks total more bases than about 2 billion, you
+              will likely want to run on a 64 bit system, for hardware limitation
+              reasons. If you manage to reach those limitations on a 64 bit system, 
+              why on EARTH are you shoving in tens of millions of 
+              Paris Japonica genome equivalents into this????
+*/
 impl Sequence {
     
     pub fn new(blocks: &Vec<Vec<usize>>) -> Sequence {
@@ -84,13 +92,16 @@ impl Sequence {
 
         }
 
+        let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
+        let orig_nums: HashMap<usize, usize> = HashMap::new();
+
         let mut seq = Sequence{
                     seq_blocks: seq_bls,
                     block_u8_starts: block_is,
                     block_lens: block_ls,
                     max_len: max_len,
-                    kmer_dict: HashMap<usize, Vec<usize>>::new(),
-                    kmer_nums: HashMap<usize, usize>::new(),
+                    kmer_dict: orig_dict, 
+                    kmer_nums: orig_nums,
                     };
 
         seq.initialize_kmer_dicts();
@@ -117,14 +128,16 @@ impl Sequence {
         }
 
         let max_len: usize = *block_lens.iter().max().unwrap();
+        let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
+        let orig_nums: HashMap<usize, usize> = HashMap::new();
 
         let mut seq = Sequence{
                     seq_blocks: seq_blocks,
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
                     max_len: max_len,
-                    kmer_dict: HashMap<usize, Vec<usize>>::new(),
-                    kmer_nums: HashMap<usize, usize>::new(),
+                    kmer_dict: orig_dict, 
+                    kmer_nums: orig_nums,
         };
 
         seq.initialize_kmer_dicts();
@@ -134,38 +147,38 @@ impl Sequence {
 
     fn initialize_kmer_dicts(&mut self) {
 
-        let mut kmer_dict: HashMap<usize, Vec<usize>> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
+        let mut kmer_dict: HashMap<usize, Vec<u64>> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
 
-        let mut kmer_amount: HashMap<usize, usize> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
+        let mut kmer_nums: HashMap<usize, usize> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
 
-        for k in (MIN_BASE..MAX_BASE+1) as usize {
+        for k in (MIN_BASE..MAX_BASE+1) {
 
             let kmer_arr = self.generate_kmers(k);
-            kmer_amount.insert(k, kmer_arr.len()/k);
+            kmer_nums.insert(k, kmer_arr.len()/k);
             kmer_dict.insert(k, kmer_arr);
         }
 
         self.kmer_dict = kmer_dict;
-        self.kmer_amount = kmer_amount;
+        self.kmer_nums = kmer_nums;
 
     }
     
     //NOTE: Pretty much any time anybody can access this array without automatically using the 
     //      the correct len should be immediately considered unsafe, especially because it 
     //      it will NOT fail: it will just give the wrong answer SILENTLY.
-    fn generate_kmers(&self, len: usize) -> Vec<usize> {
+    pub fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
         
-        let max_possible_lenmers:usize = (4_usize.pow(len)).min(self.block_lens.iter().sum()-self.block_lens.len()*len);
+        let max_possible_lenmers:usize = (4_usize.pow(len as u32)).min(self.block_lens.iter().sum::<usize>()-self.block_lens.len()*len);
 
-        let mut unel: Vec<Vec<usize>> = Vec::with_capacity(max_possible_Lmers);
-
+        let mut unel: Vec<u64> = Vec::with_capacity(max_possible_lenmers);
+        
         for i in 0..self.block_lens.len() {
             
             if self.block_lens[i] >= len {
                
                 for j in 0..(self.block_lens[i]-len+1){
-                    unel.push(self.return_bases(i, j, len));
+                    unel.push(Self::kmer_to_u64(&self.return_bases(i, j, len)));
                 }
 
             }
@@ -173,10 +186,12 @@ impl Sequence {
         }
 
         unel = unel.into_iter().unique().collect();
+
+        unel.sort_unstable(); // we filtered uniquely, so unstable sorting doesn't matter
         
-        let unel_flat: Vec<usize> = unel.iter.flatten.collect();
-        unel_flat.shrink_to_fit();
-        unel_flat
+        unel.shrink_to_fit();
+
+        unel
       
     }
 
@@ -210,9 +225,16 @@ impl Sequence {
 
     //Contract: k is an element of [MIN_BASE, MAX_BASE]
     pub fn number_unique_kmers(&self, k: usize) -> usize {
-        self.kmer_nums[k]
+        self.kmer_nums[&k]
     }
 
+    fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
+
+        let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (BITS_PER_BP.pow(a as u32)) as u64).collect();
+
+        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()
+
+    }
 
 
     pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
@@ -229,7 +251,7 @@ impl Sequence {
 
         for i in 0..BP_PER_U8 { 
 
-            V[i] = (0b00000011 & reference) as usize;
+            V[i] = (U8_BITMASK & reference) as usize;
             reference = reference >> 2; 
 
         }
@@ -263,6 +285,7 @@ impl Sequence {
 
     }
 
+    //We exploit the ordering of the u64 versions of kmer to binary search
     pub fn kmer_in_seq(&self, kmer: Vec<usize>) -> bool {
 
         /* self.block_lens.iter().map(|b| (0..*b).map(|i| self.return_bases(*b, i, kmer.len()).iter().
@@ -273,17 +296,57 @@ impl Sequence {
         //println!("size of kmer collection {}", size_of_val(&*kmer_coll));
         //kmer_coll.contains(&kmer)
 
+        let look_for = Self::kmer_to_u64(&kmer);
 
-        let unique_kmer_ptr = self.kmer_dict[kmer.len()].as_ptr()
+        let unique_kmer_ptr = self.kmer_dict[&kmer.len()].as_ptr();
 
-        for i in 0..kmer.len() {
+        let mut lowbound: isize = 0;
+        let mut upbound: isize = self.kmer_dict[&kmer.len()].len() as isize;
+        let mut midcheck: isize = (upbound+lowbound)/2;
 
+        let mut found = false;
+        
+        unsafe {
 
+            found = found || (*unique_kmer_ptr.offset(lowbound) == look_for);
+            found = found || (*unique_kmer_ptr.offset(upbound) == look_for);
 
+            let mut terminate = found; 
+            while !terminate {
+                found =  (*unique_kmer_ptr.offset(midcheck) == look_for);
+                if !found {
+                    if(*unique_kmer_ptr.offset(midcheck) > look_for) {
+                        upbound = midcheck;
+                    } else {
+                        lowbound = midcheck;
+                    }
+                    midcheck = (upbound+lowbound)/2;
+                    terminate = (midcheck == lowbound);
+
+                } else {
+                    terminate = true;
+                }
+            }
+        
+        }
+        found
+    }
+
+    fn u64_kmers_within_hamming(kmer_a: u64, kmer_b: u64, threshold: usize) -> bool {
+
+        let mut check: u64 =  kmer_a ^ kmer_b; //^ is the XOR operator in rust
+
+        let mut hamming: usize = 0;
+        
+        while (check > 0) && (hamming <= threshold) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
+            hamming += (((check & U64_BITMASK) > 0) as usize);
+            check = check >> 2;
         }
 
+        (hamming <= threshold)
 
     }
+
 
 
 }

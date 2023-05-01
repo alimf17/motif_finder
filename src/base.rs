@@ -5,7 +5,7 @@
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
     use crate::waveform::wave::{Kernel, Waveform};
-    use crate::sequence::seq::{Sequence, BP_PER_U8};
+    use crate::sequence::{Sequence, BP_PER_U8};
     use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
     use std::f64;
@@ -21,7 +21,11 @@
     const CLOSE: f64 = 1e-5;
 
     pub const MIN_BASE: usize = 8;
-    pub const MAX_BASE: usize = 20;
+    pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit here is 32. 
+                                    //To make sure this runs before the heat death of the universe
+                                    //while also not taking more memory than every human brain combined,
+                                    //We store many kmers as u64s. If you have 20 "bases" (amino acids)
+                                    //You need to force it to be at most 12. 
 
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
