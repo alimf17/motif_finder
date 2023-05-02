@@ -493,14 +493,25 @@
         pub fn pwm_prior(&self) -> f64 {
 
             //TODO: recalculate this prior to account for the odd scaling I use
-            if self.poss {-(self.pwm.len() as f64)*gamma::ln_gamma(BASE_L as f64)} else {-f64::INFINITY}
+            if self.poss {
+                //We have to normalize by the probability that our kmer is possible
+                //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
+                //number possible kmers = BASE_L^k, but this actually cancels with our integral
+                //over the regions of possible bases, leaving only number unique kmers. 
+                let mut prior = -((self.seq.number_unique_kmers(self.len()) as f64).ln()); 
+
+                prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln();
+                
+                prior
+
+            } else {-f64::INFINITY}
         }
 
         pub fn height_prior(&self) -> f64 {
 
-            TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap().ln_pdf(self.peak_height)
-
-
+            let mut prior = if self.peak_height > 0.0 { PROB_POS_PEAK.ln() } else { (1.0-PROB_POS_PEAK).ln() };
+            prior += TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap().ln_pdf(self.peak_height.abs());
+            prior
         }
 
 
@@ -828,10 +839,11 @@
 
 
     //We made this private for a reason
+    //This should go without saying, but you REALLY don't want to touch this directly.
     struct Hmc_Motif<'a> {
     
         moveable_height: f64,
-        moveable_motif: Vec<f64>,
+        moveable_motif: Vec<GBase>,
         positions: Vec<usize>,
         bp_inds: Vec<usize>,
         pos_height: bool,
@@ -856,7 +868,7 @@
             let moveable_height: f64 = (pre_height/(1.0-pre_height)).ln();
 
 
-            let moveable_motif = mot.pwm().iter().map(|a| a.to_gbase().deltas()).flatten().collect::<Vec<f64>>();
+            let moveable_motif = mot.pwm().iter().map(|a| a.to_gbase()).collect::<Vec<_>>();
 
             let positions: Vec<usize> = (0..mot.len()).flat_map(|n| std::iter::repeat(n).take(BASE_L-1)).collect();
 
@@ -869,6 +881,7 @@
                                                                      fake_rem.clone()} )
                                                        .collect();
 
+            let bind_score = mot.return_bind_score();
 
             Hmc_Motif {
 
@@ -884,8 +897,21 @@
             }
         }
 
+        /*
+        pub fn back_to_motif(&self) -> Motif {
+
+            let mut height: f64 = 1.0/(1.0+(-self.moveable_height).exp());
+            height = (MAX_HEIGHT-MIN_HEIGHT)*height+MIN_HEIGHT;
+            if !self.pos_height() {
+                height *= (-1.0);
+            }
+            
+
+            Motif::raw_pwm(pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence)
 
 
+        }
+      */
 
     }
 
@@ -1143,7 +1169,7 @@ mod tester{
 
         assert!(random_motif.raw_kern().len() == 121);
 
-        assert!((random_motif.peak_height >= MIN_HEIGHT) && (random_motif.peak_height <= MAX_HEIGHT));
+        assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
 
         assert!(ptr::eq(&sequence, random_motif.seq()));
 
@@ -1162,11 +1188,25 @@ mod tester{
             println!("{:?}", base.show());
         }
         
-        assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
+        //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
+
+        assert!((motif.pwm_prior()+(motif.seq().number_unique_kmers(motif.len()) as f64).ln()
+                 -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln())).abs() < 1e-6);
 
         let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
 
         assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
+
+        let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+
+        let mut base_prior = motif.height_prior();
+        if motif.peak_height() > 0.0 {
+            base_prior -= PROB_POS_PEAK.ln();
+        } else {
+            base_prior -= (1.0-PROB_POS_PEAK).ln();
+        }
+
+        assert!((base_prior.exp()-dist.pdf(motif.peak_height().abs())).abs() < 1e-6);
 
 
         let best_mot = motif.best_motif();
