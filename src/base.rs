@@ -393,7 +393,7 @@
 
             let kernel = Kernel::new(peak_width, peak_height);
 
-            let poss = seq.kmer_in_seq(best_bases);
+            let poss = seq.kmer_in_seq(&best_bases);
 
             Motif {
                 peak_height: peak_height,
@@ -819,7 +819,7 @@
                     (true, true) => panic!("Something pathological is going on!"),
                     (true, false) => write!(f, "[{:.5?},\n", base),
                     (false, false) => write!(f, " {:.5?},\n", base),
-                (false, true) => write!(f, " {:.5?}]\n", base),
+                    (false, true) => write!(f, " {:.5?}]\n", base),
                 };
             }
             Ok(())
@@ -1017,6 +1017,7 @@ mod tester{
     use statrs::statistics::{Min, Max};
     use statrs::function::gamma;
     use rand::Rng;
+    use std::ptr;
     use std::collections::VecDeque;
     use crate::waveform::wave::Waveform;
     use rand::distributions::{Distribution, Uniform};
@@ -1133,6 +1134,18 @@ mod tester{
         println!("Time elapsed in generate_waveform() is: {:?}", duration);
 
         println!("{}", motif);
+
+        let random_motif = Motif::rand_mot(20., &sequence);
+
+        println!("Random motif\n{}", random_motif);
+
+        assert!(random_motif.poss() && sequence.kmer_in_seq(&random_motif.best_motif()));
+
+        assert!(random_motif.raw_kern().len() == 121);
+
+        assert!((random_motif.peak_height >= MIN_HEIGHT) && (random_motif.peak_height <= MAX_HEIGHT));
+
+        assert!(ptr::eq(&sequence, random_motif.seq()));
 
         let matrix = motif.pwm();
         let nbases = matrix.len();

@@ -228,6 +228,10 @@ impl Sequence {
         self.kmer_nums[&k]
     }
 
+    pub fn unique_kmers(&self, k: usize) -> Vec<u64> {
+
+        self.kmer_dict[&k].clone()
+    }
 
 
     pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
@@ -307,7 +311,7 @@ impl Sequence {
     }
 
     //We exploit the ordering of the u64 versions of kmer to binary search
-    pub fn kmer_in_seq(&self, kmer: Vec<usize>) -> bool {
+    pub fn kmer_in_seq(&self, kmer: &Vec<usize>) -> bool {
 
         /* self.block_lens.iter().map(|b| (0..*b).map(|i| self.return_bases(*b, i, kmer.len()).iter().
                                                   zip(&kmer).map(|(p, q)| p == q).fold(true, |r, s| r && s)).
@@ -317,7 +321,7 @@ impl Sequence {
         //println!("size of kmer collection {}", size_of_val(&*kmer_coll));
         //kmer_coll.contains(&kmer)
 
-        let look_for = Self::kmer_to_u64(&kmer);
+        let look_for = Self::kmer_to_u64(kmer);
 
         let unique_kmer_ptr = self.kmer_dict[&kmer.len()].as_ptr();
 
@@ -330,14 +334,14 @@ impl Sequence {
 
         unsafe {
 
-            found = found || (unique_kmer_ptr.offset(lowbound) == &look_for);
-            found = found || (unique_kmer_ptr.offset(upbound) == &look_for);
-
-            let mut terminate = found; 
+            found = found || (*unique_kmer_ptr.offset(lowbound) == look_for);
+            found = found || (*unique_kmer_ptr.offset(upbound) == look_for);
+            
+            let mut terminate = found && !( (*unique_kmer_ptr.offset(lowbound) > look_for) || (*unique_kmer_ptr.offset(upbound) < look_for) ); 
             while !terminate {
-                found =  (unique_kmer_ptr.offset(midcheck) == &look_for);
+                found =  (*unique_kmer_ptr.offset(midcheck) == look_for);
                 if !found {
-                    if(unique_kmer_ptr.offset(midcheck) > &look_for) {
+                    if(*unique_kmer_ptr.offset(midcheck) > look_for) {
                         upbound = midcheck-1;
                     } else {
                         lowbound = midcheck+1;
@@ -463,7 +467,7 @@ mod tests {
 
         let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
 
-        let mut press2 = Sequence::new(&alt_block);
+        let press2 = Sequence::new(&alt_block);
 
         let atemers = press2.generate_kmers(8);
 
@@ -476,6 +480,15 @@ mod tests {
         assert!(atemers[0] == 43690u64);
 
         assert!(atemers[0] == unsafe{Sequence::kmer_to_u64(&Sequence::u64_to_kmer(atemers[0], 8))});
+
+
+
+        println!("{} {} kmer test", press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]), press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
+
+        println!(" {:?}", unsafe{press2.unique_kmers(10).iter().map(|&a| Sequence::u64_to_kmer(a, 10)).collect::<Vec<_>>() });
+        println!(" {:?}", press2.unique_kmers(10));
+        assert!(press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]));
+        assert!(!press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
 
 
     }
@@ -504,7 +517,7 @@ mod tests {
         let start = Instant::now();
 
 
-        let in_it = sequence.kmer_in_seq(vec![1usize;20]);
+        let in_it = sequence.kmer_in_seq(&vec![1usize;20]);
 
         let duration = start.elapsed();
         println!("Done search {} bp {:?}", bp, duration);
