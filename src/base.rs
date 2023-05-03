@@ -4,7 +4,7 @@
     use rand::distributions::{Distribution, Uniform};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
-    use crate::waveform::wave::{Kernel, Waveform};
+    use crate::waveform::wave::{Kernel, Waveform, Noise};
     use crate::sequence::{Sequence, BP_PER_U8};
     use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
@@ -665,7 +665,7 @@
 
             let (bind_score_floats, bind_score_revs) = self.return_bind_score();
 
-            let mut count: usize = 0;
+            //let mut count: usize = 0;
 
             for i in 0..starts.len() { //Iterating over each block
                 for j in 0..(lens[i]-(self.len()-1)/2) {
@@ -674,15 +674,15 @@
                         //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                         unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
                                                                                              //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
-                                                                                             //has zeros where we can be going over the motif length
+                                                                                             //has zeros where we can be going over the motif length. With THRESH, this preserves safety
 
                         //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
-                        count+=1;
+                        //count+=1;
                     }
                 }
             }
 
-            println!("num peaks {}", count);
+            //println!("num peaks {}", count);
 
             occupancy_trace
 
@@ -744,6 +744,36 @@
 
         //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
         //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
+        unsafe fn generate_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform {
+
+            let mut occupancy_trace: Waveform = DATA.derive_zero();
+
+            let mut actual_kernel: Kernel = &self.kernel*1.0;
+
+            let starts = self.seq.block_u8_starts();
+
+            let lens = self.seq.block_lens();
+
+
+            for i in 0..starts.len() { //Iterating over each block
+                for j in 0..(lens[i]-(self.len()-1)/2) {
+                    if binds.0[starts[i]*BP_PER_U8+j] > THRESH {
+                        actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]) ;
+                        //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
+                        occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//UNSAFE //Note: this technically means that we round down if the motif length is even
+                                                                                             //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
+                                                                                             //has zeros where we can be going over the motif length. With THRESH, this preserves safety
+
+                        //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
+                    }
+                }
+            }
+
+            occupancy_trace
+
+        }
+        //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
+        //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
         unsafe fn no_height_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
@@ -800,8 +830,43 @@
 
         }
 
-        fn single_motif_grad(&'a self,  DATA: &'a Waveform) {
+        //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
+        fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise, sigma_background: f64, df: f64, ar_corrs: &'a Vec<f64>) -> (f64, Vec<f64>) {
 
+            let binds = self.return_bind_score();
+ 
+            let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
+
+            let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+
+            //End preuse generation
+            let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
+                                            .produce_noise(DATA, sigma_background, df, ar_corrs)};
+            let d_ad_like_d_grad_form_h = d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) 
+                                        * (self.peak_height().abs()-MIN_HEIGHT).powi(2)
+                                        / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT));
+          
+
+            let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
+
+            for index in 0..d_ad_like_d_grad_form_binds.len() {
+
+                let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
+                let mut bp = index % (BASE_L-1);
+                bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we just skipped it like we're supposed to
+
+                let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
+
+                d_ad_like_d_grad_form_binds[index] = unsafe {
+                      - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
+                               .produce_noise(DATA, sigma_background, df, ar_corrs))
+                      * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
+                      * prop_bp * (-RT*prop_bp.ln()-CONVERSION_MARGIN).powi(2)
+                      / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) } ;
+                
+            }
+
+            (d_ad_like_d_grad_form_h, d_ad_like_d_grad_form_binds)
 
 
         }
@@ -1160,11 +1225,25 @@ mod tester{
 
         let start = Instant::now();
 
-        let binds = motif.generate_waveform(&wave);
+        let waveform = motif.generate_waveform(&wave);
 
         let duration = start.elapsed();
 
+        let waveform_raw = waveform.raw_wave();
+
+        let binds = motif.return_bind_score();
+
+        let start_b = Instant::now();
+        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &wave) };
+        let duration_b = start_b.elapsed();
+
+        let unsafe_raw = unsafe_waveform.raw_wave();
+
+        assert!(unsafe_raw.len() == waveform_raw.len());
+        assert!((unsafe_raw.iter().zip(&waveform_raw).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
+        
         println!("Time elapsed in generate_waveform() is: {:?}", duration);
+        println!("Time elapsed in the unsafe generate_waveform() is: {:?}", duration_b);
 
         println!("{}", motif);
 

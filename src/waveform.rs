@@ -219,7 +219,7 @@ pub mod wave{
         }
 
         pub fn produce_noise(&self, data: &Waveform, sigma_background: f64, df: f64, ar_corrs: &Vec<f64>) -> Noise {
-            let residual = self-data;
+            let residual = data-self;
 
 
             let mut end_dats = residual.start_dats()[1..residual.start_dats.len()].to_vec();
@@ -577,7 +577,7 @@ mod tests{
         let noi: Vec<f64> = noise.resids();
 
 
-        let raw_resid = &signal-&base_w;
+        let raw_resid = &base_w-&signal;
 
         let w = raw_resid.raw_wave();
 
