@@ -830,6 +830,7 @@
 
         }
 
+        //TODO: 1) Time this. 2) Test the absolute crap out of this.
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
         fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise, sigma_background: f64, df: f64, ar_corrs: &'a Vec<f64>) -> (f64, Vec<f64>) {
 
