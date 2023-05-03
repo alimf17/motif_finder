@@ -488,19 +488,22 @@ pub mod wave{
 
     }
 
-    impl Mul<&Noise> for &Noise {
+    impl Mul<&Vec<f64>> for &Noise {
 
         type Output = f64;
 
-        fn mul(self, rhs: &Noise) -> f64 {
+        //fn mul(self, rhs: &Noise) -> f64 {
+        fn mul(self, rhs: &Vec<f64>) -> f64 {
 
-            let rhs_r = rhs.resids();
+            //let rhs_r = rhs.resids();
 
-            if(self.resids.len() != rhs_r.len()){
+            //if(self.resids.len() != rhs_r.len()){
+            if(self.resids.len() != rhs.len()){
                 panic!("Residuals aren't the same length?!")
             }
 
-            self.resids.iter().zip(rhs_r).map(|(a,b)| a*b).sum()
+            //self.resids.iter().zip(rhs_r).map(|(a,b)| a*b).sum()
+            self.resids.iter().zip(rhs).map(|(a,b)| a*b).sum()
         }
     }
 
@@ -624,7 +627,7 @@ mod tests{
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], 0.25, 2.64);
 
-        assert!(((&n1*&n2)+1.59).abs() < 1e-6);
+        assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
 
         println!("{:?}", n1.resids());
         println!("{:?}", n1.rank());
@@ -693,7 +696,7 @@ mod tests{
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], 0.25, 2.64);
 
-        let _ = &n1*&n2;
+        let _ = &n1*&n2.resids();
     }
 
 

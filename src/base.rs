@@ -66,24 +66,11 @@
 
     impl PartialEq for Base {
         fn eq(&self, other: &Self) -> bool {
-            self.dist(other) < CLOSE    
+            self.base_dist(Some(other)) < CLOSE    
         }
-    }
+    } 
+    
 
-
-    fn clean_props(vals: [ f64; BASE_L]) -> [f64; BASE_L] {
-
-        let mut props = vals;
-
-        let norm: f64 = props.iter().sum();
-
-        for i in 0..props.len() {
-            props[i] /= norm
-        }
-
-        props
-
-    }
 
     impl Base {
 
@@ -209,6 +196,22 @@
             Self::argmax(&self.props)
         }
 
+        pub fn base_dist(&self, base: Option<&Base>) -> f64 {
+
+            let magnitude: f64 = self.props.iter().sum();
+            let as_probs: [f64; BASE_L] = self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().unwrap();//I'm never worried about error here because all Base are guarenteed to be length BASE_L
+            println!("{:?} b1", as_probs);
+            match(base) {
+
+                None => as_probs.iter().map(|a| (a-1.0/(BASE_L as f64)).powi(2)).sum::<f64>().sqrt(),
+                Some(other) => {
+                    let magnitude: f64 = other.show().iter().sum();
+                    as_probs.iter().zip(other.show().iter()).map(|(a, &b)| (a-(b/magnitude)).powi(2)).sum::<f64>().sqrt()
+                }
+            }
+
+        }
+        
         fn max( arr: &[f64]) -> f64 {
             arr.iter().fold(f64::NAN, |x, y| x.max(*y))
         }
@@ -278,12 +281,6 @@
             prop_rep
         }
 
-        pub fn dist(&self, other: &Base) -> f64 {
-
-            let diffy: Vec<f64> = self.show().iter().zip(other.show()).map(|(&a, b)| a-b as f64).collect();
-            diffy.iter().map(|&a| a.abs() as f64).sum::<f64>()
-
-        }
 
         //bp MUST be less than the BASE_L and nonnegative, or else this will produce undefined behavior
         pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
@@ -1073,8 +1070,12 @@ mod tester{
         assert!(!(tc == try_base));
         assert!(b == b.clone());
 
+        let b_mag: f64 = b.show().iter().sum();
+        let supposed_default_dist = b.show().iter().map(|a| ((a/b_mag)-(1.0/(BASE_L as f64))).powi(2)).sum::<f64>().sqrt();
+
+        assert!(supposed_default_dist == b.base_dist(None));
       
-        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(&b.to_gbase().to_base()));
+        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.base_dist(Some(&b.to_gbase().to_base())));
         assert!(b == b.to_gbase().to_base());
 
 
