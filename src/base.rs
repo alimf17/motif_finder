@@ -66,7 +66,7 @@
 
     impl PartialEq for Base {
         fn eq(&self, other: &Self) -> bool {
-            self.base_dist(Some(other)) < CLOSE    
+            self.dist(Some(other)) < CLOSE    
         }
     } 
     
@@ -196,7 +196,7 @@
             Self::argmax(&self.props)
         }
 
-        pub fn base_dist(&self, base: Option<&Base>) -> f64 {
+        pub fn dist(&self, base: Option<&Base>) -> f64 {
 
             let magnitude: f64 = self.props.iter().sum();
             let as_probs: [f64; BASE_L] = self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().unwrap();//I'm never worried about error here because all Base are guarenteed to be length BASE_L
@@ -799,6 +799,12 @@
 
 
         }
+
+        fn single_motif_grad(&'a self,  DATA: &'a Waveform) {
+
+
+
+        }
    
         
     }
@@ -1073,9 +1079,9 @@ mod tester{
         let b_mag: f64 = b.show().iter().sum();
         let supposed_default_dist = b.show().iter().map(|a| ((a/b_mag)-(1.0/(BASE_L as f64))).powi(2)).sum::<f64>().sqrt();
 
-        assert!(supposed_default_dist == b.base_dist(None));
+        assert!(supposed_default_dist == b.dist(None));
       
-        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.base_dist(Some(&b.to_gbase().to_base())));
+        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(Some(&b.to_gbase().to_base())));
         assert!(b == b.to_gbase().to_base());
 
 
