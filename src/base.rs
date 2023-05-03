@@ -744,7 +744,7 @@
 
         //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
         //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-        unsafe fn no_height_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
+        unsafe fn no_height_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform {
 
             let mut occupancy_trace: Waveform = DATA.derive_zero();
 
@@ -1375,7 +1375,7 @@ mod tester{
         let duration2 = start2.elapsed();
 
         let start3 = Instant::now();
-        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, 3, 6, &wave)};
+        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &wave)};
         let duration3 = start3.elapsed();
 
         let unsafe_sho = just_divide.raw_wave();
