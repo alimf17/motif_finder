@@ -3,6 +3,17 @@
 version = 3
 
 [[package]]
+name = "aberth"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bb994249e774e803a8078d10a10e897c7fe463d1e15a731298fc9ef37e740fd"
+dependencies = [
+ "arrayvec",
+ "num-complex",
+ "num-traits",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10,6 +21,12 @@ checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "arrayvec"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
 name = "atty"
@@ -308,10 +325,13 @@ dependencies = [
 name = "motif_finder"
 version = "0.1.0"
 dependencies = [
+ "aberth",
  "criterion",
  "fastrand",
  "itertools",
  "log",
+ "num-complex",
+ "num-traits",
  "once_cell",
  "rand",
  "statrs",

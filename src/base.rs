@@ -4,14 +4,14 @@
     use rand::distributions::{Distribution, Uniform};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
-    use crate::waveform::wave::{Kernel, Waveform, Noise};
+    use crate::waveform::{Kernel, Waveform, Noise};
     use crate::sequence::{Sequence, BP_PER_U8};
     use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
     use std::f64;
     use std::fmt;
     use std::collections::{VecDeque, HashMap};
-
+    use std::time::{Duration, Instant};
     use once_cell::sync::Lazy;
 
     pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
@@ -832,7 +832,7 @@
 
         //TODO: 1) Time this. 2) Test the absolute crap out of this.
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
-        fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise, sigma_background: f64, df: f64, ar_corrs: &'a Vec<f64>) -> (f64, Vec<f64>) {
+        fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
 
             let binds = self.return_bind_score();
  
@@ -842,7 +842,7 @@
 
             //End preuse generation
             let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
-                                            .produce_noise(DATA, sigma_background, df, ar_corrs)};
+                                            .produce_noise(DATA, noise.background)};
             let d_ad_like_d_grad_form_h = d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) 
                                         * (self.peak_height().abs()-MIN_HEIGHT).powi(2)
                                         / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT));
@@ -860,7 +860,7 @@
 
                 d_ad_like_d_grad_form_binds[index] = unsafe {
                       - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
-                               .produce_noise(DATA, sigma_background, df, ar_corrs))
+                               .produce_noise(DATA, noise.background))
                       * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                       * prop_bp * (-RT*prop_bp.ln()-CONVERSION_MARGIN).powi(2)
                       / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) } ;
@@ -1114,7 +1114,7 @@ mod tester{
     use rand::Rng;
     use std::ptr;
     use std::collections::VecDeque;
-    use crate::waveform::wave::Waveform;
+    use crate::waveform::Waveform;
     use rand::distributions::{Distribution, Uniform};
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;

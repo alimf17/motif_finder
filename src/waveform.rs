@@ -1,4 +1,3 @@
-pub mod wave{
  
     use std::ops::Add;
     use std::ops::Sub;
@@ -10,6 +9,18 @@ pub mod wave{
     use crate::sequence::Sequence;
     use statrs::distribution::StudentsT;
     use statrs::distribution::{Continuous, ContinuousCDF};
+
+    use aberth::aberth;
+    use num_complex::Complex;
+    use num_complex::ComplexFloat;
+    const EPSILON: f64 = 1e-8;
+    use once_cell::sync::Lazy;
+    use num_traits::cast;
+    use num_traits::float::Float;
+    use num_traits::float::FloatConst;
+    use num_traits::identities::{One, Zero};
+    use num_traits::MulAdd;
+    use core::iter::zip;
 
 
     const WIDE: f64 = 3.0;
@@ -218,7 +229,7 @@ pub mod wave{
 
         }
 
-        pub fn produce_noise(&self, data: &Waveform, sigma_background: f64, df: f64, ar_corrs: &Vec<f64>) -> Noise {
+        pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
             let residual = data-self;
 
 
@@ -231,12 +242,12 @@ pub mod wave{
             let mut len_penalties = Vec::new();
 
             for k in 0..end_dats.len() {
-                len_penalties.push((k+1)*ar_corrs.len());
+                len_penalties.push((k+1)*background.ar_corrs.len());
             }
 
             let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
 
-            let l_c = ar_corrs.len();
+            let l_c = background.ar_corrs.len();
 
             let mut fin_noise: Vec<f64> = vec![0.0; filt_lens.iter().sum()];
 
@@ -245,12 +256,12 @@ pub mod wave{
                 let sind: usize = if k == 0 {0} else {end_dats[k-1]};
 
     
-                let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].iter().zip(resid[(sind+l_c-1)..(end_dats[k]-1)].iter()).map(|(a,b)| a-ar_corrs[0]*b).collect();
+                let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].iter().zip(resid[(sind+l_c-1)..(end_dats[k]-1)].iter()).map(|(a,b)| a-background.ar_corrs[0]*b).collect();
                 
                 if l_c > 1 {
                 
                     for i in 1..l_c {
-                        block = block.iter().zip(resid[(sind+l_c-(i+1))..(end_dats[k]-(i+1))].iter()).map(|(a,b)| a-ar_corrs[i]*b).collect();
+                        block = block.iter().zip(resid[(sind+l_c-(i+1))..(end_dats[k]-(i+1))].iter()).map(|(a,b)| a-background.ar_corrs[i]*b).collect();
                     }
                 }
 
@@ -266,7 +277,7 @@ pub mod wave{
 
             }
 
-            Noise::new(fin_noise,sigma_background, df)
+            Noise::new(fin_noise,background)
 
 
         }
@@ -363,18 +374,43 @@ pub mod wave{
 
     }
 
-    pub struct Noise {
-        resids: Vec<f64>,
-        dist: StudentsT,
+    pub struct Background {
+        pub dist: StudentsT,
+        pub ar_corrs: Vec<f64>, 
     }
 
-    impl Noise {
+    impl Background {
 
+        pub fn new(sigma_background : f64, df : f64, ar_corrs: &Vec<f64>) -> Background {
 
-        pub fn new(resids: Vec<f64>, sigma_background : f64, df : f64) -> Noise {
+            let mut poly = ar_corrs.iter().map(|a| -1.0*a).collect::<Vec<f64>>();
+            poly.splice(0..0, [1.0]);
+            
+            let roots = aberth_vec(&poly, EPSILON).unwrap();
+
+            for root in roots {
+                println!("root {}. Abs {}.", root, root.abs());
+                if root.abs() <= 1.0 {
+                    panic!("AR model is not stationary!")
+                }
+            }
 
             let dist = StudentsT::new(0., sigma_background, df).unwrap();
-            Noise{ resids: resids, dist: dist}
+            Background{dist: dist, ar_corrs:ar_corrs.clone()}
+        }
+
+    }
+
+    pub struct Noise<'a> {
+        resids: Vec<f64>,
+        pub background: &'a Background,
+    }
+
+    impl<'a> Noise<'a> {
+
+
+        pub fn new(resids: Vec<f64>, background: &'a Background) -> Noise<'a> {
+            Noise{ resids: resids, background: background}
 
         }
 
@@ -383,7 +419,7 @@ pub mod wave{
         }
         
         pub fn dist(&self) -> StudentsT {
-            self.dist.clone()
+            self.background.dist.clone()
         }
 
         //The ranks need to be 1 indexed for the AD calculation to work
@@ -420,7 +456,7 @@ pub mod wave{
             //The statrc crate is numerically stable enough out even to +/- 200
 
             let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
-                                          .map(|((f,r),m)| m*(self.dist.cdf(*f).ln()+self.dist.sf(r).ln())).sum::<f64>();
+                                          .map(|((f,r),m)| m*(self.background.dist.cdf(*f).ln()+self.background.dist.sf(r).ln())).sum::<f64>();
 
 
             Ad
@@ -436,7 +472,7 @@ pub mod wave{
 
 
             let derivative: Vec<f64> = forward.iter().zip(ranks)
-                                        .map(|(&a, b)| (self.dist.pdf(a)/(self.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b-1.)/self.dist.cdf(a))))
+                                        .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b-1.)/self.background.dist.cdf(a))))
                                         .collect();
 
             derivative
@@ -488,7 +524,7 @@ pub mod wave{
 
     }
 
-    impl Mul<&Vec<f64>> for &Noise {
+    impl Mul<&Vec<f64>> for &Noise<'_> {
 
         type Output = f64;
 
@@ -508,7 +544,167 @@ pub mod wave{
     }
 
 
-}
+
+   //I had to take the source code for below from the aberth crate and modify it for vectors
+
+
+    pub fn aberth_vec(polynomial: &Vec<f64>, epsilon: f64) -> Result<Vec<Complex<f64>>, &'static str> {
+      let dydx = &vec_derivative(polynomial); //Got up to here 
+      let mut zs: Vec<Complex<f64>> = initial_guesses(polynomial);
+      let mut new_zs = zs.clone();
+
+      let iter: usize = ((1.0/epsilon) as usize)+1;
+      'iteration: for _ in 0..iter {
+        let mut converged = true;
+
+        for i in 0..zs.len() {
+          let p_of_z = sample_polynomial(polynomial, zs[i]);
+          let dydx_of_z = sample_polynomial(dydx, zs[i]);
+          let sum = (0..zs.len())
+            .filter(|&k| k != i)
+            .fold(Complex::new(0.0f64, 0.0), |acc, k| {
+              acc + Complex::new(1.0f64, 0.0) / (zs[i] - zs[k])
+            });
+
+          let new_z = zs[i] + p_of_z / (p_of_z * sum - dydx_of_z);
+          new_zs[i] = new_z;
+
+          if new_z.re.is_nan()
+            || new_z.im.is_nan()
+            || new_z.re.is_infinite()
+            || new_z.im.is_infinite()
+          {
+            break 'iteration;
+          }
+
+          if !new_z.approx_eq(zs[i], epsilon) {
+            converged = false;
+          }
+        }
+        println!("");
+        if converged {
+          return Ok(new_zs);
+        }
+        core::mem::swap(&mut zs, &mut new_zs);
+      }
+      Err("Failed to converge.")
+    }
+
+    pub fn vec_derivative(coefficients: &Vec<f64>) -> Vec<f64> {
+      debug_assert!(coefficients.len() != 0);
+      coefficients
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(power, &coefficient)| {
+          let p = power as f64 ;
+          p * coefficient
+        })
+        .collect()
+    }
+
+    fn initial_guesses(polynomial: &Vec<f64>)-> Vec<Complex<f64>> {
+      // the degree of the polynomial
+      let n = polynomial.len() - 1;
+      let n_f = n as f64;
+      // convert polynomial to monic form
+      let mut monic: Vec<f64> = Vec::new();
+      for c in polynomial {
+        monic.push(*c / polynomial[n]);
+      }
+      // let a = - c_1 / n
+      let a = -monic[n - 1] / n_f;
+      // let z = w + a,
+      let p_of_w = {
+        // we can recycle monic on the fly.
+        for coefficient_index in 0..=n {
+          let c = monic[coefficient_index];
+          monic[coefficient_index] = 0.0f64;
+          for ((index, power), pascal) in zip(
+            zip(0..=coefficient_index, (0..=coefficient_index).rev()),
+            aberth::PascalRowIter::new(coefficient_index as u32),
+          ) {
+            let pascal: f64 = pascal as f64;
+            monic[index] =
+              MulAdd::mul_add(c, pascal * a.powi(power as i32), monic[index]);
+          }
+        }
+        monic
+      };
+      // convert P(w) into S(w)
+      let s_of_w = {
+        let mut p = p_of_w;
+        // skip the last coefficient
+        for i in 0..n {
+          p[i] = -p[i].abs()
+        }
+        p
+      };
+      // find r_0
+      let mut int = 1.0f64;
+      let r_0 = loop {
+        let s_at_r0 = aberth::sample_polynomial(&s_of_w, int.into());
+        if s_at_r0.re > 0.0f64 {
+          break int;
+        }
+        int = int + 1.0f64;
+      };
+      drop(s_of_w);
+
+      {
+        let mut guesses: Vec<Complex<f64>> = Vec::new();
+
+        let frac_2pi_n = f64::PI() * 2.0 / n_f;
+        let frac_pi_2n = f64::PI() / 2.0 / n_f;
+
+        for k in 0..n {
+          let k_f: f64 = k as f64; 
+          let theta = MulAdd::mul_add(frac_2pi_n, k_f, frac_pi_2n);
+
+          let real = MulAdd::mul_add(r_0, theta.cos(), a);
+          let imaginary = r_0 * theta.sin();
+
+          let val = Complex::new(real, imaginary);
+          guesses.push(val) ;
+        }
+
+        guesses
+      }
+    }
+
+    pub fn sample_polynomial(coefficients: &Vec<f64>, x: Complex<f64>) -> Complex<f64> {
+      debug_assert!(coefficients.len() != 0);
+      let mut r = Complex::new(0.0f64, 0.0);
+      for c in coefficients.iter().rev() {
+        r = r.mul_add(x, c.into())
+      }
+      r
+    }
+
+    trait ComplexExt<F: Float> {
+      fn approx_eq(self, w: Self, epsilon: F) -> bool;
+    }
+
+    impl<F: Float> ComplexExt<F> for Complex<F> {
+      /// Cheap comparison of complex numbers to within some margin, epsilon.
+      #[inline]
+      fn approx_eq(self, w: Complex<F>, epsilon: F) -> bool {
+        ((self.re - w.re).powi(2)+(self.im - w.im).powi(2)).sqrt() < epsilon
+      }
+    }
+
+    trait Distance<F: Float> {
+        fn dist(self, b: Self) -> F;
+    }
+
+    impl<F: Float> Distance<F> for Complex<F> {
+      /// Cheap comparison of complex numbers to within some margin, epsilon.
+      #[inline]
+      fn dist(self, b: Complex<F>) -> F {
+        ((self.re - b.re).powi(2)+(self.im - b.im).powi(2)).sqrt() 
+      }
+    }
+
 
     
 
@@ -516,10 +712,8 @@ pub mod wave{
 
 #[cfg(test)]
 mod tests{
-    
-    use crate::waveform::wave::Kernel;
-    use crate::waveform::wave::Waveform;
-    use crate::waveform::wave::Noise;
+   
+    use super::*;
     use crate::sequence::Sequence;
 
     use statrs::distribution::ContinuousCDF;
@@ -572,7 +766,9 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
 
-        let noise: Noise = signal.produce_noise(&base_w, 0.25, 2.64, &ar);
+        let background: Background = Background::new(0.25, 2.64, &ar);
+
+        let noise: Noise = signal.produce_noise(&base_w, &background);
 
         let noi: Vec<f64> = noise.resids();
 
@@ -624,8 +820,12 @@ mod tests{
     #[test]
     fn noise_check(){
 
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], 0.25, 2.64);
+        let ar: Vec<f64> = vec![0.9, -0.1];
+        
+        let background: Background = Background::new(0.25, 2.64, &ar);
+
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], &background);
 
         assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
 
@@ -634,7 +834,7 @@ mod tests{
         println!("{}", n1.ad_calc());
 
 
-        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], 0.25, 2.64);
+        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
         
         assert!(n1.rank().iter().zip([5,4,3,2,1]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
 
@@ -647,7 +847,7 @@ mod tests{
         for i in 0..noise_length {
             let mut noisy = noise_arr.clone();
             noisy[i] += h;
-            let n1_plus_h = Noise::new(noisy, 0.25, 2.64);
+            let n1_plus_h = Noise::new(noisy, &background);
             let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
             assert!((n1.ad_grad()[i]-diff).abs() < 1e-6);
         }
@@ -693,14 +893,24 @@ mod tests{
     #[test]
     #[should_panic(expected = "Residuals aren't the same length?!")]
     fn panic_noise() {
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], 0.25, 2.64);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], 0.25, 2.64);
+        let ar: Vec<f64> = vec![0.9, -0.1];
+        
+        let background: Background = Background::new(0.25, 2.64, &ar);
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], &background);
 
         let _ = &n1*&n2.resids();
     }
 
 
+    #[test]
+    #[should_panic(expected = "AR model is not stationary!")]
+    fn panic_background() {
 
+        let ar: Vec<f64> = vec![1.5, 1.0];
+        
+        let background: Background = Background::new(0.25, 2.64, &ar);
+    }
 
 
 
