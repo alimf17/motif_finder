@@ -834,11 +834,18 @@
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
         fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
 
+            let start_binds = Instant::now();
             let binds = self.return_bind_score();
- 
+            let duration_binds = start_binds.elapsed();
+
+
+            let start_other_tf_root = Instant::now();
             let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
+            let just_ad_grad = start_other_tf_root.elapsed();
             let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+            
+            let duration_other_tf_root = start_other_tf_root.elapsed();
 
             //End preuse generation
             let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
@@ -850,6 +857,8 @@
 
             let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
 
+
+            let start_parallelizable = Instant::now();
             for index in 0..d_ad_like_d_grad_form_binds.len() {
 
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -866,7 +875,14 @@
                       / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) } ;
                 
             }
+            let duration_parallelizable = start_parallelizable.elapsed();
 
+            println!("Single TF timing information:");
+            println!("Binding: {:?}", duration_binds);
+            println!("Just the ad_grad: {:?}", just_ad_grad);
+            println!("Other preparallel: {:?}", duration_other_tf_root);
+            println!("Parallelizable: {:?}", duration_parallelizable);
+                
             (d_ad_like_d_grad_form_h, d_ad_like_d_grad_form_binds)
 
 
@@ -1114,7 +1130,7 @@ mod tester{
     use rand::Rng;
     use std::ptr;
     use std::collections::VecDeque;
-    use crate::waveform::Waveform;
+    use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
@@ -1224,11 +1240,23 @@ mod tester{
 
         let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
 
+        let motif2: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,2,20), 20., &sequence)};
+
         let start = Instant::now();
 
         let waveform = motif.generate_waveform(&wave);
-
         let duration = start.elapsed();
+        
+        let waveform2 = &waveform + &(motif2.generate_waveform(&wave));
+
+        let corrs: Vec<f64> = vec![0.9, -0.1];
+        let background = Background::new(0.25, 2.64, &corrs);
+        let noise: Noise = waveform.produce_noise(&waveform2, &background);
+
+        let grad = motif.single_motif_grad(&waveform2, &noise);
+
+
+
 
         let waveform_raw = waveform.raw_wave();
 

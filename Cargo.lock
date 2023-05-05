@@ -237,6 +237,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indxvec"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db57ad2df10362a7a0401b7cb8423ebd31a3e76c8635c948ef9e2f939830af5e"
+
+[[package]]
 name = "instant"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -328,6 +334,7 @@ dependencies = [
  "aberth",
  "criterion",
  "fastrand",
+ "indxvec",
  "itertools",
  "log",
  "num-complex",

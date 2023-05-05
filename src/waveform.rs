@@ -6,6 +6,7 @@
     use std::cmp::min;
     use core::f64::consts::PI;
 
+    use crate::base::{MIN_HEIGHT, MAX_HEIGHT};
     use crate::sequence::Sequence;
     use statrs::distribution::StudentsT;
     use statrs::distribution::{Continuous, ContinuousCDF};
@@ -22,6 +23,8 @@
     use num_traits::MulAdd;
     use core::iter::zip;
 
+
+    use std::time::{Duration, Instant};
 
     const WIDE: f64 = 3.0;
 
@@ -376,7 +379,9 @@
 
     pub struct Background {
         pub dist: StudentsT,
-        pub ar_corrs: Vec<f64>, 
+        pub ar_corrs: Vec<f64>,
+        //pub cdf_lookup: HashMap<f64, f64>,
+        //pub pdf_lookup: HashMap<f64, f64>,
     }
 
     impl Background {
@@ -390,12 +395,15 @@
 
             for root in roots {
                 println!("root {}. Abs {}.", root, root.abs());
-                if root.abs() <= 1.0 {
+                if root.abs() <= 1.0+EPSILON { //Technically, the +EPSILON means that we might rule out some stationary models
                     panic!("AR model is not stationary!")
                 }
             }
 
             let dist = StudentsT::new(0., sigma_background, df).unwrap();
+
+
+
             Background{dist: dist, ar_corrs:ar_corrs.clone()}
         }
 
@@ -422,7 +430,6 @@
             self.background.dist.clone()
         }
 
-        //The ranks need to be 1 indexed for the AD calculation to work
         pub fn rank(&self) -> Vec<usize> {
 
             let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
@@ -434,47 +441,78 @@
             let mut ind = 0;
 
             for &(i, _) in &rx {
-                ranks[i] = ind+1;
+                ranks[i] = ind;
                 ind += 1;
             }
             
             ranks
         }
-
+        
         pub fn ad_calc(&self) -> f64 {
 
-            let mut forward: Vec<f64> = self.resids();
-            forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-            let reverse: Vec<f64> = forward.iter().rev().map(|a| *a).collect();
+            let start = Instant::now();
 
+            let mut forward: Vec<f64> = self.resids();
+
+            let clone = start.elapsed();
+            forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            let sort = start.elapsed() - clone;
+
+            let cdf_calc = Instant::now();
+            let cdf_forward = forward.iter().map(|&f| self.background.dist.cdf(f));
+            let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
+            let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
+            let calc_dur = cdf_calc.elapsed();
+            let rev = start.elapsed() - (clone+sort);
             let n = forward.len();
 
             let inds: Vec<f64> = (0..n).map(|a| (2.0*(a as f64)+1.0)/(n as f64)).collect();
 
+            let ind_dur = start.elapsed() - (clone+sort+ rev);
             //I dedicated an inhuman amount of work trying to directly implement ln CDF here
             //And then ran a simple numerical test and realized that I don't need to bother
             //The statrc crate is numerically stable enough out even to +/- 200
 
-            let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
-                                          .map(|((f,r),m)| m*(self.background.dist.cdf(*f).ln()+self.background.dist.sf(r).ln())).sum::<f64>();
+            //let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
+            //                              .map(|((f,r),m)| m*(self.background.dist.cdf(*f).ln()+self.background.dist.sf(r).ln())).sum::<f64>();
 
+            let Ad =  -(n as f64) - cdf_calculate.zip(inds)
+                                               .map(|(f,m)| m*f).sum::<f64>();
+
+            let calc = start.elapsed() - (clone+sort+ rev+ind_dur);
+
+            println!("ad_calc timing. clone: {:?}. sort: {:?}. calc_dur: {:?}. rev: {:?}. inds: {:?}. calc: {:?}", clone, sort, calc_dur, rev, ind_dur, calc);
 
             Ad
         }
 
         pub fn ad_grad(&self) -> Vec<f64> {
 
-            let ranks: Vec<f64> = self.rank().iter().map(|a| *a as f64).collect();
+            let start = Instant::now();
+            let ranks = self.rank();
 
+            let rank = start.elapsed();
             let forward: Vec<f64> = self.resids();
+
+            let pdf = forward.iter().map(|&a| self.background.dist.pdf(a));
+            let cdf = forward.iter().map(|&a| self.background.dist.cdf(a));
+            let clone = start.elapsed() -rank ;
 
             let n = forward.len();
 
 
+            /*
             let derivative: Vec<f64> = forward.iter().zip(ranks)
-                                        .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-((2.*b-1.)/self.background.dist.cdf(a))))
+                                        .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-(((2*b+1) as f64)/self.background.dist.cdf(a))))
+                                        .collect();*/ 
+           
+            let derivative: Vec<f64> = cdf.zip(pdf).zip(ranks)
+                                        .map(|((c, p), r)| (p/((1.0-c)*(n as f64)))*(2.*(n as f64)-(((2*r+1) as f64)/c)))
                                         .collect();
 
+            let calc = start.elapsed() - (clone+rank);
+
+            println!("ad_grad timing. clone: {:?}. rank: {:?}. calc: {:?}.", clone,  rank, calc);
             derivative
 
         }
@@ -833,27 +871,9 @@ mod tests{
         println!("{:?}", n1.rank());
         println!("{}", n1.ad_calc());
 
-
-        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
-        
-        assert!(n1.rank().iter().zip([5,4,3,2,1]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
-
-        println!("{:?}", n1.ad_grad());
-
-        let h = 0.0000001;
-        let noise_ad = n1.ad_calc();
         let mut noise_arr = n1.resids();
-        let noise_length = noise_arr.len();
-        for i in 0..noise_length {
-            let mut noisy = noise_arr.clone();
-            noisy[i] += h;
-            let n1_plus_h = Noise::new(noisy, &background);
-            let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
-            assert!((n1.ad_grad()[i]-diff).abs() < 1e-6);
-        }
-
         noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+        let noise_length = noise_arr.len();
         let mut ad_try = -(noise_length as f64);
 
         for i in 0..noise_length {
@@ -865,7 +885,28 @@ mod tests{
             ad_try -= (mult*(ln_cdf+ln_sf));
         }
 
+        println!("calc v try {} {}", n1.ad_calc(), ad_try);
         assert!((n1.ad_calc()-ad_try).abs() < 1e-6);
+
+
+        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
+        
+        assert!(n1.rank().iter().zip([4,3,2,1,0]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
+
+        println!("{:?}", n1.ad_grad());
+
+        let h = 0.0000001;
+        let noise_ad = n1.ad_calc();
+        let mut noise_arr = n1.resids();
+        for i in 0..noise_length {
+            let mut noisy = noise_arr.clone();
+            noisy[i] += h;
+            let n1_plus_h = Noise::new(noisy, &background);
+            let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
+            println!("{} {} ad_grad", n1.ad_grad()[i], diff);
+            assert!((n1.ad_grad()[i]-diff).abs() < 1e-6);
+        }
+
 
         //Calculated these with the ln of the numerical derivative of the fast implementation
         //of the pAD function in the goftest package in R
