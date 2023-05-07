@@ -6,7 +6,6 @@
     use std::cmp::min;
     use core::f64::consts::PI;
 
-    use crate::base::{MIN_HEIGHT, MAX_HEIGHT};
     use crate::sequence::Sequence;
     use statrs::distribution::StudentsT;
     use statrs::distribution::{Continuous, ContinuousCDF};
@@ -27,6 +26,13 @@
     use std::time::{Duration, Instant};
 
     const WIDE: f64 = 3.0;
+
+    //These are based on using floats with a maximum of 8 binary sigfigs
+    //after the abscissa and exponents ranging from -12 to 3, inclusive
+    const MIN_DT_FLOAT: f64 = 0.000244140625;
+    const MAX_DT_FLOAT: f64 = 15.96875;
+    const EXP_OFFSET: u64 = (1023_u64-12) << 52;
+
 
     #[derive(Clone)]
     pub struct Kernel{
@@ -380,8 +386,8 @@
     pub struct Background {
         pub dist: StudentsT,
         pub ar_corrs: Vec<f64>,
-        //pub cdf_lookup: HashMap<f64, f64>,
-        //pub pdf_lookup: HashMap<f64, f64>,
+        pub cdf_lookup: Vec<f64>,
+        pub pdf_lookup: Vec<f64>,
     }
 
     impl Background {
@@ -402,10 +408,49 @@
 
             let dist = StudentsT::new(0., sigma_background, df).unwrap();
 
+            let mut domain = vec![0.0_f64; 8192];
+            
+            for sign in 0_u64..2 {
+                for rest in 0_u64..4096 {
+                    //This gives us 8 abscissa bits and 3 effective sign bits to play with: the 1023-12 indicates that the minimum 
+                    //exponent we care about is 2^(-12)
+                    domain[((4096*sign+rest) as usize)] = unsafe{ std::mem::transmute::<u64, f64>((sign << 63) + (1023-12 << 52) + (rest << 44))};
+                }
+            }
 
 
-            Background{dist: dist, ar_corrs:ar_corrs.clone()}
+            let cdf_lookup: Vec<f64> = domain.iter().map(|&a| dist.cdf(a)).collect();
+            let pdf_lookup: Vec<f64> = domain.iter().map(|&a| dist.pdf(a)).collect();
+
+
+            Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, pdf_lookup:pdf_lookup}
         }
+
+        fn get_lookup_index(calc: f64) -> usize {
+
+            let mut bit_check: u64 = calc.to_bits();
+           
+            if calc.abs() < MIN_DT_FLOAT {
+                bit_check = (calc.signum()*MIN_DT_FLOAT).to_bits();
+            } else if calc.abs() > MAX_DT_FLOAT {
+                bit_check = (calc.signum()*MAX_DT_FLOAT).to_bits();
+            }
+
+            let bitprep: u64 = (bit_check-EXP_OFFSET) & 0xfffff00000000000;
+
+            (((bitprep & 0x8_000_000_000_000_000) >> 51) 
+          + ((bitprep & 0x7_fff_f00_000_000_000) >> 44)) as usize
+            
+        }
+
+        pub fn cdf(&self, calc: f64) -> f64{
+            self.cdf_lookup[Self::get_lookup_index(calc)]
+        }
+        pub fn pdf(&self, calc: f64) -> f64{
+            self.pdf_lookup[Self::get_lookup_index(calc)]
+        }
+
+
 
     }
 
@@ -459,7 +504,7 @@
             let sort = start.elapsed() - clone;
 
             let cdf_calc = Instant::now();
-            let cdf_forward = forward.iter().map(|&f| self.background.dist.cdf(f));
+            let cdf_forward = forward.iter().map(|&f| self.background.cdf(f));
             let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
             let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
             let calc_dur = cdf_calc.elapsed();
@@ -494,8 +539,8 @@
             let rank = start.elapsed();
             let forward: Vec<f64> = self.resids();
 
-            let pdf = forward.iter().map(|&a| self.background.dist.pdf(a));
-            let cdf = forward.iter().map(|&a| self.background.dist.cdf(a));
+            let pdf = forward.iter().map(|&a| self.background.pdf(a));
+            let cdf = forward.iter().map(|&a| self.background.cdf(a));
             let clone = start.elapsed() -rank ;
 
             let n = forward.len();
@@ -886,7 +931,7 @@ mod tests{
         }
 
         println!("calc v try {} {}", n1.ad_calc(), ad_try);
-        assert!((n1.ad_calc()-ad_try).abs() < 1e-6);
+        assert!(((n1.ad_calc()-ad_try)/ad_try).abs() < 5e-2);//Remember, I'm only calculating an approximation. It's going to be a bit off
 
 
         let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
@@ -895,16 +940,17 @@ mod tests{
 
         println!("{:?}", n1.ad_grad());
 
-        let h = 0.0000001;
+        //let h = 0.0000001;
         let noise_ad = n1.ad_calc();
         let mut noise_arr = n1.resids();
         for i in 0..noise_length {
             let mut noisy = noise_arr.clone();
+            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0100000000000)};
             noisy[i] += h;
             let n1_plus_h = Noise::new(noisy, &background);
             let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
             println!("{} {} ad_grad", n1.ad_grad()[i], diff);
-            assert!((n1.ad_grad()[i]-diff).abs() < 1e-6);
+            assert!(((n1.ad_grad()[i]-diff)/diff).abs() < 5e-2);//Remember, I'm only calculating an approximation. It's going to be a bit off
         }
 
 

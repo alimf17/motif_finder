@@ -28,7 +28,7 @@
                                     //You need to force it to be at most 12. 
 
     const MIN_HEIGHT: f64 = 3.;
-    const MAX_HEIGHT: f64 = 30.;
+    const MAX_HEIGHT: f64 = 15.;
     const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
     const LOG_HEIGHT_SD: f64 = 0.25;
 
@@ -489,7 +489,6 @@
 
         pub fn pwm_prior(&self) -> f64 {
 
-            //TODO: recalculate this prior to account for the odd scaling I use
             if self.poss {
                 //We have to normalize by the probability that our kmer is possible
                 //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
@@ -1308,7 +1307,7 @@ mod tester{
         assert!((motif.pwm_prior()+(motif.seq().number_unique_kmers(motif.len()) as f64).ln()
                  -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln())).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 20., &sequence);
+        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 10., &sequence);
 
         assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
 
@@ -1321,6 +1320,7 @@ mod tester{
             base_prior -= (1.0-PROB_POS_PEAK).ln();
         }
 
+        println!("{} {} pro", base_prior.exp(), dist.pdf(motif.peak_height().abs()));
         assert!((base_prior.exp()-dist.pdf(motif.peak_height().abs())).abs() < 1e-6);
 
 
