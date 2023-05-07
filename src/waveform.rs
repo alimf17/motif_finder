@@ -444,10 +444,20 @@
         }
 
         pub fn cdf(&self, calc: f64) -> f64{
-            self.cdf_lookup[Self::get_lookup_index(calc)]
+
+            let ind = Self::get_lookup_index(calc);
+            unsafe{ *self.cdf_lookup.get_unchecked(ind)}
         }
         pub fn pdf(&self, calc: f64) -> f64{
-            self.pdf_lookup[Self::get_lookup_index(calc)]
+            unsafe{ *self.pdf_lookup.get_unchecked(Self::get_lookup_index(calc))}
+        }
+
+        //SAFETY: you need to know that you have a valid lookup index
+        pub unsafe fn cdf_from_ind(&self, calc_ind: usize) -> f64{
+            *self.cdf_lookup.get_unchecked(calc_ind)
+        }
+        pub unsafe fn pdf_from_ind(&self, calc_ind: usize) -> f64{
+            *self.pdf_lookup.get_unchecked(calc_ind)
         }
 
 
@@ -475,24 +485,61 @@
             self.background.dist.clone()
         }
 
-        pub fn rank(&self) -> Vec<usize> {
+        
+        pub fn rank(&self) -> Vec<f64> {
 
+            
+            //This generates a vector where each element is tagged with its original position
             let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
 
+            //This sorts the elements, but recalls their original positions
             rx.sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
 
-            let mut ranks: Vec<usize> = vec![0; rx.len()];
+            
+            let mut ranks: Vec<f64> = vec![0.; rx.len()];
 
-            let mut ind = 0;
+            let mut ind: f64 = 0.0;
 
+            //This uses the sort of elements to put rankings in their original positions
             for &(i, _) in &rx {
                 ranks[i] = ind;
-                ind += 1;
+                ind += 1.0;
             }
-            
+
             ranks
+            //let inds = (0..self.resids.len()).collect::<Vec<usize>>();
+            //self.rankVec(&inds).iter().map(|&a| a as f64).collect::<Vec<f64>>()
+            
+            
         }
-        
+
+        /*
+        pub fn rankVec(&self, vecInds: &Vec<usize>) -> Vec<usize> {
+            
+            let pivot = vecInds[((vecInds.len()-1)/2)];
+
+            let (preInds0, prepreInds1): (Vec<&usize>, Vec<&usize>) = vecInds.iter().partition(|&a| self.resids[*a] < self.resids[pivot]);
+
+            let (allSet, preInds1): (Vec<&usize>, Vec<&usize>) = prepreInds1.iter().partition(|&a| self.resids[**a] <= self.resids[pivot]);
+            let vecInds0: Vec<usize> = preInds0.iter().map(|&a| *a).collect();
+            //let vecSet: Vec<usize> = allSet.iter().map(|&a| *a).collect();
+            let vecInds1: Vec<usize> = preInds1.iter().map(|&a| *a).collect();
+
+
+            let mut coll = allSet.iter().map(|&a| *a).collect::<Vec<usize>>();
+            if vecInds0.len() != 0 {
+                let colInds0 = if vecInds0.len() == 1 { vecInds0 } else { self.rankVec(&vecInds0) };
+                coll = colInds0.iter().chain(coll.iter()).map(|&a| a).collect();
+            }
+            if vecInds1.len() != 0 {
+                let colInds1 = if vecInds1.len() == 1 { vecInds1 } else { self.rankVec(&vecInds1) };
+                coll = coll.iter().chain(colInds1.iter()).map(|&a| a).collect();
+            }
+            coll
+
+
+
+        }*/
         pub fn ad_calc(&self) -> f64 {
 
             let start = Instant::now();
@@ -503,8 +550,12 @@
             forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
             let sort = start.elapsed() - clone;
 
+            let ind_calc = Instant::now();
+            let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
+            let ind_num = ind_calc.elapsed();
             let cdf_calc = Instant::now();
-            let cdf_forward = forward.iter().map(|&f| self.background.cdf(f));
+
+            let cdf_forward = finds.map(|f| unsafe{self.background.cdf_from_ind(f)});
             let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
             let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
             let calc_dur = cdf_calc.elapsed();
@@ -526,7 +577,7 @@
 
             let calc = start.elapsed() - (clone+sort+ rev+ind_dur);
 
-            println!("ad_calc timing. clone: {:?}. sort: {:?}. calc_dur: {:?}. rev: {:?}. inds: {:?}. calc: {:?}", clone, sort, calc_dur, rev, ind_dur, calc);
+            println!("ad_calc timing. clone: {:?}. ind: {:?}. sort: {:?}. calc_dur: {:?}. rev: {:?}. inds: {:?}. calc: {:?}", clone,ind_num, sort, calc_dur, rev, ind_dur, calc);
 
             Ad
         }
@@ -539,11 +590,14 @@
             let rank = start.elapsed();
             let forward: Vec<f64> = self.resids();
 
-            let pdf = forward.iter().map(|&a| self.background.pdf(a));
-            let cdf = forward.iter().map(|&a| self.background.cdf(a));
+            let ind_calc = Instant::now();
+            let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
+            let ind_num = ind_calc.elapsed();
+            let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
+            let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
             let clone = start.elapsed() -rank ;
 
-            let n = forward.len();
+            let n = forward.len() as f64;
 
 
             /*
@@ -552,7 +606,7 @@
                                         .collect();*/ 
            
             let derivative: Vec<f64> = cdf.zip(pdf).zip(ranks)
-                                        .map(|((c, p), r)| (p/((1.0-c)*(n as f64)))*(2.*(n as f64)-(((2*r+1) as f64)/c)))
+                                        .map(|((c, p), r)| (p/((1.0-c)*n))*(2.*(n)-(((2.*r+1.))/c)))
                                         .collect();
 
             let calc = start.elapsed() - (clone+rank);
@@ -936,7 +990,7 @@ mod tests{
 
         let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
         
-        assert!(n1.rank().iter().zip([4,3,2,1,0]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
+        assert!(n1.rank().iter().zip([4.,3.,2.,1.,0.]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
 
         println!("{:?}", n1.ad_grad());
 
