@@ -31,6 +31,9 @@
     //after the abscissa and exponents ranging from -12 to 3, inclusive
     const MIN_DT_FLOAT: f64 = 0.000244140625;
     const MAX_DT_FLOAT: f64 = 15.96875;
+    
+
+
     const EXP_OFFSET: u64 = (1023_u64-12) << 52;
 
 
@@ -390,7 +393,9 @@
         pub dist: StudentsT,
         pub ar_corrs: Vec<f64>,
         pub cdf_lookup: [f64; 8192],
+        pub f64_lookup: [f64; 8192],
         pub pdf_lookup: [f64; 8192],
+        pub dpdf_lookup: [f64; 8192],
     }
 
     impl Background {
@@ -426,11 +431,19 @@
             let cdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.cdf(a)).collect::<Vec<_>>().try_into().unwrap();
             let pdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.pdf(a)).collect::<Vec<_>>().try_into().unwrap();
 
+            let dpdf_lookup: [f64; 8192] = domain.iter().map(|&a| (a/sigma_background)*dist.pdf(a)*(df+1.)/(df+(a/sigma_background).powi(2)))
+                                                 .collect::<Vec<_>>().try_into().unwrap();
 
-            Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, pdf_lookup:pdf_lookup}
+            Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, f64_lookup: domain, pdf_lookup:pdf_lookup, dpdf_lookup:dpdf_lookup}
         }
 
-        fn get_lookup_index(calc: f64) -> usize {
+        /*fn get_near_float(calc: f64) -> f64 {
+
+
+
+        }*/
+
+        fn get_near_u64(calc: f64) -> u64 {
 
             let mut bit_check: u64 = calc.to_bits();
            
@@ -440,8 +453,23 @@
                 bit_check = (calc.signum()*MAX_DT_FLOAT).to_bits();
             }
 
-            let bitprep: u64 = (bit_check-EXP_OFFSET) & 0xfffff00000000000;
+            (bit_check-EXP_OFFSET) & 0xfffff00000000000
 
+
+        }
+
+        fn get_near_f64(calc: f64) -> f64 {
+            unsafe{ std::mem::transmute::<u64, f64>(Self::get_near_u64(calc))}
+        }
+
+        //SAFETY: you need to know that you have a valid lookup index
+        unsafe fn get_near_f64_from_ind(&self, ind: usize) -> f64 {
+            *self.f64_lookup.get_unchecked(ind)
+        }
+
+        fn get_lookup_index(calc: f64) -> usize {
+
+            let bitprep = Self::get_near_u64(calc);
             (((bitprep & 0x8_000_000_000_000_000) >> 51) 
           + ((bitprep & 0x7_fff_f00_000_000_000) >> 44)) as usize
             
@@ -450,10 +478,11 @@
         pub fn cdf(&self, calc: f64) -> f64{
 
             let ind = Self::get_lookup_index(calc);
-            unsafe{ *self.cdf_lookup.get_unchecked(ind)}
+            unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))} //linear approx
         }
         pub fn pdf(&self, calc: f64) -> f64{
-            unsafe{ *self.pdf_lookup.get_unchecked(Self::get_lookup_index(calc))}
+            let ind = Self::get_lookup_index(calc);
+            unsafe{ *self.pdf_lookup.get_unchecked(ind) + *self.dpdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))}
         }
 
         //SAFETY: you need to know that you have a valid lookup index
@@ -559,9 +588,9 @@
             let mut forward: Vec<f64> = self.resids();
             forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
-            let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
+            //let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
 
-            let cdf_forward = finds.map(|f| unsafe{self.background.cdf_from_ind(f)});
+            let cdf_forward = forward.iter().map(|f| self.background.cdf(*f));
             let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
             let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
             let n = forward.len();
@@ -589,9 +618,11 @@
 
 
             let n = self.resids.len() as f64;
-            let finds = self.resids.iter().map(|&f| Background::get_lookup_index(f));
-            let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
-            let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
+            //let finds = self.resids.iter().map(|&f| Background::get_lookup_index(f));
+            //let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
+            let pdf = self.resids.iter().map(|a| unsafe{ self.background.pdf(*a)});
+            //let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
+            let cdf = self.resids.iter().map(|a| unsafe{ self.background.cdf(*a)} );
 
 
 
@@ -1032,8 +1063,9 @@ mod tests{
         let mut noise_arr = n1.resids();
         for i in 0..noise_length {
             let mut noisy = noise_arr.clone();
-            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0100000000000)};
+            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*(1./512.)};
             noisy[i] += h;
+            println!("{:?} {} post h and h", noisy, h);
             let n1_plus_h = Noise::new(noisy, &background);
             let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
             println!("{} {} ad_grad", n1.ad_grad()[i], diff);

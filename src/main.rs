@@ -26,6 +26,8 @@ use num_traits::float::FloatConst;
 use num_traits::identities::{One, Zero};
 use num_traits::MulAdd;
 use core::iter::zip;
+use std::time::{Duration, Instant};
+
 
 // 0 = -1 + 2x + 4x^4 + 11x^9
 //let polynomial = [-1., 2., 0., 0., 4., 0., 0., 0., 0., 11.];
@@ -65,8 +67,22 @@ fn main() {
     let data = &single_wave+&motif2.generate_waveform(&predata);
 
     let noise = (&data-&single_wave).produce_noise(&data, &background);
+    let dist = noise.dist();
+    let start = Instant::now();
     let grad = motif.single_motif_grad(&data, &noise);
-    
+    println!("Grad calc {:?}", start.elapsed());
+
+    let res = noise.resids();
+    let approx = Instant::now();
+    let approx_pdf = res.iter().map(|a| background.pdf(*a)).collect::<Vec<_>>();
+    let dur_app = approx.elapsed();
+
+    let exact = Instant::now();
+    let exact_pdf = res.iter().map(|a| dist.pdf(*a)).collect::<Vec<_>>();
+    let exact_app = exact.elapsed();
+
+    println!("Approx: {:?}, Exact: {:?}", dur_app, exact_app);
+
     /*
     //1+2x^2+x^4 = (1+x^2)^2
     //let polynomial: [f64; 5] = [1.0, 0.0,2.0, 0.0, 1.0];

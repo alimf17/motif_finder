@@ -833,18 +833,13 @@
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
         pub fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
 
-            let start_binds = Instant::now();
             let binds = self.return_bind_score();
-            let duration_binds = start_binds.elapsed();
 
 
-            let start_other_tf_root = Instant::now();
             let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
-            let just_ad_grad = start_other_tf_root.elapsed();
             let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
             
-            let duration_other_tf_root = start_other_tf_root.elapsed()- just_ad_grad;
 
             //End preuse generation
             let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
@@ -857,7 +852,6 @@
             let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
 
 
-            let start_parallelizable = Instant::now();
             for index in 0..d_ad_like_d_grad_form_binds.len() {
 
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -874,13 +868,7 @@
                       / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) } ;
                 
             }
-            let duration_parallelizable = start_parallelizable.elapsed();
 
-            println!("Single TF timing information:");
-            println!("Binding: {:?}", duration_binds);
-            println!("Just the ad_grad: {:?}", just_ad_grad);
-            println!("Other preparallel: {:?}", duration_other_tf_root);
-            println!("Parallelizable: {:?}", duration_parallelizable);
                 
             (d_ad_like_d_grad_form_h, d_ad_like_d_grad_form_binds)
 
