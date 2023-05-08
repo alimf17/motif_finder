@@ -1119,13 +1119,13 @@ mod tester{
     use std::collections::VecDeque;
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
-    const MIN_HEIGHT: f64 = 3.;
+    /*const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 30.;
     const LOG_HEIGHT_MEAN: f64 = 2.30258509299; //This is ~ln(10). Can't use ln in a constant
     const LOG_HEIGHT_SD: f64 = 0.25;
 
     const BASE_L: usize = 4;
-
+*/
     
     #[test]
     fn it_works() {
