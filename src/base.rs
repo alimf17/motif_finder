@@ -831,7 +831,7 @@
 
         //TODO: 1) Time this. 2) Test the absolute crap out of this.
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
-        fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
+        pub fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
 
             let start_binds = Instant::now();
             let binds = self.return_bind_score();
@@ -844,7 +844,7 @@
             let just_ad_grad = start_other_tf_root.elapsed();
             let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
             
-            let duration_other_tf_root = start_other_tf_root.elapsed();
+            let duration_other_tf_root = start_other_tf_root.elapsed()- just_ad_grad;
 
             //End preuse generation
             let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)

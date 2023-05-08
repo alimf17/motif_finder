@@ -239,6 +239,9 @@
         }
 
         pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
+            
+
+
             let residual = data-self;
 
 
@@ -386,8 +389,8 @@
     pub struct Background {
         pub dist: StudentsT,
         pub ar_corrs: Vec<f64>,
-        pub cdf_lookup: Vec<f64>,
-        pub pdf_lookup: Vec<f64>,
+        pub cdf_lookup: [f64; 8192],
+        pub pdf_lookup: [f64; 8192],
     }
 
     impl Background {
@@ -408,7 +411,8 @@
 
             let dist = StudentsT::new(0., sigma_background, df).unwrap();
 
-            let mut domain = vec![0.0_f64; 8192];
+
+            let mut domain = [0.0_f64; 8192];
             
             for sign in 0_u64..2 {
                 for rest in 0_u64..4096 {
@@ -419,8 +423,8 @@
             }
 
 
-            let cdf_lookup: Vec<f64> = domain.iter().map(|&a| dist.cdf(a)).collect();
-            let pdf_lookup: Vec<f64> = domain.iter().map(|&a| dist.pdf(a)).collect();
+            let cdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.cdf(a)).collect::<Vec<_>>().try_into().unwrap();
+            let pdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.pdf(a)).collect::<Vec<_>>().try_into().unwrap();
 
 
             Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, pdf_lookup:pdf_lookup}
@@ -495,6 +499,8 @@
             //This sorts the elements, but recalls their original positions
             rx.sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
 
+           
+        
             
             let mut ranks: Vec<f64> = vec![0.; rx.len()];
 
@@ -506,6 +512,13 @@
                 ind += 1.0;
             }
 
+            
+            /*let mut prerank = rx.iter().enumerate().map(|(a, (b, _))| (a as f64,b)).collect::<Vec<_>>();
+
+            prerank.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+
+            let ranks = prerank.iter().map(|(a,_)| *a).collect::<Vec<_>>();
+            */
             ranks
             //let inds = (0..self.resids.len()).collect::<Vec<usize>>();
             //self.rankVec(&inds).iter().map(|&a| a as f64).collect::<Vec<f64>>()
@@ -540,31 +553,21 @@
 
 
         }*/
+
         pub fn ad_calc(&self) -> f64 {
 
-            let start = Instant::now();
-
             let mut forward: Vec<f64> = self.resids();
-
-            let clone = start.elapsed();
             forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-            let sort = start.elapsed() - clone;
 
-            let ind_calc = Instant::now();
             let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
-            let ind_num = ind_calc.elapsed();
-            let cdf_calc = Instant::now();
 
             let cdf_forward = finds.map(|f| unsafe{self.background.cdf_from_ind(f)});
             let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
             let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
-            let calc_dur = cdf_calc.elapsed();
-            let rev = start.elapsed() - (clone+sort);
             let n = forward.len();
 
             let inds: Vec<f64> = (0..n).map(|a| (2.0*(a as f64)+1.0)/(n as f64)).collect();
 
-            let ind_dur = start.elapsed() - (clone+sort+ rev);
             //I dedicated an inhuman amount of work trying to directly implement ln CDF here
             //And then ran a simple numerical test and realized that I don't need to bother
             //The statrc crate is numerically stable enough out even to +/- 200
@@ -575,29 +578,21 @@
             let Ad =  -(n as f64) - cdf_calculate.zip(inds)
                                                .map(|(f,m)| m*f).sum::<f64>();
 
-            let calc = start.elapsed() - (clone+sort+ rev+ind_dur);
-
-            println!("ad_calc timing. clone: {:?}. ind: {:?}. sort: {:?}. calc_dur: {:?}. rev: {:?}. inds: {:?}. calc: {:?}", clone,ind_num, sort, calc_dur, rev, ind_dur, calc);
-
             Ad
         }
 
+        
         pub fn ad_grad(&self) -> Vec<f64> {
 
             let start = Instant::now();
             let ranks = self.rank();
 
-            let rank = start.elapsed();
-            let forward: Vec<f64> = self.resids();
 
-            let ind_calc = Instant::now();
-            let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
-            let ind_num = ind_calc.elapsed();
+            let n = self.resids.len() as f64;
+            let finds = self.resids.iter().map(|&f| Background::get_lookup_index(f));
             let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
             let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
-            let clone = start.elapsed() -rank ;
 
-            let n = forward.len() as f64;
 
 
             /*
@@ -609,13 +604,44 @@
                                         .map(|((c, p), r)| (p/((1.0-c)*n))*(2.*(n)-(((2.*r+1.))/c)))
                                         .collect();
 
-            let calc = start.elapsed() - (clone+rank);
-
-            println!("ad_grad timing. clone: {:?}. rank: {:?}. calc: {:?}.", clone,  rank, calc);
             derivative
 
         }
+   
+    /*
+        pub fn ad_grad(&self) -> Vec<f64> {
 
+            let mut preforward: Vec<_> = self.resids.iter().enumerate().collect();
+
+            preforward.sort_unstable_by(|(_,a),(_,b)| a.partial_cmp(b).unwrap());
+
+            let forward = preforward.iter().map(|(_,b)| *b);
+            let inds = preforward.iter().map(|(a,_)| *a);
+
+            let n = forward.len() as f64;
+            let finds = forward.map(|&f| Background::get_lookup_index(f));
+            let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
+            let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
+
+
+
+            /*
+            let derivative: Vec<f64> = forward.iter().zip(ranks)
+                                        .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-(((2*b+1) as f64)/self.background.dist.cdf(a))))
+                                        .collect();*/ 
+           
+            let mut calc_derivative: Vec<(usize, f64)> = cdf.zip(pdf).zip(inds).enumerate()
+                                        .map(|(r, ((c, p), i))| (i, (p/((1.0-c)*n))*(2.*(n)-(((2.*(r as f64)+1.))/c))))
+                                        .collect();
+
+            calc_derivative.sort_unstable_by(|(a,_),(b, _)| a.cmp(b));
+
+            let derivative = calc_derivative.iter().map(|(_,a)| *a).collect::<Vec<_>>();
+
+            derivative
+
+        }
+*/
         fn low_val(lA: f64) -> f64 {
 
             const C: f64 = PI*PI/8.0;
@@ -676,7 +702,14 @@
             }
 
             //self.resids.iter().zip(rhs_r).map(|(a,b)| a*b).sum()
-            self.resids.iter().zip(rhs).map(|(a,b)| a*b).sum()
+            //self.resids.iter().zip(rhs).map(|(a,b)| a*b).sum()
+
+            let mut sum = 0.0;
+
+            for i in 0..self.resids.len() {
+                sum+= (self.resids[i]*rhs[i]);
+            }
+            sum
         }
     }
 

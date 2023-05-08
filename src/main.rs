@@ -9,6 +9,7 @@ use crate::base::bases::TruncatedLogNormal;
 use crate::base::bases::Motif;*/
 use crate::base::*;
 use crate::sequence::Sequence;
+use crate::waveform::*;
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
 use statrs::statistics::{Min, Max};
 use statrs::function::gamma;
@@ -33,7 +34,7 @@ use core::iter::zip;
 
 fn main() {
 
-    /*let mut rng = fastrand::Rng::new();
+    let mut rng = fastrand::Rng::new();
 
     let block_n: usize = 200;
     let u8_per_block: usize = 4375;
@@ -48,12 +49,25 @@ fn main() {
     let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
     let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
+    let predata: Waveform = Waveform::create_zero( &sequence, 5);
     let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
+
+    let motif2 = Motif::rand_mot(20.,  &sequence);
+
+    let corrs: Vec<f64> = vec![0.9, -0.1];
+
+    let background = Background::new(0.25, 2.64, &corrs);
+    
 
     let binds = motif.return_bind_score();
 
-    */
+    let single_wave = motif.generate_waveform(&predata);
+    let data = &single_wave+&motif2.generate_waveform(&predata);
 
+    let noise = (&data-&single_wave).produce_noise(&data, &background);
+    let grad = motif.single_motif_grad(&data, &noise);
+    
+    /*
     //1+2x^2+x^4 = (1+x^2)^2
     //let polynomial: [f64; 5] = [1.0, 0.0,2.0, 0.0, 1.0];
 
@@ -76,11 +90,11 @@ fn main() {
 
         println!("rootb {}", root);
     }
-
+*/
 
 
 }
-
+/*
 pub fn aberth2(polynomial: &Vec<f64>, epsilon: f64) -> Result<Vec<Complex<f64>>, &'static str> {
   let dydx = &vec_derivative(polynomial); //Got up to here 
   let mut zs: Vec<Complex<f64>> = initial_guesses(polynomial);
@@ -239,4 +253,4 @@ impl<F: Float> Distance<F> for Complex<F> {
 }
 
 
-
+*/

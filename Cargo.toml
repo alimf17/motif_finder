@@ -25,5 +25,4 @@ name = "my_benchmark"
 harness = false
 
 [profile.release]
-debug = 2
-
+debug = true
