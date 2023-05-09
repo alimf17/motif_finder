@@ -72,6 +72,10 @@ fn main() {
     let grad = motif.single_motif_grad(&data, &noise);
     println!("Grad calc {:?}", start.elapsed());
 
+    let start = Instant::now();
+    let grad = motif.parallel_single_motif_grad(&data, &noise);
+    println!("Grad calc par {:?}", start.elapsed());
+    
     let res = noise.resids();
     let approx = Instant::now();
     let approx_pdf = res.iter().map(|a| background.pdf(*a)).collect::<Vec<_>>();

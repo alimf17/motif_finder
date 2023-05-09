@@ -64,6 +64,7 @@ impl Sequence {
             
             block_is.push(p_len);
 
+            //SAFETY: We have unsafe code that relies on these invariants being upheld
             if block.len() % BP_PER_U8 != 0 {
                 panic!("All blocks must have a number of base pairs divisible by BP_PER_U8.");
             }
@@ -71,7 +72,7 @@ impl Sequence {
             if block.len() <= MAX_BASE {
                 panic!("All blocks must be longer than your maximum possible motif size!");
             }
-
+ 
             if block.iter().any(|&a| a >= BASE_L) {
                 panic!("All sequence bases must map to a valid base!")
             }

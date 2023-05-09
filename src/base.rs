@@ -14,6 +14,7 @@
     use std::time::{Duration, Instant};
     use once_cell::sync::Lazy;
 
+    use rayon::prelude::*;
     pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
     pub const BASE_L: usize = BPS.len();
     const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
@@ -872,6 +873,55 @@
                 
             (d_ad_like_d_grad_form_h, d_ad_like_d_grad_form_binds)
 
+
+        }
+   
+        pub fn parallel_single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> Vec<f64> {
+
+            let binds = self.return_bind_score();
+
+
+            let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
+
+            let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+            
+
+            //End preuse generation
+            let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
+                                            .produce_noise(DATA, noise.background)};
+          
+
+            //let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
+
+
+            let n = self.len()*(BASE_L-1);
+
+
+            let d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
+                if i == 0 {
+                    d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise))
+                    * (self.peak_height().abs()-MIN_HEIGHT).powi(2)
+                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT))
+                } else {
+                    let index = i-1;
+                    let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
+                    let mut bp = index % (BASE_L-1);
+                    bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we just skipped it like we're supposed to
+
+                    let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
+
+                    unsafe {
+                          - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
+                                   .produce_noise(DATA, noise.background))
+                          * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
+                          * prop_bp * (-RT*prop_bp.ln()-CONVERSION_MARGIN).powi(2)
+                          / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) 
+                    }
+                }
+            }).collect();
+
+                
+            d_ad_like_d_grad_form
 
         }
    
