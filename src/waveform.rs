@@ -1,4 +1,5 @@
- 
+
+
     use std::ops::Add;
     use std::ops::Sub;
     use std::ops::Mul;
@@ -22,6 +23,9 @@
     use num_traits::MulAdd;
     use core::iter::zip;
 
+    use std::thread;
+    use std::sync::Arc;
+    use rayon::prelude::*;
 
     use std::time::{Duration, Instant};
 
@@ -526,8 +530,7 @@
             let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
 
             //This sorts the elements, but recalls their original positions
-            rx.sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
-
+            rx.par_sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
            
         
             
@@ -586,14 +589,14 @@
         pub fn ad_calc(&self) -> f64 {
 
             let mut forward: Vec<f64> = self.resids();
-            forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
+            let n = forward.len();
             //let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
 
-            let cdf_forward = forward.iter().map(|f| self.background.cdf(*f));
+            let cdf_forward = forward.into_par_iter().map(|f| self.background.cdf(f));
             let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
             let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
-            let n = forward.len();
 
             let inds: Vec<f64> = (0..n).map(|a| (2.0*(a as f64)+1.0)/(n as f64)).collect();
 
@@ -620,9 +623,9 @@
             let n = self.resids.len() as f64;
             //let finds = self.resids.iter().map(|&f| Background::get_lookup_index(f));
             //let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
-            let pdf = self.resids.iter().map(|a| unsafe{ self.background.pdf(*a)});
+            let pdf = self.resids.clone().into_par_iter().map(|a| unsafe{ self.background.pdf(a)});
             //let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
-            let cdf = self.resids.iter().map(|a| unsafe{ self.background.cdf(*a)} );
+            let cdf = self.resids.clone().into_par_iter().map(|a| unsafe{ self.background.cdf(a)} );
 
 
 

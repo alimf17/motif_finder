@@ -829,7 +829,7 @@
 
         }
 
-        //TODO: 1) Time this. 2) Test the absolute crap out of this.
+        //TODO: Test the absolute crap out of this, and move the ad_grad and ad_calc calculations OUT of this into the many tf gradient calculation
         //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
         pub fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
 

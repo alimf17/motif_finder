@@ -437,6 +437,8 @@ mod tests {
     use rand::Rng;
     use rand::distributions::{Distribution, Uniform};
 
+    use crate::Base;
+
 
     #[test]
     fn specific_seq(){

@@ -341,6 +341,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "rand",
+ "rayon",
  "statrs",
 ]
 
