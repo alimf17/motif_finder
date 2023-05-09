@@ -258,10 +258,10 @@
             
             end_dats.push(resid.len());
 
-            let mut len_penalties = Vec::new();
+            let mut len_penalties = vec![0usize; end_dats.len()];
 
             for k in 0..end_dats.len() {
-                len_penalties.push((k+1)*background.ar_corrs.len());
+                len_penalties[k] = ((k+1)*background.ar_corrs.len());
             }
 
             let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
