@@ -4,7 +4,7 @@
     use rand::distributions::{Distribution, Uniform};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
-    use crate::waveform::{Kernel, Waveform, Noise};
+    use crate::waveform::{Kernel, Waveform, Noise, Background};
     use crate::sequence::{Sequence, BP_PER_U8};
     use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
@@ -72,7 +72,7 @@
     } 
     
 
-
+    #[derive(Clone)]
     impl Base {
 
         //Note: This will break if all the bindings are zeros
@@ -294,6 +294,7 @@
     
     //BEGIN GBASE
 
+    #[derive(Clone)]
     pub struct GBase {
         best: usize,
         dgs: [ f64; BASE_L-1],
@@ -348,6 +349,7 @@
     }
 
     //BEGIN MOTIF
+    #[derive(Clone)]
     pub struct Motif<'a> {
     
         peak_height: f64,
@@ -959,7 +961,117 @@
         }
     }
 
+    struct Motif_Set<'a> {
 
+        set: Vec<Motif<'a>>, 
+        width: f64, 
+        signal: Waveform<'a>,
+        ln_post: Option<f64>,
+        data: &'a Waveform<'a>, 
+        seq: &'a Sequence,
+        background: &'a Background,
+    }
+
+    impl<'a> Motif_Set<'a> {
+
+        fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
+
+            let diff_ln_like = new-old;
+
+            //Always accept if new likelihood is better
+            if (diff_ln_like > 0.0) {
+                true
+            } else {
+                //Accept according to the metropolis criterion
+                let thresh: f64 = rng.gen();
+                thresh < diff_ln_like.exp()
+            }
+        }
+
+        fn motif_num_prior(&self) -> f64 {
+            -(self.set.len() as f64)*(20.0_f64).ln()
+        }
+
+        pub fn ln_prior(&self) -> f64 {
+            self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior()).sum::<f64>()
+        }
+
+        pub fn ln_likelihood(&self) -> f64 {
+            Noise::ad_like(((self.signal).produce_noise(self.data, self.background).ad_calc()))
+        }
+
+        pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
+            match self.ln_post {
+                None => {
+                    let mut ln_prior = self.ln_prior();
+                    if ln_prior > -Inf {
+                        self.ln_post = Some(ln_prior+self.ln_likelihood());
+                    } else{
+                        self.ln_post = Some(-f64::INFINITY);
+                    }
+                    self.ln_post.unwrap()}, 
+                Some(f) => f,
+            }
+        }
+
+        //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
+        fn birth_motif(&self) -> (Self, f64) {
+
+            let new_set = self.clone();
+            let new_mot = Motif::rand_mot(width, self.seq);
+            new_set.signal += new_mot.generate_waveform(self.data); 
+            new_set.set.push(new_mot);
+            let ln_post = new_set.ln_posterior();
+            (new_set, ln_post)
+
+        }
+
+    }
+
+
+    //We explicitly reimplement clone because we don't want to initialize ln_post until
+    //AFTER we make all necessary modifications to the motif set
+    impl Clone for Motif_Set {
+
+        
+        fn clone(&self) -> Self {
+
+            Motif_Set {
+                set: self.set.clone(),
+                width: self.width, 
+                signal: self.signal.clone(),
+                ln_post: None,
+                data: self.data, //pointer
+                seq: self.seq, //pointer
+                background: self.background, //pointer
+            }
+    }
+
+
+
+        }
+
+    }
+
+    struct Set_Trace {
+        trace: Vec<Motif_Set<'a>>, 
+        data: Waveform<'a>, 
+        seq: Sequence,
+        background: Background,
+    }
+
+
+    //TODO: 
+        //Create an "advance" function which does the appropriate number of HMCs, base leaps, and RJ steps
+        //Create an "output and reset" type of function which outputs all motifs but the final one to a file and starts us to just that motif
+        //Create an initialize function that reads in the prepared sequence, waveform, and background distribution from some pre initialized source
+        //          and allows us to either start from a prior Set_Trace file, from a MEME motif file, or from completely anew
+
+
+
+
+
+    /*
     //We made this private for a reason
     //This should go without saying, but you REALLY don't want to touch this directly.
     struct Hmc_Motif<'a> {
@@ -1038,7 +1150,7 @@
     }
 
 
-
+*/
 
     //BEGIN TRUNCATED LOGNORMAL
 
