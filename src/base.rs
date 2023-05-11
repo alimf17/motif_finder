@@ -37,6 +37,10 @@
 
     pub const THRESH: f64 = 1e-4;
 
+    //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
+    //The more you increase this, the fewer motifs you will get, on average
+    const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
+
     //When converting between gradient compatible and incompatible representations
     //We sometimes end up with numerical errors that basically make infinities where there shouldn't be
     //CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off bases that could get too weak for proper conversion
@@ -51,18 +55,9 @@
 
     //BEGIN BASE
 
+    #[derive(Clone)]
     pub struct Base {
        props: [ f64; BASE_L],
-    }
-
-    impl Clone for Base {
-
-        fn clone(&self) -> Self {
-
-            Self::new(self.props)
-
-        }
-
     }
 
     impl PartialEq for Base {
@@ -72,17 +67,12 @@
     } 
     
 
-    #[derive(Clone)]
     impl Base {
 
         //Note: This will break if all the bindings are zeros
         pub fn new(props: [ f64; 4]) -> Base {
 
             let mut props = props;
-
-            let eps = 1e-12;
- 
-            //let norm: f64 = props.iter().sum();
 
             let mut any_neg: bool = false;
 
@@ -92,34 +82,31 @@
 
             let max = Self::max(&props);
             
-            props = props.iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
-
             let mut rng = rand::thread_rng();
+
             //We can rely on perfect float equality because max copies its result
             let mut maxes = props.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>(); 
-            let mut one_max = (maxes.len() == 1);
+            let max_ind = maxes.choose(&mut rng).unwrap();
            
 
-            //We just want to decrement the maximum slightly
-            //Our implementation breaks if there are two best bases
-            while !one_max {
-                let ind: usize = *maxes.choose(&mut rng).unwrap();
-                props[ind] = *PROP_UPPER_CUTOFF;
-                maxes = props.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>();
-                one_max = (maxes.len() == 1);
-            }
-
-           
             for i in 0..props.len() {
-                if props[i] < *PROP_CUTOFF {props[i] = *PROP_CUTOFF }
+                if i == *max_ind {
+                    props[i] = 1.0;
+                } else {
+                    props[i] = (props[i]/max)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF 
+                }
             }
 
-            if any_neg{ //|| ((norm - 1.0).abs() > 1e-12) {
-               panic!("All is positive: {}. Norm is .", !any_neg)
+            if any_neg{  //|| ((norm - 1.0).abs() > 1e-12) 
+               panic!("All base entries must be positive!"); 
             }
+
+
 
             Base { props }
         }
+
+
 
 
         //Safety: props must be an array with 
@@ -145,25 +132,16 @@
             let mut att: [f64; BASE_L] = [0.0; BASE_L];
 
             for i in 0..att.len() {
-                att[i] = (*BASE_DIST).sample(&mut rng);
+                att[i] = rng.gen();
             }
 
-            let att_sum: f64 = att.iter().sum();
+            let max_ind = rng.gen_range(0..BASE_L);
 
-            //The code from here until the unsafe line is us ABSOLUTELY GUARENTEEING that we fulfill the safety requirements of proper_new
-            let max: f64 = Self::max(&att);
-
-            let mut maxes = att.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>();
-
-            let max_ind: usize = *maxes.choose(&mut rng).unwrap();
-
-
-            
             for i in 0..att.len() {
                 if i == max_ind {
                     att[i] = 1.0;
                 } else {
-                    att[i] =  (att[i]/att_sum)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF;
+                    att[i] =  (att[i])*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF;
                 }
             }
 
@@ -290,7 +268,13 @@
             
         }
 
+
+
     }
+
+
+
+
     
     //BEGIN GBASE
 
@@ -363,10 +347,12 @@
     impl<'a> Motif<'a> {
 
         //GENERATORS
+        //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
         //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-        pub unsafe fn raw_pwm(pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
+        pub unsafe fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
             let kernel = Kernel::new(peak_width, peak_height);
 
+            pwm.reserve_exact(MAX_BASE-pwm.len());
             Motif {
                 peak_height: peak_height,
                 kernel: kernel,
@@ -380,7 +366,8 @@
         //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
         pub fn from_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
-            let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
+            let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
+            pwm = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
             let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
@@ -412,7 +399,8 @@
         //        THIS WILL BREAK SILENTLY IF SAFETY GUARENTEES ARE NOT KEPT
         pub unsafe fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
-            let pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
+            let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
+            pwm = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
             let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
@@ -961,6 +949,7 @@
         }
     }
 
+    #[derive(Clone)]
     struct Motif_Set<'a> {
 
         set: Vec<Motif<'a>>, 
@@ -973,6 +962,7 @@
     }
 
     impl<'a> Motif_Set<'a> {
+        
 
         fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
 
@@ -988,8 +978,30 @@
             }
         }
 
+        fn derive_set(&self) -> Self {
+
+            Motif_Set {
+                set: self.set.clone(),
+                width: self.width, 
+                signal: self.signal.clone(),
+                ln_post: None,
+                data: self.data, //pointer
+                seq: self.seq, //pointer
+                background: self.background, //pointer
+            }
+
+        }
+
+        //This is our prior on the number of motifs
+        //We do not justify this with a maximum entropy prior
+        //Instead, we only want to consider an additional motif if 
+        //it brings an improvement of at least NECESSARY_MOTIF_IMPROVEMENT to the ln posterior
+        //This amounts to a geometric prior with positive integer support 
+        //and p = 1-NECESSARY_MOTIF_IMPROVEMENT.exp().
+        //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
+        //for the motif set prior, and would obfuscate the true point of this prior
         fn motif_num_prior(&self) -> f64 {
-            -(self.set.len() as f64)*(20.0_f64).ln()
+            -((self.set.len()-1) as f64)*NECESSARY_MOTIF_IMPROVEMENT
         }
 
         pub fn ln_prior(&self) -> f64 {
@@ -1004,7 +1016,7 @@
             match self.ln_post {
                 None => {
                     let mut ln_prior = self.ln_prior();
-                    if ln_prior > -Inf {
+                    if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                         self.ln_post = Some(ln_prior+self.ln_likelihood());
                     } else{
                         self.ln_post = Some(-f64::INFINITY);
@@ -1014,46 +1026,104 @@
             }
         }
 
-        //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
-        fn birth_motif(&self) -> (Self, f64) {
+        //
 
-            let new_set = self.clone();
-            let new_mot = Motif::rand_mot(width, self.seq);
-            new_set.signal += new_mot.generate_waveform(self.data); 
+        //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
+        fn add_motif(&self) -> Option<(Self, f64)> {
+            let mut new_set = self.derive_set();
+            let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
+            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
+            let signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
+            new_set.signal = signal;
             new_set.set.push(new_mot);
             let ln_post = new_set.ln_posterior();
-            (new_set, ln_post)
+            Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
         }
 
-    }
+        fn kill_motif(&self) -> Option<(Self, f64)> {
+
+            if (self.set.len() <= 1) { //We never want to propose a set with no motifs, ever
+                None
+            } else {
+                let mut new_set = self.derive_set();
+                let mut rng = rand::thread_rng();
+                let rem_mot = new_set.set.swap_remove(rng.gen_range(0..self.set.len())); 
+                let ln_gen_prob = rem_mot.height_prior()+rem_mot.pwm_prior();
+                let signal = {&new_set.signal - &rem_mot.generate_waveform(self.data)};
+                new_set.signal = signal;
+                let ln_post = new_set.ln_posterior();
+                Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
+            }
+        }
 
 
-    //We explicitly reimplement clone because we don't want to initialize ln_post until
-    //AFTER we make all necessary modifications to the motif set
-    impl Clone for Motif_Set {
+        //I'm only extending motifs on one end
+        //This saves a bit of time from not having to reshuffle motif vectors
+        fn extend_motif(&self) -> Option<(Self, f64)> {
+            let mut new_set = self.derive_set();
+            let mut rng = rand::thread_rng();
+           
+            let extend_id = rng.gen_range(0..self.set.len());
+
+            if (self.set[extend_id].len() >= MAX_BASE) { //We want to immediately reject any move which extends a motif beyond maximum length
+                None
+            } else {
+
+                let mut new_mot = self.set[extend_id].clone();
+                new_mot.pwm.push(Base::rand_new());
+                let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
+                if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
+                    new_set.signal = {&new_set.signal - &self.set[extend_id].generate_waveform(self.data)}; 
+                    new_set.signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
+                    new_set.set[extend_id] = new_mot;
+                    let ln_post = new_set.ln_posterior();
+                    let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
+                    Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
+                } else {
+                    None
+                }
+            }
+        }
+
+        //I'm only extending motifs on one end
+        //This saves a bit of time from not having to reshuffle motif vectors
+        fn contract_motif(&self) -> Option<(Self, f64)> {
+            let mut new_set = self.derive_set();
+            let mut rng = rand::thread_rng();
+           
+            let contract_id = rng.gen_range(0..self.set.len());
+
+            if (self.set[contract_id].len() <= MIN_BASE) { //We want to immediately reject any move which contracts a motif below minimum length
+                None
+            } else {
+
+                let mut new_mot = self.set[contract_id].clone();
+                let old_base = new_mot.pwm.pop();
+                let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(); //A contracted motif will always exist in the sequence if the longer motif does
+                new_set.signal = {&new_set.signal - &self.set[contract_id].generate_waveform(self.data)}; 
+                new_set.signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
+                new_set.set[contract_id] = new_mot;
+                let ln_post = new_set.ln_posterior();
+                let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
+                Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
+            }
+        }
 
         
-        fn clone(&self) -> Self {
 
-            Motif_Set {
-                set: self.set.clone(),
-                width: self.width, 
-                signal: self.signal.clone(),
-                ln_post: None,
-                data: self.data, //pointer
-                seq: self.seq, //pointer
-                background: self.background, //pointer
-            }
+
+
     }
 
 
 
-        }
 
-    }
 
-    struct Set_Trace {
+
+
+
+    struct Set_Trace<'a> {
         trace: Vec<Motif_Set<'a>>, 
         data: Waveform<'a>, 
         seq: Sequence,
