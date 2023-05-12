@@ -13,7 +13,7 @@
     use std::collections::{VecDeque, HashMap};
     use std::time::{Duration, Instant};
     use once_cell::sync::Lazy;
-
+    use assume::assume;
     use rayon::prelude::*;
     pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
     pub const BASE_L: usize = BPS.len();
@@ -1047,8 +1047,18 @@
 
         }
 
+        fn replace_motif(&mut self, new_mot: Motif<'a>, rem_id: usize) {
+
+            let rem_mot = self.set[rem_id].clone();
+            self.signal -= &rem_mot.generate_waveform(self.data);
+            self.signal += &new_mot.generate_waveform(self.data) ;
+            self.set[rem_id] = new_mot;
+            self.ln_post = None;
+
+        }
+
         //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
-        fn create_motif(&'a self) -> Option<(Self, f64)> {
+        fn propose_new_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
             let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
@@ -1058,7 +1068,7 @@
 
         }
 
-        fn destroy_motif(&'a self) -> Option<(Self, f64)> {
+        fn propose_kill_motif(&'a self) -> Option<(Self, f64)> {
 
             if (self.set.len() <= 1) { //We never want to propose a set with no motifs, ever
                 None
@@ -1076,9 +1086,7 @@
 
         //I'm only extending motifs on one end
         //This saves a bit of time from not having to reshuffle motif vectors
-        //Because I use swap_remove in remove_motif, the changed motif will always
-        //Go on the end, while the prior last motif will replace it
-        fn extend_motif(&'a self) -> Option<(Self, f64)> {
+        fn propose_extend_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let mut rng = rand::thread_rng();
            
@@ -1092,8 +1100,7 @@
                 new_mot.pwm.push(Base::rand_new());
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
                 if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
-                    new_set.remove_motif(extend_id);
-                    new_set.add_motif(new_mot);
+                    new_set.replace_motif(new_mot, extend_id);
                     let ln_post = new_set.ln_posterior();
                     let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                     Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
@@ -1105,7 +1112,7 @@
 
         //I'm only extending motifs on one end
         //This saves a bit of time from not having to reshuffle motif vectors
-        fn contract_motif(&'a self) -> Option<(Self, f64)> {
+        fn propose_contract_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let mut rng = rand::thread_rng();
            
@@ -1118,8 +1125,7 @@
                 let mut new_mot = self.set[contract_id].clone();
                 let old_base = new_mot.pwm.pop();
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(); //A contracted motif will always exist in the sequence if the longer motif does
-                new_set.remove_motif(contract_id);
-                new_set.add_motif(new_mot);
+                new_set.replace_motif(new_mot, contract_id);
                 let ln_post = new_set.ln_posterior();
                 let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation

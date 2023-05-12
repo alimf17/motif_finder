@@ -29,6 +29,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "assume"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6f9ca11400f14ef046700eb6401c706c587871303453a5e7586efb82340c3d"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,6 +338,7 @@ name = "motif_finder"
 version = "0.1.0"
 dependencies = [
  "aberth",
+ "assume",
  "criterion",
  "fastrand",
  "indxvec",

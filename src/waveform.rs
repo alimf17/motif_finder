@@ -27,6 +27,8 @@ use std::thread;
 use std::sync::Arc;
 use rayon::prelude::*;
 
+use assume::assume;
+
 use std::time::{Duration, Instant};
 
 const WIDE: f64 = 3.0;
@@ -366,6 +368,10 @@ impl<'a, 'b> AddAssign<&'b Waveform<'b>> for Waveform<'a> {
         
         let n = self.wave.len();
 
+
+        //If we have the same sequence pointer and the same spacer, our lengths are always identical
+        assume!(unsafe: other_wave.len() == n);
+
         for i in 0..n {
             self.wave[i] += other_wave[i];
         }
@@ -410,6 +416,9 @@ impl<'a, 'b> SubAssign<&'b Waveform<'b>> for Waveform<'a> {
         
         let n = self.wave.len();
 
+        //If we have the same sequence pointer and the same spacer, our lengths are always identical
+        assume!(unsafe: other_wave.len() == n);
+        
         for i in 0..n {
             self.wave[i] -= other_wave[i];
         }
