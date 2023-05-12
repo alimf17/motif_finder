@@ -35,7 +35,7 @@
 
     const PROB_POS_PEAK: f64 = 0.9;
 
-    pub const THRESH: f64 = 1e-4;
+    pub const THRESH: f64 = 1e-3; 
 
     //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
     //The more you increase this, the fewer motifs you will get, on average
@@ -47,11 +47,13 @@
     //These numbers were empirically determined, not theoretically. 
     const CONVERSION_MARGIN: f64 = 1e-6;
     const REFLECTOR: f64 = 15.0;
-    static DGIBBS_CUTOFF: Lazy<f64> = Lazy::new(|| -RT*THRESH.ln());
+    static DGIBBS_CUTOFF: Lazy<f64> = Lazy::new(|| -RT*THRESH.ln());//This is about +4 kcal/mol
     static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
     static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| (-CONVERSION_MARGIN/RT).exp());
 
     static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
+
+    const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
     //BEGIN BASE
 
@@ -113,7 +115,7 @@
         //      1) exactly one element = 1.0
         //      2) all other elements between *PROP_CUTOFF and *PROP_UPPER_CUTOFF
         //Otherwise, this WILL break. HARD. And in ways I can't determine
-        pub unsafe fn proper_new(props: [ f64; 4]) -> Base {
+        pub unsafe fn proper_new(props: [ f64; BASE_L]) -> Base {
             Base { props }
         }
 
@@ -211,6 +213,7 @@
 
         }
 
+        /*
 
         pub fn to_gbase(&self) -> GBase {
 
@@ -241,6 +244,38 @@
             };
 
             newdg
+
+        }*/
+        
+        pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
+
+            let best = Self::argmax(&self.props);
+
+            let mut new_props = [0.0_f64 ; BASE_L];
+
+            let mut ind: usize = 0;
+
+            for i in 0..self.props.len() {
+                if i == best {
+                    new_props[i] = 1.0;
+                } else {
+                    let mut dg = -RT*(self.props[i]).ln(); 
+                    dg = (dg-CONVERSION_MARGIN)/(*DGIBBS_CUTOFF-CONVERSION_MARGIN);
+                    dg = (dg/1.0-dg).ln()+addend[ind];
+                    dg = CONVERSION_MARGIN+((*DGIBBS_CUTOFF-CONVERSION_MARGIN)/(1.0+((-dg).exp())));
+                    dg = (-dg/RT).exp();
+                    //We implement the line below because we have numerical annoyances with the conversion
+                    //These numerical annoyances have to do with the double ln/exp that we need to convert back and forth
+                    //And need to be handled manually
+                    new_props[i] = if dg < *PROP_CUTOFF {*PROP_CUTOFF} else if dg > *PROP_UPPER_CUTOFF {*PROP_UPPER_CUTOFF} else {dg};
+                    ind += 1;
+                }
+
+            }
+
+            Base {props: new_props}
+
+
 
         }
 
@@ -278,6 +313,7 @@
     
     //BEGIN GBASE
 
+    /*
     #[derive(Clone)]
     pub struct GBase {
         best: usize,
@@ -330,7 +366,7 @@
         pub fn deltas(&self) -> [ f64; BASE_L-1] {
             self.dgs.clone()
         }
-    }
+    }*/
 
     //BEGIN MOTIF
     #[derive(Clone)]
@@ -866,19 +902,18 @@
 
         }
    
-        pub fn parallel_single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> Vec<f64> {
+        //SAFETY: the d_ad_stat_d_noise must be of the same length as the noise vector.
+        pub unsafe fn parallel_single_motif_grad(&'a self,  DATA: &'a Waveform, d_ad_stat_d_noise: &'a Vec<f64>, d_ad_like_d_ad_stat: f64, background: &'a Background) -> Vec<f64> {
 
             let binds = self.return_bind_score();
 
 
-            let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
+            //let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
-            let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+            //let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
             
 
             //End preuse generation
-            let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
-                                            .produce_noise(DATA, noise.background)};
           
 
             //let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
@@ -889,7 +924,9 @@
 
             let d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
                 if i == 0 {
-                    d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise))
+                    let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
+                                                   .produce_noise(DATA, background)};
+                    d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))
                     * (self.peak_height().abs()-MIN_HEIGHT).powi(2)
                     / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT))
                 } else {
@@ -902,8 +939,8 @@
 
                     unsafe {
                           - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
-                                   .produce_noise(DATA, noise.background))
-                          * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
+                                   .produce_noise(DATA, background))
+                          * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                           * prop_bp * (-RT*prop_bp.ln()-CONVERSION_MARGIN).powi(2)
                           / (-RT * (*DGIBBS_CUTOFF-CONVERSION_MARGIN)) 
                     }
@@ -914,6 +951,11 @@
             d_ad_like_d_grad_form
 
         }
+
+
+
+
+
    
         
     }
@@ -1028,33 +1070,32 @@
 
         //
 
-        fn add_motif(&mut self, new_mot: Motif<'a>) {
+        fn add_motif(&mut self, new_mot: Motif<'a>) -> f64 {
 
             self.signal += &new_mot.generate_waveform(self.data) ;
             self.set.push(new_mot);
             self.ln_post = None;
+            self.ln_posterior()
 
         }
 
-        fn remove_motif(&mut self, rem_id: usize) {
-
+        fn remove_motif(&mut self, rem_id: usize) -> f64{
             assert!(rem_id < self.set.len());
 
             let rem_mot = self.set.swap_remove(rem_id);
             self.signal -= &rem_mot.generate_waveform(self.data);
             self.ln_post = None;
-
+            self.ln_posterior()
 
         }
 
-        fn replace_motif(&mut self, new_mot: Motif<'a>, rem_id: usize) {
-
+        fn replace_motif(&mut self, new_mot: Motif<'a>, rem_id: usize) -> f64 {
             let rem_mot = self.set[rem_id].clone();
             self.signal -= &rem_mot.generate_waveform(self.data);
             self.signal += &new_mot.generate_waveform(self.data) ;
             self.set[rem_id] = new_mot;
             self.ln_post = None;
-
+            self.ln_posterior()
         }
 
         //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
@@ -1062,8 +1103,7 @@
             let mut new_set = self.derive_set();
             let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
             let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
-            new_set.add_motif(new_mot);
-            let ln_post = new_set.ln_posterior();
+            let ln_post = new_set.add_motif(new_mot);
             Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
         }
@@ -1077,8 +1117,7 @@
                 let mut rng = rand::thread_rng();
                 let rem_id = rng.gen_range(0..self.set.len());
                 let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_prior();
-                new_set.remove_motif(rem_id);
-                let ln_post = new_set.ln_posterior();
+                let ln_post = new_set.remove_motif(rem_id);
                 Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
             }
         }
@@ -1100,8 +1139,7 @@
                 new_mot.pwm.push(Base::rand_new());
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
                 if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
-                    new_set.replace_motif(new_mot, extend_id);
-                    let ln_post = new_set.ln_posterior();
+                    let ln_post = new_set.replace_motif(new_mot, extend_id);
                     let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                     Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
                 } else {
@@ -1125,11 +1163,43 @@
                 let mut new_mot = self.set[contract_id].clone();
                 let old_base = new_mot.pwm.pop();
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(); //A contracted motif will always exist in the sequence if the longer motif does
-                new_set.replace_motif(new_mot, contract_id);
-                let ln_post = new_set.ln_posterior();
+                let ln_post = new_set.replace_motif(new_mot, contract_id);
                 let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
             }
+        }
+
+
+        //For borrow checker reasons, this will only work if the motif calling already has a generated likelihood
+        //If you use this on a motif without such a likelihood, it will panic
+        fn run_rj_move(&'a self) -> (Self, usize, bool) {
+
+            let mut rng = rand::thread_rng();
+            let which_rj = rng.gen_range(0..4);
+
+            let proposal: Option<(Self, f64)> = match which_rj {
+
+                0 => self.propose_new_motif(),
+                1 => self.propose_kill_motif(),
+                2 => self.propose_extend_motif(),
+                3 => self.propose_contract_motif(),
+                _ => {panic!("Should not be proposing moves that don't exist"); None},
+
+            };
+
+            match proposal {
+
+                None => (self.clone(), which_rj, false),
+                Some((new_mot, modded_ln_like)) => {
+
+                    if Self::accept_test(self.ln_post.unwrap(), modded_ln_like, &mut rng) {
+                        (new_mot, which_rj, true)
+                    } else { 
+                        (self.clone(), which_rj, false)
+                    }
+                }
+            }
+
         }
 
         

@@ -23,6 +23,7 @@ const U64_BITMASK: u64 = 3u64;
 //   4) I've developed this thing for 5 years over two different programming languages 
 //   5) I still screw it up when I have to do it manually. 
 //   6) Save yourself. 
+#[derive(Clone)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,

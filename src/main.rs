@@ -73,9 +73,17 @@ fn main() {
     println!("Grad calc {:?}", start.elapsed());
 
     let start = Instant::now();
-    let grad = motif.parallel_single_motif_grad(&data, &noise);
-    println!("Grad calc par {:?}", start.elapsed());
-    
+    let ad_grad = noise.ad_grad();
+    let d_ad_like = Noise::ad_diff(noise.ad_calc());
+    let omittable = Instant::now();
+    let grad2 = unsafe { motif.parallel_single_motif_grad(&data, &ad_grad, d_ad_like, &background)};
+    println!("Grad calc par {:?}. Without noise calcs: {:?}", start.elapsed(), omittable.elapsed());
+
+    let mut old_grad = grad.1.clone();
+    old_grad.insert(0, grad.0);
+    println!("Grad differences: {}", old_grad.iter().zip(grad2).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt());
+
+
     let res = noise.resids();
     let approx = Instant::now();
     let approx_pdf = res.iter().map(|a| background.pdf(*a)).collect::<Vec<_>>();
