@@ -1,7 +1,7 @@
 
 
-use std::ops::Add;
-use std::ops::Sub;
+use std::ops::{Add, AddAssign};
+use std::ops::{Sub, SubAssign};
 use std::ops::Mul;
 use std::cmp::max;
 use std::cmp::min;
@@ -354,6 +354,27 @@ impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {
 
 }
 
+impl<'a, 'b> AddAssign<&'b Waveform<'b>> for Waveform<'a> {
+
+    fn add_assign(&mut self, wave2: &'b Waveform) {
+
+        if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
+            panic!("These signals do not add! Spacers must be equal and waves must point to the same sequence!");
+        }
+
+        let other_wave = wave2.raw_wave();
+        
+        let n = self.wave.len();
+
+        for i in 0..n {
+            self.wave[i] += other_wave[i];
+        }
+
+
+    }
+
+}
+
 impl<'a, 'b> Sub<&'b Waveform<'b>> for &'a Waveform<'a> {
 
     type Output = Waveform<'a>;
@@ -372,6 +393,27 @@ impl<'a, 'b> Sub<&'b Waveform<'b>> for &'a Waveform<'a> {
             start_dats: self.start_dats.clone(),
             seq: self.seq,
         }
+
+    }
+
+}
+
+impl<'a, 'b> SubAssign<&'b Waveform<'b>> for Waveform<'a> {
+
+    fn sub_assign(&mut self, wave2: &'b Waveform) {
+
+        if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
+            panic!("These signals do not add! Spacers must be equal and waves must point to the same sequence!");
+        }
+
+        let other_wave = wave2.raw_wave();
+        
+        let n = self.wave.len();
+
+        for i in 0..n {
+            self.wave[i] -= other_wave[i];
+        }
+
 
     }
 

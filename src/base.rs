@@ -1028,30 +1028,46 @@
 
         //
 
+        fn add_motif(&mut self, new_mot: Motif<'a>) {
+
+            self.signal += &new_mot.generate_waveform(self.data) ;
+            self.set.push(new_mot);
+            self.ln_post = None;
+
+        }
+
+        fn remove_motif(&mut self, rem_id: usize) {
+
+            assert!(rem_id < self.set.len());
+
+            let rem_mot = self.set.swap_remove(rem_id);
+            self.signal -= &rem_mot.generate_waveform(self.data);
+            self.ln_post = None;
+
+
+        }
+
         //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
-        fn add_motif(&self) -> Option<(Self, f64)> {
+        fn create_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
             let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
-            let signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
-            new_set.signal = signal;
-            new_set.set.push(new_mot);
+            new_set.add_motif(new_mot);
             let ln_post = new_set.ln_posterior();
             Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
         }
 
-        fn kill_motif(&self) -> Option<(Self, f64)> {
+        fn destroy_motif(&'a self) -> Option<(Self, f64)> {
 
             if (self.set.len() <= 1) { //We never want to propose a set with no motifs, ever
                 None
             } else {
                 let mut new_set = self.derive_set();
                 let mut rng = rand::thread_rng();
-                let rem_mot = new_set.set.swap_remove(rng.gen_range(0..self.set.len())); 
-                let ln_gen_prob = rem_mot.height_prior()+rem_mot.pwm_prior();
-                let signal = {&new_set.signal - &rem_mot.generate_waveform(self.data)};
-                new_set.signal = signal;
+                let rem_id = rng.gen_range(0..self.set.len());
+                let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_prior();
+                new_set.remove_motif(rem_id);
                 let ln_post = new_set.ln_posterior();
                 Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
             }
@@ -1060,7 +1076,9 @@
 
         //I'm only extending motifs on one end
         //This saves a bit of time from not having to reshuffle motif vectors
-        fn extend_motif(&self) -> Option<(Self, f64)> {
+        //Because I use swap_remove in remove_motif, the changed motif will always
+        //Go on the end, while the prior last motif will replace it
+        fn extend_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let mut rng = rand::thread_rng();
            
@@ -1074,9 +1092,8 @@
                 new_mot.pwm.push(Base::rand_new());
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
                 if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
-                    new_set.signal = {&new_set.signal - &self.set[extend_id].generate_waveform(self.data)}; 
-                    new_set.signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
-                    new_set.set[extend_id] = new_mot;
+                    new_set.remove_motif(extend_id);
+                    new_set.add_motif(new_mot);
                     let ln_post = new_set.ln_posterior();
                     let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                     Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
@@ -1088,7 +1105,7 @@
 
         //I'm only extending motifs on one end
         //This saves a bit of time from not having to reshuffle motif vectors
-        fn contract_motif(&self) -> Option<(Self, f64)> {
+        fn contract_motif(&'a self) -> Option<(Self, f64)> {
             let mut new_set = self.derive_set();
             let mut rng = rand::thread_rng();
            
@@ -1101,9 +1118,8 @@
                 let mut new_mot = self.set[contract_id].clone();
                 let old_base = new_mot.pwm.pop();
                 let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(); //A contracted motif will always exist in the sequence if the longer motif does
-                new_set.signal = {&new_set.signal - &self.set[contract_id].generate_waveform(self.data)}; 
-                new_set.signal = {&new_set.signal + &new_mot.generate_waveform(self.data)};
-                new_set.set[contract_id] = new_mot;
+                new_set.remove_motif(contract_id);
+                new_set.add_motif(new_mot);
                 let ln_post = new_set.ln_posterior();
                 let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
