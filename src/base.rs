@@ -1068,8 +1068,6 @@
             }
         }
 
-        //
-
         fn add_motif(&mut self, new_mot: Motif<'a>) -> f64 {
 
             self.signal += &new_mot.generate_waveform(self.data) ;
@@ -1183,7 +1181,7 @@
                 1 => self.propose_kill_motif(),
                 2 => self.propose_extend_motif(),
                 3 => self.propose_contract_motif(),
-                _ => {panic!("Should not be proposing moves that don't exist"); None},
+                _ => unreachable!(),
 
             };
 
