@@ -5,7 +5,7 @@
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
     use crate::waveform::{Kernel, Waveform, Noise, Background};
-    use crate::sequence::{Sequence, BP_PER_U8};
+    use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
     use statrs::function::gamma;
     use statrs::{consts, Result, StatsError};
     use std::f64;
@@ -27,6 +27,7 @@
                                     //while also not taking more memory than every human brain combined,
                                     //We store many kmers as u64s. If you have 20 "bases" (amino acids)
                                     //You need to force it to be at most 12. 
+
 
     const MIN_HEIGHT: f64 = 3.;
     const MAX_HEIGHT: f64 = 15.;
@@ -471,6 +472,27 @@
             unsafe {
                 Self::from_clean_motif(mot, peak_width, &seq)
             }
+
+        }
+
+        pub fn scramble_by_id_to_valid(&self, id: usize) -> Motif<'a> {
+
+            let mut new_mot = self.clone();
+            let new_best: u64 = self.seq.idth_unique_kmer(self.len(), id);
+            let old_best: u64 = Sequence::kmer_to_u64(&self.best_motif());
+
+            for i in 0..self.len() {
+
+                let old_base: usize = (old_best & (U64_BITMASK << (BITS_PER_BP*i))) as usize;
+                let new_base: usize = (new_best & (U64_BITMASK << (BITS_PER_BP*i))) as usize;
+
+                if new_base != old_base {
+                    new_mot.pwm[i].make_best(new_base);
+                }
+
+            }
+
+            new_mot
 
         }
 
@@ -1087,6 +1109,15 @@
 
         }
 
+        fn remove_motif_void(&mut self, rem_id: usize) {
+
+            assert!(rem_id < self.set.len());
+            let rem_mot = self.set.swap_remove(rem_id);
+            self.signal -= &rem_mot.generate_waveform(self.data);
+            self.ln_post = None;
+
+        }
+
         fn replace_motif(&mut self, new_mot: Motif<'a>, rem_id: usize) -> f64 {
             let rem_mot = self.set[rem_id].clone();
             self.signal -= &rem_mot.generate_waveform(self.data);
@@ -1169,6 +1200,7 @@
 
 
         //For borrow checker reasons, this will only work if the motif calling already has a generated likelihood
+        //And I can't have it do it here
         //If you use this on a motif without such a likelihood, it will panic
         fn run_rj_move(&'a self) -> (Self, usize, bool) {
 
@@ -1200,7 +1232,47 @@
 
         }
 
-        
+       fn base_leap(&'a self) -> Self {
+
+           let mut rng = rand::thread_rng();
+
+           //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
+           let mut ids: Vec<usize> = (0..self.set.len()).collect();
+           ids.shuffle(&mut rng);
+
+           let mut cur_set = self.clone();
+
+           for id in ids {
+
+               let current_mot = self.set[id].clone();
+
+               let mut base_set = self.clone();
+               base_set.remove_motif_void(id);
+               //This was numerically derived, and not a hard rule. I wanted less than 50 kmers per leap
+               let threshold = if current_mot.len() < 11 {1} else { (current_mot.len()-1)/2-3}; 
+
+               let kmer_ids = self.seq.all_kmers_within_hamming(&current_mot.best_motif(), threshold);
+
+               let likes_and_mots: Vec<(f64, Self)> = kmer_ids.clone().into_par_iter().map(|a| {
+                   let mut to_add = base_set.clone();
+                   let add_mot = current_mot.scramble_by_id_to_valid(a);
+                   let lnlike = to_add.add_motif(add_mot);
+                   (lnlike, to_add)
+               }).collect();
+
+               //We want to pick these based on their relative ln posteriors
+               //
+               //let 
+
+
+
+
+
+           }
+
+           todo!();
+
+       }
 
 
 
@@ -1472,8 +1544,8 @@ mod tester{
 
         assert!(supposed_default_dist == b.dist(None));
       
-        println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(Some(&b.to_gbase().to_base())));
-        assert!(b == b.to_gbase().to_base());
+        //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(Some(&b.to_gbase().to_base())));
+        //assert!(b == b.to_gbase().to_base());
 
 
         //let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);

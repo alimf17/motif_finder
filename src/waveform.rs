@@ -642,28 +642,22 @@ impl<'a> Noise<'a> {
 
     pub fn ad_calc(&self) -> f64 {
 
+        let time = Instant::now();
         let mut forward: Vec<f64> = self.resids();
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let n = forward.len();
-        //let finds = forward.iter().map(|&f| Background::get_lookup_index(f));
 
-        let cdf_forward = forward.into_par_iter().map(|f| self.background.cdf(f));
-        let reverse = cdf_forward.clone().rev().map(|f| (1.0-f));
-        let cdf_calculate = cdf_forward.zip(reverse).map(|(f, r)| f.ln()+r.ln());
+        let mut Ad = -(n as f64);
+        for i in 0..n {
 
-        let inds: Vec<f64> = (0..n).map(|a| (2.0*(a as f64)+1.0)/(n as f64)).collect();
+            let cdf = self.background.cdf(forward[i]);
+            let rev_sf = 1.0-self.background.cdf(forward[n-1-i]);
+            Ad-= (cdf.ln()+rev_sf.ln()) * ((2*i+1) as f64)/(n as f64)
 
-        //I dedicated an inhuman amount of work trying to directly implement ln CDF here
-        //And then ran a simple numerical test and realized that I don't need to bother
-        //The statrc crate is numerically stable enough out even to +/- 200
+        }
 
-        //let Ad = -(n as f64) - forward.iter().zip(reverse).zip(inds)
-        //                              .map(|((f,r),m)| m*(self.background.dist.cdf(*f).ln()+self.background.dist.sf(r).ln())).sum::<f64>();
-
-        let Ad =  -(n as f64) - cdf_calculate.zip(inds)
-                                           .map(|(f,m)| m*f).sum::<f64>();
-
+        println!("ad_calc {:?}", time.elapsed());
         Ad
     }
 
@@ -673,25 +667,17 @@ impl<'a> Noise<'a> {
         let start = Instant::now();
         let ranks = self.rank();
 
-
         let n = self.resids.len() as f64;
-        //let finds = self.resids.iter().map(|&f| Background::get_lookup_index(f));
-        //let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
-        let pdf = self.resids.clone().into_par_iter().map(|a| unsafe{ self.background.pdf(a)});
-        //let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
-        let cdf = self.resids.clone().into_par_iter().map(|a| unsafe{ self.background.cdf(a)} );
-
-
-
-        /*
-        let derivative: Vec<f64> = forward.iter().zip(ranks)
-                                    .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-(((2*b+1) as f64)/self.background.dist.cdf(a))))
-                                    .collect();*/ 
        
-        let derivative: Vec<f64> = cdf.zip(pdf).zip(ranks)
-                                    .map(|((c, p), r)| (p/((1.0-c)*n))*(2.*(n)-(((2.*r+1.))/c)))
-                                    .collect();
+        let mut derivative: Vec<f64> = vec![0.0; self.resids.len()];
 
+        for i in 0..self.resids.len() {
+            let cdf = unsafe{ self.background.cdf(self.resids[i])};
+            derivative[i] = ((unsafe{self.background.pdf(self.resids[i])})/((1.0-cdf)*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
+        }
+
+
+        println!("ad_grad {:?}", start.elapsed());
         derivative
 
     }

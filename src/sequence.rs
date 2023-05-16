@@ -6,13 +6,13 @@ use rand::Rng;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a loop of use statements
 
-const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole 
+pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole 
 pub const BP_PER_U8: usize = 8/BITS_PER_BP; 
 const PLACE_VALS: [u8; BP_PER_U8] = [1, 4, 16, 64]; //NOTICE: this only works when BASE_L == 4. 
                                             //Because a u8 contains 8 bits of information (duh)
                                             //And it requires exactly two bits disabmiguate 4 things. 
-const U8_BITMASK: u8 = 3u8; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
-const U64_BITMASK: u64 = 3u64;
+const U8_BITMASK: u8 = (1_u8 << BITS_PER_BP) - 1; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
+pub const U64_BITMASK: u64 = (1_u64  << BITS_PER_BP)-1;
 
 //I promise you, you only every want to use the constructors we have provided you
 //You do NOT want to try to initialize this manually. 
@@ -235,6 +235,10 @@ impl Sequence {
         self.kmer_dict[&k].clone()
     }
 
+    pub fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
+        self.kmer_dict[&k][id]
+    }
+
 
     pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
 
@@ -259,12 +263,20 @@ impl Sequence {
 
     }
     
-    fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
+    pub fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
 
+        /*
         let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (2u64.pow((a*BITS_PER_BP) as u32)) as u64).collect();
 
-        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()
+        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()*/
 
+        let mut mot : u64 = 0;
+
+        for i in (0..bases.len()) {
+            mot += (bases[i] as u64) << (i*BITS_PER_BP);
+        }
+
+        mot
     }
 
 
@@ -286,6 +298,7 @@ impl Sequence {
         V
 
     }
+
 
     pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<usize> {
 

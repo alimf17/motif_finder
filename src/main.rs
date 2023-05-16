@@ -27,7 +27,8 @@ use num_traits::identities::{One, Zero};
 use num_traits::MulAdd;
 use core::iter::zip;
 use std::time::{Duration, Instant};
-
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 
 // 0 = -1 + 2x + 4x^4 + 11x^9
 //let polynomial = [-1., 2., 0., 0., 4., 0., 0., 0., 0., 11.];
@@ -86,14 +87,17 @@ fn main() {
 
     let res = noise.resids();
     let approx = Instant::now();
-    let approx_pdf = res.iter().map(|a| background.pdf(*a)).collect::<Vec<_>>();
+    let approx_pdf = res.clone().into_iter().map(|a| background.cdf(a)).collect::<Vec<_>>();
     let dur_app = approx.elapsed();
+    let approx_par = Instant::now();
+    let approx_pdf = res.clone().into_par_iter().map(|a| background.cdf(a)).collect::<Vec<_>>();
+    let dur_par = approx_par.elapsed();
 
     let exact = Instant::now();
-    let exact_pdf = res.iter().map(|a| dist.pdf(*a)).collect::<Vec<_>>();
+    let exact_pdf = res.iter().map(|a| dist.cdf(*a)).collect::<Vec<_>>();
     let exact_app = exact.elapsed();
 
-    println!("Approx: {:?}, Exact: {:?}", dur_app, exact_app);
+    println!("Approx: {:?}, Par Approx: {:?}, Exact: {:?}", dur_app,dur_par, exact_app);
 
     /*
     //1+2x^2+x^4 = (1+x^2)^2
