@@ -1,7 +1,7 @@
 //pub mod bases {
     use rand::Rng;
     use rand::seq::SliceRandom;
-    use rand::distributions::{Distribution, Uniform};
+    use rand::distributions::{Distribution, Uniform, WeightedIndex};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
     use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
     use crate::waveform::{Kernel, Waveform, Noise, Background};
@@ -475,9 +475,25 @@
 
         }
 
-        pub fn scramble_by_id_to_valid(&self, id: usize) -> Motif<'a> {
+        pub fn make_opposite(&self) -> Motif<'a> {
 
-            let mut new_mot = self.clone();
+            let mut opposite = self.clone();
+
+            opposite.peak_height = -self.peak_height;
+
+            opposite.kernel = Kernel::new(self.kernel.get_sd(), -self.peak_height);
+            opposite
+
+        }
+
+        pub fn scramble_by_id_to_valid(&self, id: usize, opposite: bool) -> Motif<'a> {
+
+            let mut new_mot: Motif;
+            if opposite {
+                new_mot = self.make_opposite();
+            } else {
+                new_mot = self.clone();
+            }
             let new_best: u64 = self.seq.idth_unique_kmer(self.len(), id);
             let old_best: u64 = Sequence::kmer_to_u64(&self.best_motif());
 
@@ -1098,6 +1114,15 @@
             self.ln_posterior()
 
         }
+        
+        fn insert_motif(&mut self, new_mot: Motif<'a>, position: usize) -> f64 {
+
+            self.signal += &new_mot.generate_waveform(self.data) ;
+            self.set.insert(position, new_mot);
+            self.ln_post = None;
+            self.ln_posterior()
+
+        }
 
         fn remove_motif(&mut self, rem_id: usize) -> f64{
             assert!(rem_id < self.set.len());
@@ -1240,37 +1265,51 @@
            let mut ids: Vec<usize> = (0..self.set.len()).collect();
            ids.shuffle(&mut rng);
 
-           let mut cur_set = self.clone();
+           let mut current_set = self.clone();
 
            for id in ids {
 
-               let current_mot = self.set[id].clone();
+               let current_mot = current_set.set[id].clone();
 
-               let mut base_set = self.clone();
+               let mut base_set = current_set.clone();
                base_set.remove_motif_void(id);
                //This was numerically derived, and not a hard rule. I wanted less than 50 kmers per leap
-               let threshold = if current_mot.len() < 11 {1} else { (current_mot.len()-1)/2-3}; 
+               let threshold = if current_mot.len() < 12 {1} else { (current_mot.len())/2-4}; 
 
                let kmer_ids = self.seq.all_kmers_within_hamming(&current_mot.best_motif(), threshold);
 
-               let likes_and_mots: Vec<(f64, Self)> = kmer_ids.clone().into_par_iter().map(|a| {
+               let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
+
+               let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
                    let mut to_add = base_set.clone();
-                   let add_mot = current_mot.scramble_by_id_to_valid(a);
-                   let lnlike = to_add.add_motif(add_mot);
+                   let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1);
+                   let lnlike = to_add.insert_motif(add_mot, id);
                    (lnlike, to_add)
                }).collect();
 
                //We want to pick these based on their relative ln posteriors
-               //
-               //let 
+               //But these are going to be small. We normalize based on the first
+               //ln likelihood because it's convenient
+               
+               let mut selection_probs: Vec<f64> = vec![0.0; likes_and_mots.len()];
 
+               let normalize_ln_like: f64 = likes_and_mots[0].0;
 
+               let mut sum_probs: f64 = 0.0;
 
+               for i in 0..selection_probs.len() {
+                   //This subtraction might seem technically unnecessary, but
+                   //but computers are not infinitely precise. We want to 
+                   //ensure that we minimize numerical issues
+                   selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp();
+                   sum_probs+=selection_probs[i];
+               }
 
-
+               let dist = WeightedIndex::new(&selection_probs).unwrap();
+               current_set = likes_and_mots[dist.sample(&mut rng)].1.clone();
            }
 
-           todo!();
+           current_set
 
        }
 
@@ -1302,87 +1341,6 @@
 
 
 
-
-    /*
-    //We made this private for a reason
-    //This should go without saying, but you REALLY don't want to touch this directly.
-    struct Hmc_Motif<'a> {
-    
-        moveable_height: f64,
-        moveable_motif: Vec<GBase>,
-        positions: Vec<usize>,
-        bp_inds: Vec<usize>,
-        pos_height: bool,
-        best_motif: Vec<usize>,
-        kernel: Kernel,
-        poss: bool,
-        seq: &'a Sequence,
-
-    }
-
-    impl<'a> Hmc_Motif<'a> {
-
-        pub fn new(mot: &'a Motif) -> Hmc_Motif<'a> {
-
-            let best_motif = mot.best_motif();
-            let pos_height = (mot.peak_height() > 0.0);
-            let kernel = Kernel::new(mot.peak_height(), mot.peak_width());
-            let poss = mot.poss();
-            let seq = mot.seq();
-
-            let pre_height: f64 = (mot.peak_height().abs()-MIN_HEIGHT)/(MAX_HEIGHT-MIN_HEIGHT);
-            let moveable_height: f64 = (pre_height/(1.0-pre_height)).ln();
-
-
-            let moveable_motif = mot.pwm().iter().map(|a| a.to_gbase()).collect::<Vec<_>>();
-
-            let positions: Vec<usize> = (0..mot.len()).flat_map(|n| std::iter::repeat(n).take(BASE_L-1)).collect();
-
-            let base_vec: Vec<usize> = (0..BASE_L).collect();
-
-            let mut fake_rem: Vec<usize> = (0..(BASE_L-1)).collect();
-
-            let bp_inds: Vec<usize> = best_motif.iter().flat_map(|n| { fake_rem = base_vec.clone();
-                                                                     fake_rem.remove(*n);
-                                                                     fake_rem.clone()} )
-                                                       .collect();
-
-            let bind_score = mot.return_bind_score();
-
-            Hmc_Motif {
-
-                moveable_height: moveable_height,
-                moveable_motif: moveable_motif,
-                positions: positions,
-                bp_inds: bp_inds,
-                pos_height: pos_height, 
-                best_motif: best_motif,
-                kernel: kernel,
-                poss: poss,
-                seq: seq,
-            }
-        }
-
-        /*
-        pub fn back_to_motif(&self) -> Motif {
-
-            let mut height: f64 = 1.0/(1.0+(-self.moveable_height).exp());
-            height = (MAX_HEIGHT-MIN_HEIGHT)*height+MIN_HEIGHT;
-            if !self.pos_height() {
-                height *= (-1.0);
-            }
-            
-
-            Motif::raw_pwm(pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence)
-
-
-        }
-      */
-
-    }
-
-
-*/
 
     //BEGIN TRUNCATED LOGNORMAL
 
