@@ -1170,7 +1170,7 @@ impl<'a> Motif_Set<'a> {
     }
 
     //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
-    fn propose_new_motif(&'a self) -> Option<(Self, f64)> {
+    fn propose_new_motif(&self) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
         let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
@@ -1179,7 +1179,7 @@ impl<'a> Motif_Set<'a> {
 
     }
 
-    fn propose_kill_motif(&'a self) -> Option<(Self, f64)> {
+    fn propose_kill_motif(&self) -> Option<(Self, f64)> {
 
         if (self.set.len() <= 1) { //We never want to propose a set with no motifs, ever
             None
@@ -1196,7 +1196,7 @@ impl<'a> Motif_Set<'a> {
 
     //I'm only extending motifs on one end
     //This saves a bit of time from not having to reshuffle motif vectors
-    fn propose_extend_motif(&'a self) -> Option<(Self, f64)> {
+    fn propose_extend_motif(&self) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let mut rng = rand::thread_rng();
        
@@ -1221,7 +1221,7 @@ impl<'a> Motif_Set<'a> {
 
     //I'm only extending motifs on one end
     //This saves a bit of time from not having to reshuffle motif vectors
-    fn propose_contract_motif(&'a self) -> Option<(Self, f64)> {
+    fn propose_contract_motif(&self) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let mut rng = rand::thread_rng();
        
@@ -1246,7 +1246,7 @@ impl<'a> Motif_Set<'a> {
     //For borrow checker reasons, this will only work if the motif calling already has a generated likelihood
     //And I can't have it do it here
     //If you use this on a motif without such a likelihood, it will panic
-    pub fn run_rj_move(&'a self) -> (Self, usize, bool) {
+    pub fn run_rj_move(&self) -> (Self, usize, bool) {
 
         let mut rng = rand::thread_rng();
         let which_rj = rng.gen_range(0..4);
@@ -1278,7 +1278,7 @@ impl<'a> Motif_Set<'a> {
 
 
     //MOVE TO CALL
-    pub fn base_leap(&'a self) -> Self {
+    pub fn base_leap(&self) -> Self {
 
        let mut rng = rand::thread_rng();
 
@@ -1335,7 +1335,7 @@ impl<'a> Motif_Set<'a> {
    }
 
 
-   fn gradient(&'a self) -> Vec<f64> {
+   fn gradient(&self) -> Vec<f64> {
 
        let noise = self.signal.produce_noise(self.data, self.background);
        let d_ad_stat_d_noise = noise.ad_grad();
@@ -1370,7 +1370,7 @@ impl<'a> Motif_Set<'a> {
    }
     
    //MOVE TO CALL 
-   pub fn hmc(&'a self, trace_steps: usize, eps: f64, momentum_dist : &Normal, rng: &mut Rng) ->  (Self, bool) {
+   pub fn hmc<R: Rng + ?Sized>(&self, trace_steps: usize, eps: f64, momentum_dist : &Normal, rng: &mut R) ->  (Self, bool) {
        
        let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
@@ -1383,7 +1383,7 @@ impl<'a> Motif_Set<'a> {
        let mut momentum_apply = momentum.clone();
 
 
-       for _ 0..trace_steps {
+       for _ in 0..trace_steps {
        
            let mut new_set = self.clone();
            new_set.ln_post = None;
@@ -1401,7 +1401,7 @@ impl<'a> Motif_Set<'a> {
            let mut next_start = 0;
            for k in 0..self.set.len() {
                next_start += self.set[k].len()*(BASE_L-1)+1;
-               new_set.set[k] = prior_set.set[k].add_momentum(eps, &modded_momentum[start..next_start]);
+               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(eps, &modded_momentum[start..next_start])};
                start = next_start;
            }
 
@@ -1421,12 +1421,12 @@ impl<'a> Motif_Set<'a> {
        let mut delta_kinetic_energy: f64 = 0.0;
 
        for i in 0..momentum.len() {
-           delta_kinetic_energy += ( momentum_apply.powi(2) - momentum.powi(2) )/2.0;
+           delta_kinetic_energy += ( momentum_apply[i].powi(2) - momentum[i].powi(2) )/2.0;
        }
 
-       let delta_potential_energy = prior_set.ln_posterior()-self.ln_posterior();
+       let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
-       if Self::accept_test(0, delta_kinetic_energy+delta_potential_energy, rng){
+       if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
            (prior_set, true)
        } else {
            (self.clone(), false)
@@ -1451,7 +1451,7 @@ impl<'a> Motif_Set<'a> {
 
 
 
-struct Set_Trace<'a> {
+pub struct Set_Trace<'a> {
     trace: Vec<Motif_Set<'a>>, 
     data: Waveform<'a>, 
     seq: Sequence,
@@ -1465,25 +1465,28 @@ struct Set_Trace<'a> {
     //Create an initialize function that reads in the prepared sequence, waveform, and background distribution from some pre initialized source
     //          and allows us to either start from a prior Set_Trace file, from a MEME motif file, or from completely anew
 
-impl Set_Trace<'a> {
+impl<'a> Set_Trace<'a> {
 
 
     //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
     //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
     //Base leaps run once: after the RJ steps but before the HMC steps: this is basically designed so that each set of steps goes from
     //most drastic to least drastic changes
-    pub fn advance(&mut self, rng: &mut Rng, momentum_sd: f64, hmc_trace_steps: usize, hmc_epsilon: f64, num_rj_steps: usize, num_hmc_steps: usize) -> [usize; 5] { //1 for each of the RJ moves, plus one for hmc
+    pub fn advance<R: Rng + ?Sized>(&'a mut self, rng: &mut R, momentum_sd: f64, hmc_trace_steps: usize, hmc_epsilon: f64, num_rj_steps: usize, num_hmc_steps: usize) -> [usize; 5] { //1 for each of the RJ moves, plus one for hmc
         
         let momentum_dist = Normal::new(0.0, momentum_sd).unwrap();
 
-        let mut num_acceptances: [usize; 5] = vec![0; 5];
+        let mut num_acceptances: [usize; 5] = [0; 5];
 
         for _ in 0..num_rj_steps {
 
-            let (set, move_type, accept) = self.current_set().rj_move();
+            let setty = self.current_set();
+            let (mut set, move_type, accept) = setty.run_rj_move();
             if accept{
                 num_acceptances[move_type] += 1;
             }
+
+
             self.trace.push(set);
         }
 
@@ -1506,9 +1509,10 @@ impl Set_Trace<'a> {
 
     }
 
-    pub fn current_set(&'a self) -> &Motif_Set<'a> {
-        self.trace.last().unwrap()
+    fn current_set<'b>(&self) -> Motif_Set<'a> {
+        self.trace[self.trace.len()-1].clone()
     }
+
 
 }
 
