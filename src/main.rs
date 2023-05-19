@@ -82,8 +82,9 @@ fn main() {
 
     let mut old_grad = grad.1.clone();
     old_grad.insert(0, grad.0);
-    println!("Grad differences: {}", old_grad.iter().zip(grad2).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt());
+    println!("Grad differences: {}", old_grad.iter().zip(grad2.iter()).map(|(a, &b)| (a-b).powi(2)).sum::<f64>().sqrt());
 
+    println!("gradient {:?}", grad2);
 
     let res = noise.resids();
     let approx = Instant::now();
