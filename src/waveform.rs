@@ -49,7 +49,7 @@ const MAX_DT_FLOAT: f64 = 15.96875;
 const EXP_OFFSET: u64 = (1023_u64-12) << 52;
 
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Kernel{
 
     peak_width: f64,
@@ -106,6 +106,7 @@ impl Kernel {
 
 }
 
+//CANNOT BE SERIALIZED
 #[derive(Clone)]
 pub struct Waveform<'a> {
     wave: Vec<f64>,
@@ -452,6 +453,46 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct WaveformDef {
+    wave: Vec<f64>,
+    spacer: usize,
+    point_lens: Vec<usize>,
+    start_dats: Vec<usize>,
+
+}
+impl<'a> From<&'a Waveform<'a>> for WaveformDef {
+    fn from(other: &'a Waveform) -> Self {
+        Self {
+            wave: other.raw_wave(),
+            spacer: other.spacer(),
+            point_lens: other.point_lens(),
+            start_dats: other.start_dats(),
+        }
+    }
+}
+
+impl WaveformDef {
+
+    //SAFETY: If the relevant lengths of the waveform do not correspond to the sequence, this will be unsafe. 
+    //        By correspond, I mean that every element of point_lens needs to be 1+seq.block_lens/spacer
+    //        And start_dats needs to match the cumulative sum of point_lens. 
+    pub unsafe fn get_waveform<'a>(&'a self, seq: &'a Sequence) -> Waveform<'a> {
+
+        Waveform {
+
+            wave: self.wave.clone(),
+            spacer: self.spacer, 
+            point_lens: self.point_lens.clone(),
+            start_dats: self.start_dats.clone(),
+            seq: seq
+        }
+
+
+    }
+
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "StudentsT")]
 struct StudentsTDef {
     #[serde(getter = "StudentsT::location")]
@@ -524,11 +565,6 @@ impl Background {
         Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, f64_lookup: domain, pdf_lookup:pdf_lookup, dpdf_lookup:dpdf_lookup}
     }
 
-    /*fn get_near_float(calc: f64) -> f64 {
-
-
-
-    }*/
 
     fn get_near_u64(calc: f64) -> u64 {
 
@@ -584,6 +620,8 @@ impl Background {
 
 }
 
+
+//CANNOT BE SERIALIZED
 #[derive(Clone)]
 pub struct Noise<'a> {
     resids: Vec<f64>,

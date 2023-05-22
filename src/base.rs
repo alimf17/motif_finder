@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
-use crate::waveform::{Kernel, Waveform, Noise, Background};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use statrs::function::gamma;
 use statrs::{consts, Result, StatsError};
@@ -218,39 +218,6 @@ impl Base {
 
     }
 
-    /*
-
-    pub fn to_gbase(&self) -> GBase {
-
-        let max = self.props.iter().copied().fold(f64::NAN, f64::max);
-
-        let best = Self::argmax(&self.props);
-
-        let mut dgs = [0.0_f64 ; BASE_L-1];
-
-        let mut ind = 0;
-
-        for i in 0..self.props.len() {
-            if i != Self::argmax(&self.props) {
-                //dgs[ind] = -RT*(self.props[i]/max).ln();
-                dgs[ind] = -RT*(self.props[i]).ln(); //Trying for a proportion binding implementation
-                ind += 1;
-            }
-        }
-
-        let prelim_dg = dgs.iter().map(|&a| (a-CONVERSION_MARGIN)/(*DGIBBS_CUTOFF-CONVERSION_MARGIN)).collect::<Vec<f64>>();
-
-        dgs = prelim_dg.iter().map(|a| (a/(1.0-a)).ln()).collect::<Vec<f64>>().try_into().unwrap();
-                                           
-
-        let newdg: GBase = GBase {
-            best: best,
-            dgs: dgs,
-        };
-
-        newdg
-
-    }*/
     
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
 
@@ -311,64 +278,10 @@ impl Base {
 
 
 
-//BEGIN GBASE
-
-/*
-#[derive(Clone)]
-pub struct GBase {
-    best: usize,
-    dgs: [ f64; BASE_L-1],
-
-}
-
-impl GBase {
-
-    pub fn new(dg: [ f64; BASE_L-1], be: usize) -> GBase{
-
-        GBase{ best: be, dgs: dg }
-    }
-
-    pub fn to_base(&self) -> Base {
-
-
-
-        let mut prop_pre = self.dgs.iter().map(|&a| CONVERSION_MARGIN+((*DGIBBS_CUTOFF-CONVERSION_MARGIN)/(1.0+((-a).exp())))).collect::<Vec<f64>>();
-
-        let mut props = [0.0_f64 ; BASE_L];
-
-
-        for i in 0..props.len() {
-
-            if i < self.best {
-                props[i] = (-prop_pre[i]/RT).exp();
-            } else if i == self.best {
-                props[i] = 1.0_f64;
-            } else {
-                props[i] = (-prop_pre[i-1]/RT).exp();
-            }
-        }
-
-        /* let norm: f64 = props.iter().sum();
-
-        for p in 0..props.len() {
-            props[p] /= norm;
-        } */ // Proportion binding implementation of base
-
-
-        let based: Base = Base {
-            props: props,
-        };
-
-        based
-
-    }
-
-    pub fn deltas(&self) -> [ f64; BASE_L-1] {
-        self.dgs.clone()
-    }
-}*/
 
 //BEGIN MOTIF
+
+//CANNOT BE SERIALIZED
 #[derive(Clone)]
 pub struct Motif<'a> {
 
@@ -385,17 +298,21 @@ impl<'a> Motif<'a> {
     //GENERATORS
     //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub unsafe fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
+    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
         let kernel = Kernel::new(peak_width, peak_height);
 
         pwm.reserve_exact(MAX_BASE-pwm.len());
-        Motif {
+        let mut m = Motif {
             peak_height: peak_height,
             kernel: kernel,
             pwm: pwm,
             poss: true,
             seq: seq,
-        }
+        };
+
+        m.poss = m.seq.kmer_in_seq(&m.best_motif());
+
+        m
     }
 
 
@@ -459,7 +376,7 @@ impl<'a> Motif<'a> {
 
 
     }
-    //TODO: make sure that this takes a sequence reference variable and that we pull our random motif from there
+    
     pub fn rand_mot(peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
 
         let mut rng = rand::thread_rng();
@@ -551,6 +468,10 @@ impl<'a> Motif<'a> {
 
     pub fn peak_height(&self) -> f64 {
         self.peak_height
+    }
+
+    pub fn kernel(&self) -> Kernel {
+        self.kernel.clone()
     }
 
     pub fn raw_kern(&self) -> &Vec<f64> {
@@ -1052,7 +973,37 @@ impl fmt::Display for Motif<'_> {
     }
 }
 
+//helper object for Motif so that I can (de)serialize the Set_Trace object
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MotifDef {
+
+    peak_height: f64,
+    kernel: Kernel,
+    pwm: Vec<Base>,
+
+}
+
+impl<'a> From<&'a Motif<'a>> for MotifDef {
+    fn from(other: &'a Motif) -> Self {
+        Self {
+            peak_height: other.peak_height(),
+            kernel: other.kernel(),
+            pwm: other.pwm(),
+        }
+    }
+}
+
+impl MotifDef {
+
+    pub fn get_motif<'a>(&'a self, seq: &'a Sequence) -> Motif<'a> {
+        Motif::raw_pwm(self.pwm.clone(), self.peak_height, self.kernel.get_sd(), seq)
+    }
+
+}
+
 #[derive(Clone)]
+//DEFINITELY CANNOT BE DIRECTLY SERIALIZED
 struct Motif_Set<'a> {
 
     set: Vec<Motif<'a>>, 
@@ -1455,7 +1406,9 @@ impl<'a> Motif_Set<'a> {
 
 
 
-
+//THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
+//SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
+//AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
 pub struct Set_Trace<'a> {
     trace: Vec<Motif_Set<'a>>,
     capacity: usize,
@@ -1537,6 +1490,8 @@ impl<'a> Set_Trace<'a> {
 
 
 }
+
+//
 /*
 impl Serialize for Set_Trace<'a> {
 
@@ -1546,15 +1501,19 @@ impl Serialize for Set_Trace<'a> {
     {
         // 3 is the number of fields in the struct.
         let mut state = serializer.serialize_struct("Set_Trace", 5)?;
-        state.serialize_field("r", &self.r)?;
-        state.serialize_field("g", &self.g)?;
-        state.serialize_field("b", &self.b)?;
+        state.serialize_field("capacity", &self.capacity)?;
+        state.serialize_field("seq", &self.seq)?;
+        state.serialize_field("background", &self.background)?;
+
+        state.serialize_field("data", WaveformDef::from(&self.data))?;
+
         state.end()
     }
 
 
 }
-*/
+//
+ */
 
 
 
