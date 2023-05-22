@@ -30,6 +30,14 @@ use std::time::{Duration, Instant};
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 
+use serde_json::value::Serializer as Json_Serializer;
+
+use serde::{ser, Serialize,Serializer, Deserialize};
+use serde::de::{
+    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+    VariantAccess, Visitor,
+};
+
 // 0 = -1 + 2x + 4x^4 + 11x^9
 //let polynomial = [-1., 2., 0., 0., 4., 0., 0., 0., 0., 11.];
 
@@ -100,6 +108,8 @@ fn main() {
 
     println!("Approx: {:?}, Par Approx: {:?}, Exact: {:?}", dur_app,dur_par, exact_app);
 
+    println!("{}", (&sequence).serialize(Json_Serializer).unwrap());
+    println!("{}", (&background).serialize(Json_Serializer).unwrap());
     /*
     //1+2x^2+x^4 = (1+x^2)^2
     //let polynomial: [f64; 5] = [1.0, 0.0,2.0, 0.0, 1.0];

@@ -15,6 +15,12 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
+
+use serde::{ser, Serialize,Serializer, Deserialize};
+use serde::de::{
+    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+    VariantAccess, Visitor,
+};
 pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
 pub const BASE_L: usize = BPS.len();
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
@@ -56,7 +62,7 @@ const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "
 
 //BEGIN BASE
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Base {
    props: [ f64; BASE_L],
 }
@@ -1450,9 +1456,9 @@ impl<'a> Motif_Set<'a> {
 
 
 
-
 pub struct Set_Trace<'a> {
-    trace: Vec<Motif_Set<'a>>, 
+    trace: Vec<Motif_Set<'a>>,
+    capacity: usize,
     data: Waveform<'a>, 
     seq: Sequence,
     background: Background,
@@ -1466,6 +1472,22 @@ pub struct Set_Trace<'a> {
     //          and allows us to either start from a prior Set_Trace file, from a MEME motif file, or from completely anew
 
 impl<'a> Set_Trace<'a> {
+
+    pub fn new(capacity: usize, seq: Sequence, data: Waveform<'a>, background: Background) -> Set_Trace<'a> {
+
+        if !std::ptr::eq(data.seq(), &seq) {
+            panic!("Your data needs to be associated with your sequence!");
+        }
+
+        Set_Trace{
+            trace: Vec::<Motif_Set<'a>>::with_capacity(capacity),
+            capacity: capacity, 
+            data: data, 
+            seq: seq, 
+            background: background,
+        }
+
+    }
 
 
     //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
@@ -1515,6 +1537,24 @@ impl<'a> Set_Trace<'a> {
 
 
 }
+/*
+impl Serialize for Set_Trace<'a> {
+
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("Set_Trace", 5)?;
+        state.serialize_field("r", &self.r)?;
+        state.serialize_field("g", &self.g)?;
+        state.serialize_field("b", &self.b)?;
+        state.end()
+    }
+
+
+}
+*/
 
 
 

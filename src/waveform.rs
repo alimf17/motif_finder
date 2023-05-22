@@ -31,6 +31,12 @@ use assume::assume;
 
 use std::time::{Duration, Instant};
 
+use serde::{ser, Serialize,Serializer, Deserialize};
+use serde::de::{
+    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+    VariantAccess, Visitor,
+};
+use serde_big_array::BigArray;
 const WIDE: f64 = 3.0;
 
 //These are based on using floats with a maximum of 8 binary sigfigs
@@ -445,13 +451,37 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "StudentsT")]
+struct StudentsTDef {
+    #[serde(getter = "StudentsT::location")]
+    location: f64,
+    #[serde(getter = "StudentsT::scale")]
+    scale: f64,
+    #[serde(getter = "StudentsT::freedom")]
+    freedom: f64,
+}
+
+impl From<StudentsTDef> for StudentsT {
+
+    fn from(def: StudentsTDef) -> StudentsT {
+        StudentsT::new(def.location, def.scale, def.freedom).unwrap()
+    }
+
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Background {
+    #[serde(with = "StudentsTDef")]
     pub dist: StudentsT,
     pub ar_corrs: Vec<f64>,
+    #[serde(with = "BigArray")]
     pub cdf_lookup: [f64; 8192],
+    #[serde(with = "BigArray")]
     pub f64_lookup: [f64; 8192],
+    #[serde(with = "BigArray")]
     pub pdf_lookup: [f64; 8192],
+    #[serde(with = "BigArray")]
     pub dpdf_lookup: [f64; 8192],
 }
 
