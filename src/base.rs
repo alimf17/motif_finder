@@ -899,7 +899,6 @@ pub struct Motif_Set<'a> {
     signal: Waveform<'a>,
     ln_post: Option<f64>,
     data: &'a Waveform<'a>, 
-    seq: &'a Sequence,
     background: &'a Background,
 }
 
@@ -928,7 +927,6 @@ impl<'a> Motif_Set<'a> {
             signal: self.signal.clone(),
             ln_post: None,
             data: self.data, //pointer
-            seq: self.seq, //pointer
             background: self.background, //pointer
         }
 
@@ -1030,7 +1028,7 @@ impl<'a> Motif_Set<'a> {
     //This _adds_ a new motif, but does not do any testing vis a vis whether such a move will be _accepted_
     fn propose_new_motif(&self) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
-        let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
+        let new_mot = Motif::rand_mot(self.width, self.data.seq()); //rand_mot always generates a possible motif
         let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
         let ln_post = new_set.add_motif(new_mot);
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
@@ -1155,7 +1153,7 @@ impl<'a> Motif_Set<'a> {
            //This was numerically derived, and not a hard rule. I wanted less than 50 kmers per leap
            let threshold = if current_mot.len() < 12 {1} else { (current_mot.len())/2-4}; 
 
-           let kmer_ids = self.seq.all_kmers_within_hamming(&current_mot.best_motif(), threshold);
+           let kmer_ids = self.data.seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold);
 
            let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
 
@@ -1342,7 +1340,6 @@ impl Motif_Set_Def {
             signal: signal,
             ln_post: Some(self.ln_post),
             data: data, 
-            seq: seq,
             background: background,
         }
 
@@ -1418,10 +1415,6 @@ impl<'a> Set_Trace<'a> {
         if recalc_ln_post {
             repoint_set.data = &self.data;
             repoint_set.background = &self.background;
-        }
-        if !std::ptr::eq(&(self.seq), repoint_set.seq) {
-            recalc_ln_post = true;
-            repoint_set.seq = &self.seq;
         }
 
         if recalc_ln_post {
