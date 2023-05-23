@@ -282,24 +282,21 @@ impl Base {
 
 //BEGIN MOTIF
 
-//CANNOT BE SERIALIZED
-#[derive(Clone)]
-pub struct Motif<'a> {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Motif {
 
     peak_height: f64,
     kernel: Kernel,
     pwm: Vec<Base>,
-    poss: bool,
-    seq: &'a Sequence,
 
 }
 
-impl<'a> Motif<'a> {
+impl Motif {
 
     //GENERATORS
     //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
+    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64) -> Motif {
         let kernel = Kernel::new(peak_width, peak_height);
 
         pwm.reserve_exact(MAX_BASE-pwm.len());
@@ -307,69 +304,17 @@ impl<'a> Motif<'a> {
             peak_height: peak_height,
             kernel: kernel,
             pwm: pwm,
-            poss: true,
-            seq: seq,
         };
-
-        m.poss = m.seq.kmer_in_seq(&m.best_motif());
 
         m
     }
 
 
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn from_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
-
+    pub fn from_motif(best_bases: Vec<usize>, peak_width: f64) -> Motif {
+        
         let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
-        pwm = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
-        let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
-
-        let mut rng = rand::thread_rng();
-
-        let sign: f64 = rng.gen();
-        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
-
-        let peak_height: f64 = sign*height_dist.sample(&mut rng);
-
-        let kernel = Kernel::new(peak_width, peak_height);
-
-        let poss = seq.kmer_in_seq(&best_bases);
-
-        Motif {
-            peak_height: peak_height,
-            kernel: kernel,
-            pwm: pwm,
-            poss: poss,
-            seq: seq,
-        }
-
-
-    }
-
-    pub fn recontextualize_motif<'b>(&'a self, seq: &'b Sequence) -> Motif<'b> {
-
-        let mut m = Motif {
-
-            peak_height: self.peak_height,
-            kernel: self.kernel(),
-            pwm: self.pwm(),
-            poss: true,
-            seq: seq,
-        };
-
-        m.poss = m.seq.kmer_in_seq(&m.best_motif());
-        m
-       
-
-    }
-
-    //Safety: best_bases must appear as a subsequence in seq at least once.
-    //        WARNING: failing this safety check will NOT make everything crash and burn. 
-    //        THIS WILL BREAK SILENTLY IF SAFETY GUARENTEES ARE NOT KEPT
-    pub unsafe fn from_clean_motif(best_bases: Vec<usize>, peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
-
-        let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
         pwm = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
         let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
@@ -387,14 +332,14 @@ impl<'a> Motif<'a> {
             peak_height: peak_height,
             kernel: kernel,
             pwm: pwm,
-            poss: true,
-            seq: seq,
         }
 
 
     }
+
+
     
-    pub fn rand_mot(peak_width: f64, seq: &'a Sequence) -> Motif<'a> {
+    pub fn rand_mot(peak_width: f64, seq: &Sequence) -> Motif {
 
         let mut rng = rand::thread_rng();
 
@@ -402,24 +347,23 @@ impl<'a> Motif<'a> {
 
         let mot = seq.random_valid_motif(num_bases);
 
-        unsafe {
-            Self::from_clean_motif(mot, peak_width, &seq)
-        }
+        
+        Self::from_motif(mot, peak_width)
+        
 
     }
 
-    pub fn make_opposite(&self) -> Motif<'a> {
+    pub fn make_opposite(&self) -> Motif {
 
         let mut opposite = self.clone();
 
         opposite.peak_height = -self.peak_height;
-
         opposite.kernel = Kernel::new(self.kernel.get_sd(), -self.peak_height);
         opposite
 
     }
 
-    pub fn scramble_by_id_to_valid(&self, id: usize, opposite: bool) -> Motif<'a> {
+    pub fn scramble_by_id_to_valid(&self, id: usize, opposite: bool, seq: &Sequence) -> Motif {
 
         let mut new_mot: Motif;
         if opposite {
@@ -427,7 +371,7 @@ impl<'a> Motif<'a> {
         } else {
             new_mot = self.clone();
         }
-        let new_best: u64 = self.seq.idth_unique_kmer(self.len(), id);
+        let new_best: u64 = seq.idth_unique_kmer(self.len(), id);
         let old_best: u64 = Sequence::kmer_to_u64(&self.best_motif());
 
         for i in 0..self.len() {
@@ -447,8 +391,6 @@ impl<'a> Motif<'a> {
 
     //Safety: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
     unsafe fn add_momentum(&self, eps: f64, momentum: &[f64]) -> Self {
-
-
 
         let mut new_mot = self.clone();
 
@@ -503,24 +445,17 @@ impl<'a> Motif<'a> {
         self.pwm.len()
     }
 
-    pub fn seq(&self) -> &Sequence {
-        self.seq
-    }
-
-    pub fn poss(&self) -> bool {
-        self.poss
-    }
 
     //PRIORS
 
-    pub fn pwm_prior(&self) -> f64 {
+    pub fn pwm_prior(&self, seq: &Sequence) -> f64 {
 
-        if self.poss {
+        if seq.kmer_in_seq(&self.best_motif()) {
             //We have to normalize by the probability that our kmer is possible
             //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
             //number possible kmers = BASE_L^k, but this actually cancels with our integral
             //over the regions of possible bases, leaving only number unique kmers. 
-            let mut prior = -((self.seq.number_unique_kmers(self.len()) as f64).ln()); 
+            let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
 
             prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln();
             
@@ -562,30 +497,18 @@ impl<'a> Motif<'a> {
         return (bind, reverse)
 
     }
-    /*pub fn prop_binding(&self, kmer: &[usize]) -> f64 { 
 
-        let bind_forward: f64 = self.pwm.iter().zip(kmer).map(|(a, &b)| a.rel_bind(b)).product::<f64>();
+    pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
-        return bind_forward
-
-    }*/
-
-    pub fn return_bind_score(&self) -> (Vec<f64>, Vec<bool>) {
-
-        //let seq = self.seq;
-        let coded_sequence = self.seq.seq_blocks();
-        let block_lens = self.seq.block_lens(); //bp space
-        let block_starts = self.seq.block_u8_starts(); //stored index space
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
 
 
         let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
         let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
 
-        let mut uncoded_seq: Vec<usize> = vec![0; self.seq.max_len()];
-
-        //let seq_ptr = uncoded_seq.as_mut_ptr();
-        //let bind_ptr = bind_scores.as_mut_ptr();
-        //let comp_ptr = rev_comp.as_mut_ptr();
+        let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
 
         let seq_frame = 1+(self.len()/4);
 
@@ -594,10 +517,6 @@ impl<'a> Motif<'a> {
 
         let mut store = Sequence::code_to_bases(coded_sequence[0]);
 
-        //let mut bind_forward: f64 = 1.0;
-        //let mut bind_reverse: f64 = 1.0;
-        
-        //let ilen: isize = self.len() as isize;
 
         {
         let uncoded_seq = uncoded_seq.as_mut_slice();
@@ -609,7 +528,6 @@ impl<'a> Motif<'a> {
                 store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
                 for k in 0..4 {
                     uncoded_seq[4*jd+k] = store[k];
-                    //actual_frame[4*jd+k] = store[k];
                 }
 
             }
@@ -618,10 +536,6 @@ impl<'a> Motif<'a> {
             for j in 0..((block_lens[i])-self.len()) {
 
                 ind = 4*block_starts[i]+(j as usize);
-                //
-                //ind = j+4*(block_starts[i] as isize);
-                //bind_forward = 1.0;
-                //bind_reverse = 1.0;
 
                 
                 let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
@@ -629,7 +543,6 @@ impl<'a> Motif<'a> {
                 
                 (bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) };
                 
-                //(bind_scores[ind], rev_comp[ind]) = self.prop_binding(&uncoded_seq[j..(j+self.len())]);
             }
 
         }
@@ -646,9 +559,9 @@ impl<'a> Motif<'a> {
     //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
     //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
     //      as true will have binding scores of 0
-    pub fn base_check(&self, rev_comp: &Vec<bool>, bp: usize, motif_pos: usize) -> Vec<bool> {
+    pub fn base_check(&self, seq: &Sequence, rev_comp: &Vec<bool>, bp: usize, motif_pos: usize) -> Vec<bool> {
             
-        let coded_sequence = self.seq.seq_blocks();
+        let coded_sequence = seq.seq_blocks();
 
         let rev_pos = self.len()-1-motif_pos;
 
@@ -678,19 +591,17 @@ impl<'a> Motif<'a> {
 
 
     //NOTE: if DATA does not point to the same sequence that self does, this will break. HARD. 
-    pub fn generate_waveform(&'a self, DATA: &'a Waveform) -> Waveform {
+    pub fn generate_waveform<'a>(&self, DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
         let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
-        let (bind_score_floats, bind_score_revs) = self.return_bind_score();
-
-        //let mut count: usize = 0;
+        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-(self.len()-1)/2) {
@@ -713,7 +624,7 @@ impl<'a> Motif<'a> {
 
     }
 
-    pub fn no_height_waveform(&'a self, DATA: &'a Waveform) -> Waveform {
+    pub fn no_height_waveform<'a>(&self, DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
@@ -721,11 +632,11 @@ impl<'a> Motif<'a> {
         //let mut actual_kernel: Kernel = &base_kernel*1.0;
         let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
-        let (bind_score_floats, bind_score_revs) = self.return_bind_score();
+        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
@@ -741,19 +652,19 @@ impl<'a> Motif<'a> {
 
     }
     
-    pub fn only_pos_waveform(&'a self,bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
+    pub fn only_pos_waveform<'a>(&self,bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
         let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
-        let (bind_score_floats, bind_score_revs) = self.return_bind_score();
+        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
 
-        let checked = self.base_check(&bind_score_revs, bp, motif_pos);
+        let checked = self.base_check( DATA.seq(), &bind_score_revs, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
                 if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
@@ -769,15 +680,15 @@ impl<'a> Motif<'a> {
 
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-    unsafe fn generate_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform {
+    unsafe fn generate_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
         let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
 
         for i in 0..starts.len() { //Iterating over each block
@@ -799,7 +710,7 @@ impl<'a> Motif<'a> {
     }
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-    unsafe fn no_height_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform {
+    unsafe fn no_height_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
@@ -807,9 +718,9 @@ impl<'a> Motif<'a> {
         let mut actual_kernel: Kernel = &base_kernel*1.0;
         //let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
@@ -828,17 +739,17 @@ impl<'a> Motif<'a> {
     }
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-    unsafe fn only_pos_waveform_from_binds(&'a self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform {
+    unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
 
         let mut actual_kernel: Kernel = &self.kernel*1.0;
 
-        let starts = self.seq.block_u8_starts();
+        let starts = DATA.seq().block_u8_starts();
 
-        let lens = self.seq.block_lens();
+        let lens = DATA.seq().block_lens();
 
-        let checked = self.base_check(&binds.1, bp, motif_pos);
+        let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
@@ -857,9 +768,9 @@ impl<'a> Motif<'a> {
 
     //TODO: Test the absolute crap out of this, and move the ad_grad and ad_calc calculations OUT of this into the many tf gradient calculation
     //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
-    pub fn single_motif_grad(&'a self,  DATA: &'a Waveform, noise: &'a Noise) -> (f64, Vec<f64>) {
+    pub fn single_motif_grad(&self,  DATA: &Waveform, noise: &Noise) -> (f64, Vec<f64>) {
 
-        let binds = self.return_bind_score();
+        let binds = self.return_bind_score(DATA.seq());
 
 
         let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
@@ -902,21 +813,9 @@ impl<'a> Motif<'a> {
     }
 
     //SAFETY: the d_ad_stat_d_noise must be of the same length as the noise vector we get from DATA.
-    pub unsafe fn parallel_single_motif_grad(&'a self,  DATA: &'a Waveform, d_ad_stat_d_noise: &'a Vec<f64>, d_ad_like_d_ad_stat: f64, background: &'a Background) -> Vec<f64> {
+    pub unsafe fn parallel_single_motif_grad(&self,  DATA: &Waveform, d_ad_stat_d_noise: &Vec<f64>, d_ad_like_d_ad_stat: f64, background: &Background) -> Vec<f64> {
 
-        let binds = self.return_bind_score();
-
-
-        //let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
-
-        //let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
-        
-
-        //End preuse generation
-      
-
-        //let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
-
+        let binds = self.return_bind_score(DATA.seq());
 
         let n = self.len()*(BASE_L-1);
 
@@ -959,7 +858,7 @@ impl<'a> Motif<'a> {
     
 }
 
-impl fmt::Display for Motif<'_> { 
+impl fmt::Display for Motif { 
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const DIGITS: usize = 5;
         
@@ -967,7 +866,7 @@ impl fmt::Display for Motif<'_> {
         write!(f, "Peak height: {:.DIGITS$}. Total peak width (bp): {}\n", self.peak_height, self.kernel.len());
        
         //I want people to be free to define their own bases, if they like
-        //But they will have to change it in the code: it's not my problem
+        //But they will have to change it in the code for formatting: it's not my problem
         //The two extra spaces on either side let the output align in a pretty way
         for b in BPS { write!(f, "  {:<DIGITS$}  ", b); }
         write!(f, "\n");
@@ -990,40 +889,12 @@ impl fmt::Display for Motif<'_> {
     }
 }
 
-//helper object for Motif so that I can (de)serialize the Set_Trace object
-
-#[derive(Serialize, Clone)]
-pub struct MotifDef {
-
-    peak_height: f64,
-    kernel: Kernel,
-    pwm: Vec<Base>,
-
-}
-
-impl<'a> From<&'a Motif<'a>> for MotifDef {
-    fn from(other: &'a Motif) -> Self {
-        Self {
-            peak_height: other.peak_height(),
-            kernel: other.kernel(),
-            pwm: other.pwm(),
-        }
-    }
-}
-
-impl MotifDef {
-
-    pub fn get_motif<'a>(&'a self, seq: &'a Sequence) -> Motif<'a> {
-        Motif::raw_pwm(self.pwm.clone(), self.peak_height, self.kernel.get_sd(), seq)
-    }
-
-}
 
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
 pub struct Motif_Set<'a> {
 
-    set: Vec<Motif<'a>>, 
+    set: Vec<Motif>, 
     width: f64, 
     signal: Waveform<'a>,
     ln_post: Option<f64>,
@@ -1076,7 +947,7 @@ impl<'a> Motif_Set<'a> {
     }
 
     pub fn ln_prior(&self) -> f64 {
-        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior()).sum::<f64>()
+        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(self.data.seq())).sum::<f64>()
     }
 
     pub fn ln_likelihood(&self) -> f64 {
@@ -1110,7 +981,7 @@ impl<'a> Motif_Set<'a> {
         }
     }
 
-    fn add_motif(&mut self, new_mot: Motif<'a>) -> f64 {
+    fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data) ;
         self.set.push(new_mot);
@@ -1119,7 +990,7 @@ impl<'a> Motif_Set<'a> {
 
     }
     
-    fn insert_motif(&mut self, new_mot: Motif<'a>, position: usize) -> f64 {
+    fn insert_motif(&mut self, new_mot: Motif, position: usize) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data) ;
         self.set.insert(position, new_mot);
@@ -1147,7 +1018,7 @@ impl<'a> Motif_Set<'a> {
 
     }
 
-    fn replace_motif(&mut self, new_mot: Motif<'a>, rem_id: usize) -> f64 {
+    fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.set[rem_id].clone();
         self.signal -= &rem_mot.generate_waveform(self.data);
         self.signal += &new_mot.generate_waveform(self.data) ;
@@ -1160,7 +1031,7 @@ impl<'a> Motif_Set<'a> {
     fn propose_new_motif(&self) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let new_mot = Motif::rand_mot(self.width, self.seq); //rand_mot always generates a possible motif
-        let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
+        let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
         let ln_post = new_set.add_motif(new_mot);
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
@@ -1174,7 +1045,7 @@ impl<'a> Motif_Set<'a> {
             let mut new_set = self.derive_set();
             let mut rng = rand::thread_rng();
             let rem_id = rng.gen_range(0..self.set.len());
-            let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_prior();
+            let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_prior(self.data.seq());
             let ln_post = new_set.remove_motif(rem_id);
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
@@ -1195,7 +1066,7 @@ impl<'a> Motif_Set<'a> {
 
             let mut new_mot = self.set[extend_id].clone();
             new_mot.pwm.push(Base::rand_new());
-            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior();
+            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
                 let ln_post = new_set.replace_motif(new_mot, extend_id);
                 let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
@@ -1220,7 +1091,7 @@ impl<'a> Motif_Set<'a> {
 
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
-            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(); //A contracted motif will always exist in the sequence if the longer motif does
+            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq()); //A contracted motif will always exist in the sequence if the longer motif does
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             let base_ln_density = ((BASE_L-1) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(BASE_L as f64)).ln();
             Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
@@ -1290,7 +1161,7 @@ impl<'a> Motif_Set<'a> {
 
            let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
                let mut to_add = base_set.clone();
-               let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1);
+               let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1, self.data.seq());
                let lnlike = to_add.insert_motif(add_mot, id);
                (lnlike, to_add)
            }).collect();
@@ -1435,7 +1306,7 @@ impl<'a> Motif_Set<'a> {
 #[derive(Serialize, Clone)]
 pub struct Motif_Set_Def {
 
-    set: Vec<MotifDef>,
+    set: Vec<Motif>,
     width: f64,
     signal: WaveformDef,
     ln_post: f64,
@@ -1445,12 +1316,10 @@ pub struct Motif_Set_Def {
 impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
     fn from(other: &'a Motif_Set) -> Self {
 
-        //I actually need a reference for MotifDef::from, hence not &a
-        let set: Vec<MotifDef> = other.set.iter().map(|a| MotifDef::from(a)).collect();
         let signal = WaveformDef::from(&other.signal);
 
         Self {
-            set: set, 
+            set: other.set.clone(), 
             width: other.width,
             signal: signal,
             ln_post: other.calc_ln_post(),
@@ -1464,7 +1333,7 @@ impl Motif_Set_Def {
     //        to reconstitute the motif set signal using WaveformDef's get_waveform function
     pub unsafe fn get_motif_set<'a>(&'a self, seq: &'a Sequence, data: &'a Waveform, background: &'a Background) -> Motif_Set<'a> {
         
-        let set: Vec<Motif> = self.set.iter().map(|a| a.get_motif(seq)).collect();
+        let set = self.set.clone();
         let signal = self.signal.get_waveform(seq);
 
         Motif_Set {
@@ -1553,7 +1422,6 @@ impl<'a> Set_Trace<'a> {
         if !std::ptr::eq(&(self.seq), repoint_set.seq) {
             recalc_ln_post = true;
             repoint_set.seq = &self.seq;
-            repoint_set.set = set.set.iter().map(|a| a.recontextualize_motif(&self.seq)).collect();
         }
 
         if recalc_ln_post {
@@ -1883,9 +1751,9 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
+        let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), 20.); //sequence
 
-        let motif2: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,2,20), 20., &sequence)};
+        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), 20.); //sequence
 
         let start = Instant::now();
 
@@ -1905,7 +1773,7 @@ mod tester{
 
         let waveform_raw = waveform.raw_wave();
 
-        let binds = motif.return_bind_score();
+        let binds = motif.return_bind_score(&sequence);
 
         let start_b = Instant::now();
         let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &wave) };
@@ -1925,13 +1793,9 @@ mod tester{
 
         println!("Random motif\n{}", random_motif);
 
-        assert!(random_motif.poss() && sequence.kmer_in_seq(&random_motif.best_motif()));
-
         assert!(random_motif.raw_kern().len() == 121);
 
         assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
-
-        assert!(ptr::eq(&sequence, random_motif.seq()));
 
         let matrix = motif.pwm();
         let nbases = matrix.len();
@@ -1942,6 +1806,9 @@ mod tester{
 
         println!("{:?}", motif.best_motif());
 
+        println!("{:?}", sequence.return_bases(0,0,20));
+        //println!("{:?}", sequence.unique_kmers(motif.len()));
+        println!("{}", Sequence::kmer_to_u64(&motif.best_motif()));
         let matrix = motif.rev_complement();
 
         for base in &matrix {
@@ -1950,12 +1817,13 @@ mod tester{
         
         //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        assert!((motif.pwm_prior()+(motif.seq().number_unique_kmers(motif.len()) as f64).ln()
+        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), (sequence.number_unique_kmers(motif.len()) as f64).ln() -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()));
+        assert!((motif.pwm_prior(&sequence)+(sequence.number_unique_kmers(motif.len()) as f64).ln()
                  -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln())).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 10., &sequence);
+        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 10.);//Sequence
 
-        assert!(un_mot.pwm_prior() < 0.0 && un_mot.pwm_prior().is_infinite());
+        assert!(un_mot.pwm_prior(&sequence) < 0.0 && un_mot.pwm_prior(&sequence).is_infinite());
 
         let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
@@ -2018,7 +1886,7 @@ mod tester{
 
 
         println!("DF");
-        let little_motif: Motif = unsafe{Motif::raw_pwm(mat, 10.0, 1.0, &wave_seq)};
+        let little_motif: Motif = Motif::raw_pwm(mat, 10.0, 1.0); //wave_seq
 
         print!("{}", little_motif);
         println!("{:?}",little_motif.generate_waveform(&wave_wave).raw_wave());
@@ -2030,11 +1898,11 @@ mod tester{
         let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
-        let wave_motif: Motif = unsafe{Motif::raw_pwm(mat, 10.0, 1.0, &small)};
+        let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, 1.0); //small
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.bool()).collect();
 
-        let checked = wave_motif.base_check(&rev_comp, 0, 4);
+        let checked = wave_motif.base_check( &small, &rev_comp, 0, 4);
 
         let forward: Vec<bool> = vec![true, false, false, true, true, false, false, false, true, true, false, false, true, false, false, false, true, true, true, false, true, false, true, false, true, true, false, false, true, false, true, false, true, false, false, false, true, false, true, false, true, true, false, false, false, false, false, false];
 
@@ -2046,7 +1914,7 @@ mod tester{
         println!("checked: {:?}", checked);
 
         println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_u8_starts(), small.return_bases(0, 0, 24));
-        println!("blocks in seq: {:?}", wave_motif.seq().seq_blocks());
+        println!("blocks in seq: {:?}", small.seq_blocks());
 
 
 
@@ -2057,7 +1925,7 @@ mod tester{
                 let ind = if rev_comp[24*i+j] { j+wave_motif.len()-1-4 } else {j+4}; 
                 if ind < 24 {
                     let bp = small.return_bases(i, ind, 1)[0];
-                    let bp2 = wave_motif.seq().return_bases(i, ind, 1)[0];
+                    let bp2 = small.return_bases(i, ind, 1)[0];
                     let matcher = if rev_comp[24*i+j] { bp == 3 } else { bp == 0};
                     println!("start loc: {}, bp: {}, bp2: {}, ind: {}, rev: {}, matcher: {}, checked: {}, correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, checked[24*i+j], correct[24*i+j]);
                     assert!(checked[24*i+j] == matcher);
@@ -2068,13 +1936,13 @@ mod tester{
 
         let start = Instant::now();
 
-        let binds = motif.return_bind_score();
+        let binds = motif.return_bind_score(&sequence);
 
         let duration = start.elapsed();
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
         let start = Instant::now();
-        let checked = motif.base_check(&binds.1, 2, 4);
+        let checked = motif.base_check(&sequence, &binds.1, 2, 4);
         //let checked = motif.base_check(&binds.1, 2, 4, &sequence);
         let duration = start.elapsed();
         println!("Time elapsed in check is: {:?}", duration);
@@ -2103,7 +1971,7 @@ mod tester{
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let wave_sho: Vec<f64> = wave_noh.raw_wave();
 
-        let checked = motif.base_check(&binds.1, 3, 6);
+        let checked = motif.base_check(&sequence, &binds.1, 3, 6);
 
         let start = Instant::now();
         let wave_filter = motif.only_pos_waveform(3, 6, &wave);

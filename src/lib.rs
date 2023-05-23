@@ -36,9 +36,9 @@ fn main() {
     let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
     let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
-    let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
+    let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), 20.);
 
-    let binds = motif.return_bind_score();
+    let binds = motif.return_bind_score(&sequence);
 
 }
 

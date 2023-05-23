@@ -61,7 +61,7 @@ fn main() {
     let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
     let predata: Waveform = Waveform::create_zero( &sequence, 5);
-    let motif: Motif = unsafe{Motif::from_clean_motif(sequence.return_bases(0,0,20), 20., &sequence)};
+    let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), 20.);
 
     let motif2 = Motif::rand_mot(20.,  &sequence);
 
@@ -70,7 +70,7 @@ fn main() {
     let background = Background::new(0.25, 2.64, &corrs);
     
 
-    let binds = motif.return_bind_score();
+    let binds = motif.return_bind_score(&sequence);
 
     let single_wave = motif.generate_waveform(&predata);
     let data = &single_wave+&motif2.generate_waveform(&predata);

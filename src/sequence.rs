@@ -162,7 +162,7 @@ impl Sequence {
         for k in (MIN_BASE..MAX_BASE+1) {
 
             let kmer_arr = self.generate_kmers(k);
-            kmer_nums.insert(k, kmer_arr.len()/k);
+            kmer_nums.insert(k, kmer_arr.len());
             kmer_dict.insert(k, kmer_arr);
         }
 
@@ -334,32 +334,26 @@ impl Sequence {
     //We exploit the ordering of the u64 versions of kmer to binary search
     pub fn kmer_in_seq(&self, kmer: &Vec<usize>) -> bool {
 
-        /* self.block_lens.iter().map(|b| (0..*b).map(|i| self.return_bases(*b, i, kmer.len()).iter().
-                                                  zip(&kmer).map(|(p, q)| p == q).fold(true, |r, s| r && s)).
-                                                  fold(false, |d, e| d || e)).fold(false, |d, e| d || e) */
-
-        //let kmer_coll = self.generate_kmers(kmer.len());
-        //println!("size of kmer collection {}", size_of_val(&*kmer_coll));
-        //kmer_coll.contains(&kmer)
-
         let look_for = Self::kmer_to_u64(kmer);
 
-        let unique_kmer_ptr = self.kmer_dict[&kmer.len()].as_ptr();
+        let unique_kmer_ptr: *const u64 = self.kmer_dict[&kmer.len()].as_ptr();
 
         let mut found = false;
        
         let mut lowbound: isize = 0;
-        let mut upbound: isize = (self.kmer_nums[&kmer.len()]-1) as isize;
+        let mut upbound: isize = (self.kmer_nums[&(kmer.len())]-1) as isize;
         let mut midcheck: isize = (upbound+lowbound)/2;
         
 
         unsafe {
 
+
             found = found || (*unique_kmer_ptr.offset(lowbound) == look_for);
             found = found || (*unique_kmer_ptr.offset(upbound) == look_for);
             
-            let mut terminate = found && !( (*unique_kmer_ptr.offset(lowbound) > look_for) || (*unique_kmer_ptr.offset(upbound) < look_for) ); 
+            let mut terminate = found ||  (*unique_kmer_ptr.offset(lowbound) > look_for) || (*unique_kmer_ptr.offset(upbound) < look_for) ; 
             while !terminate {
+
                 found =  (*unique_kmer_ptr.offset(midcheck) == look_for);
                 if !found {
                     if(*unique_kmer_ptr.offset(midcheck) > look_for) {
