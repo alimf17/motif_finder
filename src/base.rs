@@ -4,6 +4,7 @@ use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
+use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use statrs::function::gamma;
@@ -16,7 +17,7 @@ use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
 
-use serde::{ser, Serialize,Serializer, Deserialize};
+use serde::{ser::*, Serialize,Serializer, Deserialize};
 use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
@@ -346,6 +347,22 @@ impl<'a> Motif<'a> {
 
     }
 
+    pub fn recontextualize_motif<'b>(&'a self, seq: &'b Sequence) -> Motif<'b> {
+
+        let mut m = Motif {
+
+            peak_height: self.peak_height,
+            kernel: self.kernel(),
+            pwm: self.pwm(),
+            poss: true,
+            seq: seq,
+        };
+
+        m.poss = m.seq.kmer_in_seq(&m.best_motif());
+        m
+       
+
+    }
 
     //Safety: best_bases must appear as a subsequence in seq at least once.
     //        WARNING: failing this safety check will NOT make everything crash and burn. 
@@ -975,7 +992,7 @@ impl fmt::Display for Motif<'_> {
 
 //helper object for Motif so that I can (de)serialize the Set_Trace object
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct MotifDef {
 
     peak_height: f64,
@@ -1004,7 +1021,7 @@ impl MotifDef {
 
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
-struct Motif_Set<'a> {
+pub struct Motif_Set<'a> {
 
     set: Vec<Motif<'a>>, 
     width: f64, 
@@ -1069,13 +1086,26 @@ impl<'a> Motif_Set<'a> {
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
         match self.ln_post {
             None => {
-                let mut ln_prior = self.ln_prior();
+                let ln_prior = self.ln_prior();
                 if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                     self.ln_post = Some(ln_prior+self.ln_likelihood());
                 } else{
                     self.ln_post = Some(-f64::INFINITY);
                 }
                 self.ln_post.unwrap()}, 
+            Some(f) => f,
+        }
+    }
+
+    fn calc_ln_post(&self) -> f64 { //ln_posterior() should be preferred if you can mutate self, since it ensures the calculation isn't redone too much
+        match self.ln_post {
+            None => {
+                let mut ln_post: f64 = self.ln_prior();
+                if ln_post > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
+                    ln_post += self.ln_likelihood();
+                } 
+                ln_post
+            }, 
             Some(f) => f,
         }
     }
@@ -1402,6 +1432,57 @@ impl<'a> Motif_Set<'a> {
 }
 
 
+#[derive(Serialize, Clone)]
+pub struct Motif_Set_Def {
+
+    set: Vec<MotifDef>,
+    width: f64,
+    signal: WaveformDef,
+    ln_post: f64,
+
+}
+
+impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
+    fn from(other: &'a Motif_Set) -> Self {
+
+        //I actually need a reference for MotifDef::from, hence not &a
+        let set: Vec<MotifDef> = other.set.iter().map(|a| MotifDef::from(a)).collect();
+        let signal = WaveformDef::from(&other.signal);
+
+        Self {
+            set: set, 
+            width: other.width,
+            signal: signal,
+            ln_post: other.calc_ln_post(),
+        }
+    }
+}
+
+impl Motif_Set_Def {
+
+    //SAFETY: data must be the same dimensions as self.signal, and seq must satisfy the safety guarentees to use self.signal
+    //        to reconstitute the motif set signal using WaveformDef's get_waveform function
+    pub unsafe fn get_motif_set<'a>(&'a self, seq: &'a Sequence, data: &'a Waveform, background: &'a Background) -> Motif_Set<'a> {
+        
+        let set: Vec<Motif> = self.set.iter().map(|a| a.get_motif(seq)).collect();
+        let signal = self.signal.get_waveform(seq);
+
+        Motif_Set {
+            set: set,
+            width: self.width,
+            signal: signal,
+            ln_post: Some(self.ln_post),
+            data: data, 
+            seq: seq,
+            background: background,
+        }
+
+
+    }
+
+}
+
+
 
 
 
@@ -1439,6 +1520,52 @@ impl<'a> Set_Trace<'a> {
             seq: seq, 
             background: background,
         }
+
+    }
+
+
+    //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
+    //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
+    //         To ensure the safety of this function, there is a recalculation step that occurs if the 
+    //         sequence or data changes. I assure you, you do not want this recalculation to occur:
+    //         It's going to be very slow
+    pub fn push_set(&'a mut self, set: Motif_Set<'a>) {
+
+        /*        Motif_Set {
+            set: set,
+            width: self.width,
+            signal: signal,
+            ln_post: Some(self.ln_post),
+            data: data,
+            seq: seq,
+            background: background,
+        }
+        */
+
+        let mut repoint_set = set.clone();
+
+        let mut recalc_ln_post = (!std::ptr::eq(&(self.data), repoint_set.data)) || 
+                                 (!std::ptr::eq(&(self.background), repoint_set.background)) ;
+        if recalc_ln_post {
+            repoint_set.data = &self.data;
+            repoint_set.background = &self.background;
+        }
+        if !std::ptr::eq(&(self.seq), repoint_set.seq) {
+            recalc_ln_post = true;
+            repoint_set.seq = &self.seq;
+            repoint_set.set = set.set.iter().map(|a| a.recontextualize_motif(&self.seq)).collect();
+        }
+
+        if recalc_ln_post {
+            repoint_set.signal = self.data.derive_zero();
+            for i in 0..repoint_set.set.len() {
+                repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data);
+            }
+            repoint_set.ln_post = None;
+            repoint_set.ln_posterior();
+        }
+
+        self.trace.push(repoint_set);
 
     }
 
@@ -1491,29 +1618,33 @@ impl<'a> Set_Trace<'a> {
 
 }
 
-//
-/*
-impl Serialize for Set_Trace<'a> {
+// /*
 
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl Serialize for Set_Trace<'_> {
+
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // 3 is the number of fields in the struct.
         let mut state = serializer.serialize_struct("Set_Trace", 5)?;
+        
+        let trace: Vec<Motif_Set_Def> = self.trace.iter().map(|a| Motif_Set_Def::from(a)).collect();
+        state.serialize_field("trace", &trace)?;
+
         state.serialize_field("capacity", &self.capacity)?;
         state.serialize_field("seq", &self.seq)?;
         state.serialize_field("background", &self.background)?;
 
-        state.serialize_field("data", WaveformDef::from(&self.data))?;
+        state.serialize_field("data", &WaveformDef::from(&self.data))?;
+
+
 
         state.end()
     }
 
 
 }
-//
- */
+// */
 
 
 

@@ -10,6 +10,8 @@ use core::f64::consts::PI;
 use crate::sequence::Sequence;
 use statrs::distribution::StudentsT;
 use statrs::distribution::{Continuous, ContinuousCDF};
+use statrs::Result as otherResult;
+
 
 use aberth::aberth;
 use num_complex::Complex;
@@ -452,7 +454,7 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Clone)]
 pub struct WaveformDef {
     wave: Vec<f64>,
     spacer: usize,
