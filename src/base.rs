@@ -5,7 +5,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
-use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
+use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use statrs::function::gamma;
 use statrs::{consts, Result, StatsError};
@@ -1301,12 +1301,12 @@ impl<'a> Motif_Set<'a> {
 }
 
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Motif_Set_Def {
 
     set: Vec<Motif>,
     width: f64,
-    signal: WaveformDef,
+    signal: Waveform_Def,
     ln_post: f64,
 
 }
@@ -1314,7 +1314,7 @@ pub struct Motif_Set_Def {
 impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
     fn from(other: &'a Motif_Set) -> Self {
 
-        let signal = WaveformDef::from(&other.signal);
+        let signal = Waveform_Def::from(&other.signal);
 
         Self {
             set: other.set.clone(), 
@@ -1327,12 +1327,14 @@ impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
 
 impl Motif_Set_Def {
 
-    //SAFETY: data must be the same dimensions as self.signal, and seq must satisfy the safety guarentees to use self.signal
-    //        to reconstitute the motif set signal using WaveformDef's get_waveform function
-    pub unsafe fn get_motif_set<'a>(&'a self, seq: &'a Sequence, data: &'a Waveform, background: &'a Background) -> Motif_Set<'a> {
+    //SAFETY: data must be the same dimensions as self.signal, both in absolute length of the signal and the
+    //        values at each position of the point_lens, start_lens, and spacer
+    //        Memory safety may be POSSIBLE with less strict requirements, but it's guarenteed with these
+    //        Which also guarentee the correctness of this code. 
+    pub unsafe fn get_motif_set<'a>(self, data: &'a Waveform, background: &'a Background) -> Motif_Set<'a> {
         
         let set = self.set.clone();
-        let signal = self.signal.get_waveform(seq);
+        let signal = self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq());
 
         Motif_Set {
             set: set,
@@ -1373,7 +1375,7 @@ pub struct Set_Trace<'a> {
 
 impl<'a> Set_Trace<'a> {
 
-    pub fn new(capacity: usize, seq: Sequence, data: Waveform<'a>, background: Background) -> Set_Trace<'a> {
+    pub fn new_empty(capacity: usize, seq: Sequence, data: Waveform<'a>, background: Background) -> Set_Trace<'a> {
 
         if !std::ptr::eq(data.seq(), &seq) {
             panic!("Your data needs to be associated with your sequence!");
@@ -1430,6 +1432,43 @@ impl<'a> Set_Trace<'a> {
 
     }
 
+    pub fn push_set_def(&'a mut self, set: Motif_Set_Def) {
+
+        /*        Motif_Set {
+            set: set,
+            width: self.width,
+            signal: signal,
+            ln_post: Some(self.ln_post),
+            data: data,
+            seq: seq,
+            background: background,
+        }
+        */
+
+        let mut repoint_set = unsafe{set.get_motif_set(&self.data, &self.background)};
+
+        repoint_set.signal = self.data.derive_zero();
+        for i in 0..repoint_set.set.len() {
+            repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data);
+        }
+        repoint_set.ln_post = None;
+        repoint_set.ln_posterior();
+
+        self.trace.push(repoint_set);
+
+    }
+
+    //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
+    //      just give you a wrong answer that seems to work
+    pub fn push_set_def_trust_like(&'a mut self, set: Motif_Set_Def) {
+        self.trace.push(unsafe{set.get_motif_set(&self.data, &self.background)});
+    }
+
+    pub fn push_set_def_trust_like_many(&'a mut self, sets: Vec<Motif_Set_Def>) {
+        for set in sets {
+            self.trace.push(unsafe{set.get_motif_set(&self.data, &self.background)});
+        }
+    }
 
     //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
     //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
@@ -1475,11 +1514,109 @@ impl<'a> Set_Trace<'a> {
     fn current_set<'b>(&self) -> Motif_Set<'a> {
         self.trace[self.trace.len()-1].clone()
     }
+    
+    fn save_and_drop_history(&mut self) -> Set_Trace_Def {
+
+        let len_trace = self.trace.len();
+
+        //We want to keep the last element in the Set_Trace, so that the markov chain can proceed
+        let trace = self.trace.drain(0..(len_trace-1)).map(|a| Motif_Set_Def::from(&a)).collect();
+
+
+        Set_Trace_Def {
+            trace: trace, 
+            capacity: self.capacity, 
+            data: Waveform_Def::from(&self.data),
+            seq: self.seq.clone(),
+            background: self.background.clone(),
+        }
+    }
+
+    //SAFETY: the seq MUST be a clone of what data is currently pointing to, and the set trace MUST be empty
+    //This is EXTREMELY unsafe otherwise. 
+    /*unsafe fn repoint(&mut self) {
+        self.data.repoint(&self.seq);
+    }*/
+
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Set_Trace_Def {
+
+    trace: Vec<Motif_Set_Def>,
+    capacity: usize,
+    data: Waveform_Def,
+    seq: Sequence,
+    background: Background,
 
 
 }
 
-// /*
+impl Set_Trace_Def {
+ 
+    //You may have noticed that this is a self, not a &self
+    //That's intentional. I want Rust to straight up drop the Set_Trace_Def that calls this
+    //Remember, this is a super fancy Metropolis-Hastings done on GENOME scale data. 
+    //We're compute and memory constrained. 
+    fn pre_repoint_set_trace(&self) -> Set_Trace {
+
+        let mut trace = Vec::<Motif_Set>::with_capacity(self.capacity);
+
+        //let last_item = self.trace.pop().unwrap();
+
+        let (point_lens, start_dats) = Waveform::make_dimension_arrays(&self.seq, self.data.spacer());
+
+        let data_len = point_lens.last().unwrap()+start_dats.last().unwrap();
+        let safe = (self.data.len() == data_len);
+
+        //(last_item.signal.len() == data_len);
+
+        //This guarentees the memory safety of get_waveform() for the data waveform.
+        //There's no graceful way to recover from the data signal being incompatible
+        //with your sequence, so we burn everything to the ground.
+        if !safe { panic!("Sequence structure is incompatible with data structure!!!!")}
+
+        let data = unsafe{ self.data.clone().get_waveform(point_lens, start_dats, &self.seq) };
+
+        //trace.push(unsafe{last_item.get_motif_set(&self.data, &self.background)});
+
+        Set_Trace{
+
+            trace: trace, 
+            capacity: self.capacity, 
+            data: data,
+            seq: self.seq.clone(),
+            background: self.background.clone(),
+
+        }
+     
+    }
+
+    //SAFETY: self and the set trace must have identical sequences and data
+    unsafe fn load_last_state<'a>(&'a self, load_into_set: &'a mut Set_Trace<'a>) {
+
+        let seq_ptr = &load_into_set.seq as *const Sequence;
+        load_into_set.data.repoint(seq_ptr);
+        load_into_set.push_set_def_trust_like((self.trace.last().unwrap().clone()));
+
+    }
+
+    //SAFETY: self and the set trace must have identical sequences and data
+    //NOTE: the safety guarantee also guarantees that push_set_def_trust_like is fine
+    unsafe fn load_every_state_trusted_likes<'a>(&'a self, load_into_set: &'a mut Set_Trace<'a>) {
+        
+        let seq_ptr = &load_into_set.seq as *const Sequence;
+        load_into_set.data.repoint(seq_ptr);
+        load_into_set.push_set_def_trust_like_many((self.trace.clone()));
+    
+    }
+
+}
+
+
+
+// 
+/*
 
 impl Serialize for Set_Trace<'_> {
 
@@ -1496,7 +1633,7 @@ impl Serialize for Set_Trace<'_> {
         state.serialize_field("seq", &self.seq)?;
         state.serialize_field("background", &self.background)?;
 
-        state.serialize_field("data", &WaveformDef::from(&self.data))?;
+        state.serialize_field("data", &Waveform_Def::from(&self.data))?;
 
 
 
@@ -1505,6 +1642,18 @@ impl Serialize for Set_Trace<'_> {
 
 
 }
+
+
+
+impl<'de> Deserialize<'de> for Set_Trace {
+    fn deserialize<D>(deserializer: D) -> Result<i32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_i32(I32Visitor)
+    }
+}
+
 // */
 
 

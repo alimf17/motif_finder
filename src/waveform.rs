@@ -121,16 +121,39 @@ pub struct Waveform<'a> {
 impl<'a> Waveform<'a> {
 
     /*
-       This function has an additional constraint:
+       This function has an additional constraint for correctness:
 
        The start_data must be organized in accordance with spacer and sequence.
        In particular, each block must have 1+floor((block length-1)/spacer) data points
        HOWEVER, this initializer only knows TO panic if the total number of data points
        cannot be reconciled with seq and spacer. If you have one too MANY points in one
-       block and one too FEW points in another, this will NOT know to break. 
+       block and one too FEW points in another, this will NOT know to break. If you get 
+       this wrong, your run will be memory safe, but it will give garbage and incorrect
+       answers.
        */
     pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
 
+
+        let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
+        
+        if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
+            panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
+        }
+
+
+
+        let tot_L: usize = point_lens.iter().sum();
+
+        Waveform {
+            wave: start_data,
+            spacer: spacer,
+            point_lens: point_lens,
+            start_dats: start_dats,
+            seq: seq,
+        }
+    }
+
+    pub fn make_dimension_arrays(seq: &'a Sequence, spacer: usize) -> (Vec<usize>, Vec<usize>) {
 
         /*We require that all data begin with the 0th base for mainly this reason
           We are using the usize round down behavior here to denote how many
@@ -148,28 +171,16 @@ impl<'a> Waveform<'a> {
          */
         let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| 1+((a-1)/spacer)).collect();
 
-        if point_lens.iter().sum::<usize>() != start_data.len() {
-            panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
-        }
+        let mut size: usize = 0;
 
         let mut start_dats: Vec<usize> = Vec::new();
-
-        let mut size: usize = 0;
 
         for i in 0..point_lens.len(){
             start_dats.push(size);
             size += point_lens[i];
         }
 
-        let tot_L: usize = point_lens.iter().sum();
-
-        Waveform {
-            wave: start_data,
-            spacer: spacer,
-            point_lens: point_lens,
-            start_dats: start_dats,
-            seq: seq,
-        }
+        (point_lens, start_dats)
     }
 
     pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
@@ -339,6 +350,10 @@ impl<'a> Waveform<'a> {
         self.seq
     }
 
+    //SAFETY: the seq MUST be a clone of what data is currently pointing to
+    pub unsafe fn repoint(&mut self, seq: *const Sequence) {
+        self.seq = &*seq;
+    }
 }
 
 impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {
@@ -454,44 +469,50 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 
 }
 
-#[derive(Serialize, Clone)]
-pub struct WaveformDef {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Waveform_Def {
     wave: Vec<f64>,
     spacer: usize,
-    point_lens: Vec<usize>,
-    start_dats: Vec<usize>,
 
 }
-impl<'a> From<&'a Waveform<'a>> for WaveformDef {
+impl<'a> From<&'a Waveform<'a>> for Waveform_Def {
     fn from(other: &'a Waveform) -> Self {
         Self {
             wave: other.raw_wave(),
             spacer: other.spacer(),
-            point_lens: other.point_lens(),
-            start_dats: other.start_dats(),
         }
     }
 }
 
-impl WaveformDef {
+impl Waveform_Def {
 
     //SAFETY: If the relevant lengths of the waveform do not correspond to the sequence, this will be unsafe. 
     //        By correspond, I mean that every element of point_lens needs to be 1+seq.block_lens/spacer
-    //        And start_dats needs to match the cumulative sum of point_lens. 
-    pub unsafe fn get_waveform<'a>(&'a self, seq: &'a Sequence) -> Waveform<'a> {
+    //        And start_dats needs to match the cumulative sum of point_lens. self.wave.len() must also equal
+    //        point_lens.last().unwrap()+start_dats.last().unwrap(). 
+    //
+    //ACCURACY:  Make sure that wave is in fact organized into the blocks implied by point_lens and start_dats.
+    pub unsafe fn get_waveform<'a>(self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
 
         Waveform {
 
-            wave: self.wave.clone(),
+            wave: self.wave,
             spacer: self.spacer, 
-            point_lens: self.point_lens.clone(),
-            start_dats: self.start_dats.clone(),
+            point_lens: point_lens,
+            start_dats: start_dats,
             seq: seq
         }
 
 
     }
 
+    pub fn len(&self) -> usize {
+        self.wave.len()
+    }
+
+    pub fn spacer(&self) -> usize {
+        self.spacer
+    }
 }
 
 #[derive(Serialize, Deserialize)]
