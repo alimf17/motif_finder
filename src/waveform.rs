@@ -350,10 +350,11 @@ impl<'a> Waveform<'a> {
         self.seq
     }
 
+    /*
     //SAFETY: the seq MUST be a clone of what data is currently pointing to
     pub unsafe fn repoint(&mut self, seq: *const Sequence) {
         self.seq = &*seq;
-    }
+    }*/
 }
 
 impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {

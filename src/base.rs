@@ -1361,9 +1361,9 @@ impl Motif_Set_Def {
 pub struct Set_Trace<'a> {
     trace: Vec<Motif_Set<'a>>,
     capacity: usize,
-    data: Waveform<'a>, 
-    seq: Sequence,
-    background: Background,
+    data: &'a Waveform<'a>, 
+    seq: &'a Sequence,
+    background: &'a Background,
 }
 
 
@@ -1375,9 +1375,10 @@ pub struct Set_Trace<'a> {
 
 impl<'a> Set_Trace<'a> {
 
-    pub fn new_empty(capacity: usize, seq: Sequence, data: Waveform<'a>, background: Background) -> Set_Trace<'a> {
+    //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
+    pub fn new_empty(capacity: usize, seq: &'a Sequence, data: &'a Waveform<'a>, background: &'a Background) -> Set_Trace<'a> {
 
-        if !std::ptr::eq(data.seq(), &seq) {
+        if !std::ptr::eq(data.seq(), seq) {
             panic!("Your data needs to be associated with your sequence!");
         }
 
@@ -1412,8 +1413,8 @@ impl<'a> Set_Trace<'a> {
 
         let mut repoint_set = set.clone();
 
-        let mut recalc_ln_post = (!std::ptr::eq(&(self.data), repoint_set.data)) || 
-                                 (!std::ptr::eq(&(self.background), repoint_set.background)) ;
+        let mut recalc_ln_post = (!std::ptr::eq((self.data), repoint_set.data)) || 
+                                 (!std::ptr::eq((self.background), repoint_set.background)) ;
         if recalc_ln_post {
             repoint_set.data = &self.data;
             repoint_set.background = &self.background;
@@ -1514,7 +1515,7 @@ impl<'a> Set_Trace<'a> {
     fn current_set<'b>(&self) -> Motif_Set<'a> {
         self.trace[self.trace.len()-1].clone()
     }
-    
+   /* 
     fn save_and_drop_history(&mut self) -> Set_Trace_Def {
 
         let len_trace = self.trace.len();
@@ -1531,7 +1532,7 @@ impl<'a> Set_Trace<'a> {
             background: self.background.clone(),
         }
     }
-
+*/
     //SAFETY: the seq MUST be a clone of what data is currently pointing to, and the set trace MUST be empty
     //This is EXTREMELY unsafe otherwise. 
     /*unsafe fn repoint(&mut self) {
@@ -1539,7 +1540,7 @@ impl<'a> Set_Trace<'a> {
     }*/
 
 }
-
+/*
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Set_Trace_Def {
 
@@ -1612,7 +1613,7 @@ impl Set_Trace_Def {
     }
 
 }
-
+*/
 
 
 // 
