@@ -493,11 +493,11 @@ impl Waveform_Def {
     //        point_lens.last().unwrap()+start_dats.last().unwrap(). 
     //
     //ACCURACY:  Make sure that wave is in fact organized into the blocks implied by point_lens and start_dats.
-    pub unsafe fn get_waveform<'a>(self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
+    pub unsafe fn get_waveform<'a>(&self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
 
         Waveform {
 
-            wave: self.wave,
+            wave: self.wave.clone(),
             spacer: self.spacer, 
             point_lens: point_lens,
             start_dats: start_dats,
@@ -645,7 +645,6 @@ impl Background {
 }
 
 
-//CANNOT BE SERIALIZED
 #[derive(Clone)]
 pub struct Noise<'a> {
     resids: Vec<f64>,
@@ -704,33 +703,6 @@ impl<'a> Noise<'a> {
         
     }
 
-    /*
-    pub fn rankVec(&self, vecInds: &Vec<usize>) -> Vec<usize> {
-        
-        let pivot = vecInds[((vecInds.len()-1)/2)];
-
-        let (preInds0, prepreInds1): (Vec<&usize>, Vec<&usize>) = vecInds.iter().partition(|&a| self.resids[*a] < self.resids[pivot]);
-
-        let (allSet, preInds1): (Vec<&usize>, Vec<&usize>) = prepreInds1.iter().partition(|&a| self.resids[**a] <= self.resids[pivot]);
-        let vecInds0: Vec<usize> = preInds0.iter().map(|&a| *a).collect();
-        //let vecSet: Vec<usize> = allSet.iter().map(|&a| *a).collect();
-        let vecInds1: Vec<usize> = preInds1.iter().map(|&a| *a).collect();
-
-
-        let mut coll = allSet.iter().map(|&a| *a).collect::<Vec<usize>>();
-        if vecInds0.len() != 0 {
-            let colInds0 = if vecInds0.len() == 1 { vecInds0 } else { self.rankVec(&vecInds0) };
-            coll = colInds0.iter().chain(coll.iter()).map(|&a| a).collect();
-        }
-        if vecInds1.len() != 0 {
-            let colInds1 = if vecInds1.len() == 1 { vecInds1 } else { self.rankVec(&vecInds1) };
-            coll = coll.iter().chain(colInds1.iter()).map(|&a| a).collect();
-        }
-        coll
-
-
-
-    }*/
 
     pub fn ad_calc(&self) -> f64 {
 

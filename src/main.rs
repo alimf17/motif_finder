@@ -2,6 +2,7 @@
 mod base;
 mod sequence;
 mod waveform;
+mod data_struct;
 
 /*use crate::base::bases::Base;
 use crate::base::bases::GBase;

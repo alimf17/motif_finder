@@ -1362,7 +1362,6 @@ pub struct Set_Trace<'a> {
     trace: Vec<Motif_Set<'a>>,
     capacity: usize,
     data: &'a Waveform<'a>, 
-    seq: &'a Sequence,
     background: &'a Background,
 }
 
@@ -1376,17 +1375,13 @@ pub struct Set_Trace<'a> {
 impl<'a> Set_Trace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_empty(capacity: usize, seq: &'a Sequence, data: &'a Waveform<'a>, background: &'a Background) -> Set_Trace<'a> {
+    pub fn new_empty(capacity: usize, data: &'a Waveform<'a>, background: &'a Background) -> Set_Trace<'a> {
 
-        if !std::ptr::eq(data.seq(), seq) {
-            panic!("Your data needs to be associated with your sequence!");
-        }
 
         Set_Trace{
             trace: Vec::<Motif_Set<'a>>::with_capacity(capacity),
             capacity: capacity, 
             data: data, 
-            seq: seq, 
             background: background,
         }
 
@@ -1515,7 +1510,8 @@ impl<'a> Set_Trace<'a> {
     fn current_set<'b>(&self) -> Motif_Set<'a> {
         self.trace[self.trace.len()-1].clone()
     }
-   /* 
+
+    /*    
     fn save_and_drop_history(&mut self) -> Set_Trace_Def {
 
         let len_trace = self.trace.len();
@@ -1532,13 +1528,14 @@ impl<'a> Set_Trace<'a> {
             background: self.background.clone(),
         }
     }
-*/
+
     //SAFETY: the seq MUST be a clone of what data is currently pointing to, and the set trace MUST be empty
     //This is EXTREMELY unsafe otherwise. 
     /*unsafe fn repoint(&mut self) {
         self.data.repoint(&self.seq);
     }*/
 
+    */
 }
 /*
 #[derive(Serialize, Deserialize, Clone)]
@@ -1614,48 +1611,6 @@ impl Set_Trace_Def {
 
 }
 */
-
-
-// 
-/*
-
-impl Serialize for Set_Trace<'_> {
-
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("Set_Trace", 5)?;
-        
-        let trace: Vec<Motif_Set_Def> = self.trace.iter().map(|a| Motif_Set_Def::from(a)).collect();
-        state.serialize_field("trace", &trace)?;
-
-        state.serialize_field("capacity", &self.capacity)?;
-        state.serialize_field("seq", &self.seq)?;
-        state.serialize_field("background", &self.background)?;
-
-        state.serialize_field("data", &Waveform_Def::from(&self.data))?;
-
-
-
-        state.end()
-    }
-
-
-}
-
-
-
-impl<'de> Deserialize<'de> for Set_Trace {
-    fn deserialize<D>(deserializer: D) -> Result<i32, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_i32(I32Visitor)
-    }
-}
-
-// */
 
 
 
