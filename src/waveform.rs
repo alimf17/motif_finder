@@ -625,18 +625,19 @@ impl Background {
     pub fn cdf(&self, calc: f64) -> f64{
 
         let ind = Self::get_lookup_index(calc);
-        unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))} //linear approx
+        let diff = calc-unsafe{self.get_near_f64_from_ind(ind)};
+        unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(diff)+*self.dpdf_lookup.get_unchecked(ind)*diff.powi(2)} //quadratic approx
     }
     pub fn pdf(&self, calc: f64) -> f64{
         let ind = Self::get_lookup_index(calc);
-        unsafe{ *self.pdf_lookup.get_unchecked(ind) + *self.dpdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))}
+        unsafe{ *self.pdf_lookup.get_unchecked(ind) + *self.dpdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))} //linear approx
     }
 
     //SAFETY: you need to know that you have a valid lookup index
-    pub unsafe fn cdf_from_ind(&self, calc_ind: usize) -> f64{
+    unsafe fn cdf_from_ind(&self, calc_ind: usize) -> f64{
         *self.cdf_lookup.get_unchecked(calc_ind)
     }
-    pub unsafe fn pdf_from_ind(&self, calc_ind: usize) -> f64{
+    unsafe fn pdf_from_ind(&self, calc_ind: usize) -> f64{
         *self.pdf_lookup.get_unchecked(calc_ind)
     }
 

@@ -48,7 +48,7 @@ pub struct Sequence {
 */
 impl Sequence {
     
-    pub fn new(blocks: &Vec<Vec<usize>>) -> Sequence {
+    pub fn new(blocks: Vec<Vec<usize>>) -> Sequence {
 
         let mut block_is: Vec<usize> = Vec::new();
 

@@ -22,7 +22,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-pub const BPS: [&str; 4] = ["A", "C", "G", "T"];
+pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
@@ -1537,80 +1537,21 @@ impl<'a> Set_Trace<'a> {
 
     */
 }
-/*
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Set_Trace_Def {
 
     trace: Vec<Motif_Set_Def>,
     capacity: usize,
-    data: Waveform_Def,
-    seq: Sequence,
-    background: Background,
-
+    data_name: String,
 
 }
+
 
 impl Set_Trace_Def {
  
-    //You may have noticed that this is a self, not a &self
-    //That's intentional. I want Rust to straight up drop the Set_Trace_Def that calls this
-    //Remember, this is a super fancy Metropolis-Hastings done on GENOME scale data. 
-    //We're compute and memory constrained. 
-    fn pre_repoint_set_trace(&self) -> Set_Trace {
-
-        let mut trace = Vec::<Motif_Set>::with_capacity(self.capacity);
-
-        //let last_item = self.trace.pop().unwrap();
-
-        let (point_lens, start_dats) = Waveform::make_dimension_arrays(&self.seq, self.data.spacer());
-
-        let data_len = point_lens.last().unwrap()+start_dats.last().unwrap();
-        let safe = (self.data.len() == data_len);
-
-        //(last_item.signal.len() == data_len);
-
-        //This guarentees the memory safety of get_waveform() for the data waveform.
-        //There's no graceful way to recover from the data signal being incompatible
-        //with your sequence, so we burn everything to the ground.
-        if !safe { panic!("Sequence structure is incompatible with data structure!!!!")}
-
-        let data = unsafe{ self.data.clone().get_waveform(point_lens, start_dats, &self.seq) };
-
-        //trace.push(unsafe{last_item.get_motif_set(&self.data, &self.background)});
-
-        Set_Trace{
-
-            trace: trace, 
-            capacity: self.capacity, 
-            data: data,
-            seq: self.seq.clone(),
-            background: self.background.clone(),
-
-        }
-     
-    }
-
-    //SAFETY: self and the set trace must have identical sequences and data
-    unsafe fn load_last_state<'a>(&'a self, load_into_set: &'a mut Set_Trace<'a>) {
-
-        let seq_ptr = &load_into_set.seq as *const Sequence;
-        load_into_set.data.repoint(seq_ptr);
-        load_into_set.push_set_def_trust_like((self.trace.last().unwrap().clone()));
-
-    }
-
-    //SAFETY: self and the set trace must have identical sequences and data
-    //NOTE: the safety guarantee also guarantees that push_set_def_trust_like is fine
-    unsafe fn load_every_state_trusted_likes<'a>(&'a self, load_into_set: &'a mut Set_Trace<'a>) {
-        
-        let seq_ptr = &load_into_set.seq as *const Sequence;
-        load_into_set.data.repoint(seq_ptr);
-        load_into_set.push_set_def_trust_like_many((self.trace.clone()));
-    
-    }
 
 }
-*/
 
 
 
