@@ -74,13 +74,22 @@ impl All_Data {
         &self.background
     }
  
-    //TODO: Read from FASTA file and data table, then synchronize
+
     //SAFETY: I'm spending a lot of effort to validate your FASTA file
     //If your FASTA file is invalid and it somehow gets through, 
-    //there will be parts of the code that are unsafe.
-
-    //At the end of this function, we will have a Vector of usizes in terms of bases
-    fn process_fasta(fasta_file_name: &str, null_char: Option<char>, seq_lines_are_contiguous: bool) -> (Vec<Vec<usize>>, String) {
+    //there will be parts of the code that are unsafe. This WILL panic if:
+    //
+    //  1) Your file doesn't exist. 
+    //  2) Your file doesn't start with '>'
+    //  3) You have ANY characters that aren't bases or a null character (usually, 'N', or 'X') on a line that doesn't start with '>'
+    //
+    //At the end of this function, we will have a Vector of usizes in terms of bases, 
+    //with null bases being marked with an index of BASE_L.
+    //WARNING: ALL sequences in your FASTA file will be considered a single continguous block. 
+    //         If they are not, why not? The FASTA file input shouldn't be fragments: it should be
+    //         a reference genome.
+    //and the String that will be used to make the file name for the full data struct
+    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> (Vec<usize>, String) {
 
         let file_string = fs::read_to_string(fasta_file_name).expect("Invalid file name!");
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
@@ -92,10 +101,8 @@ impl All_Data {
               .chars().all(|c| c.is_whitespace()) {_ = fasta_as_vec.pop();}
 
 
-        let mut base_vec: Vec<Vec<usize>> = Vec::new();
+        let mut base_vec: Vec<usize> = Vec::new();
        
-        let mut outer_index = 0usize;
-
         let mut fasta_iter = fasta_as_vec.iter().enumerate();
 
         let first_line = fasta_iter.next().expect("FASTA file should not be empty!");
@@ -104,38 +111,20 @@ impl All_Data {
             panic!("{}", ILLEGAL_FASTA_FILE_PANIC);
         }
 
-        let mut last_null = true;   //We need to make sure that skip all BLOCKS of null characters, not at each null 
-        
-        base_vec[0] = Vec::new();
         for (line_pos, line) in fasta_iter {
 
             if line.starts_with('>'){
-                if seq_lines_are_contiguous { 
-                    continue;
-                }
-                if !last_null {
-                    outer_index+=1;
-                    base_vec[outer_index] = Vec::new();
-                    last_null = true;
-                }
                 continue;
             }
-
             for (char_pos, chara) in line.chars().enumerate(){
 
                 if (Some(chara) == null_char) {
-                    if !last_null {
-                        outer_index += 1; 
-                        base_vec[outer_index] = Vec::new();
-                    }
-                    last_null = true;
-                    continue;
+                    base_vec.push(BASE_L);
+                } else {
+                    base_vec.push(*((*GET_BASE_USIZE)
+                            .get(&chara)
+                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1))))); 
                 }
-                last_null = false;
-
-                base_vec[outer_index].push(*((*GET_BASE_USIZE).get(&chara)
-                                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1))))); 
-
             }
 
         }
