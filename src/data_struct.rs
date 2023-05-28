@@ -287,9 +287,16 @@ impl All_Data {
 
         let mut filtered = vec![0.0_f64; connected.len()-ar_coeffs.len()];
 
-        todo!()
+        let l_c = ar_coeffs.len();
 
+        let mut block = connected[l_c..].to_vec();
 
+        for i in 0..l_c {
+            for j in 0..block.len() {
+                block[j] -= (ar_coeffs[i]*connected[l_c+j-(i+1)]);
+            }
+        }
+        Some(block)
     }
 
 
