@@ -298,12 +298,13 @@ impl<'a> Waveform<'a> {
             let sind: usize = if k == 0 {0} else {end_dats[k-1]};
 
 
-            let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].iter().zip(resid[(sind+l_c-1)..(end_dats[k]-1)].iter()).map(|(a,b)| a-background.ar_corrs[0]*b).collect();
+            let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].to_vec();//.iter().zip(resid[(sind+l_c-1)..(end_dats[k]-1)].iter()).map(|(a,b)| a-background.ar_corrs[0]*b).collect();
             
-            if l_c > 1 {
+            for i in 0..l_c {
+                //block = block.iter().zip(resid[(sind+l_c-(i+1))..(end_dats[k]-(i+1))].iter()).map(|(a,b)| a-background.ar_corrs[i]*b).collect();
             
-                for i in 1..l_c {
-                    block = block.iter().zip(resid[(sind+l_c-(i+1))..(end_dats[k]-(i+1))].iter()).map(|(a,b)| a-background.ar_corrs[i]*b).collect();
+                for j in 0..block.len() {
+                    block[j] -= (background.ar_corrs[i]*resid[sind+l_c+j-(i+1)]);
                 }
             }
 

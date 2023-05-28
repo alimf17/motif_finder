@@ -17,6 +17,8 @@ use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
 
+use nalgebra::{DMatrix, DVector, dvector};
+
 use serde::{ser::*, Serialize,Serializer, Deserialize};
 use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
@@ -1456,13 +1458,13 @@ impl<'a> Set_Trace<'a> {
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
-    pub fn push_set_def_trust_like(&'a mut self, set: Motif_Set_Def) {
-        self.trace.push(unsafe{set.get_motif_set(&self.data, &self.background)});
+    unsafe fn push_set_def_trust_like(&'a mut self, set: Motif_Set_Def) {
+        self.trace.push(set.get_motif_set(&self.data, &self.background));
     }
 
-    pub fn push_set_def_trust_like_many(&'a mut self, sets: Vec<Motif_Set_Def>) {
+    unsafe fn push_set_def_trust_like_many(&'a mut self, sets: Vec<Motif_Set_Def>) {
         for set in sets {
-            self.trace.push(unsafe{set.get_motif_set(&self.data, &self.background)});
+            self.trace.push(set.get_motif_set(&self.data, &self.background));
         }
     }
 

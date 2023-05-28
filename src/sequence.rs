@@ -460,7 +460,7 @@ mod tests {
 
         let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0], vec![2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
 
-        let mut press = Sequence::new(&blocked);
+        let mut press = Sequence::new(blocked);
 
         let bases = [0,1,2,3];
 
@@ -484,7 +484,7 @@ mod tests {
 
         let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
 
-        let press2 = Sequence::new(&alt_block);
+        let press2 = Sequence::new(alt_block);
 
         let atemers = press2.generate_kmers(8);
 
