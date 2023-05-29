@@ -330,7 +330,7 @@ impl All_Data {
             sd_guess = (total_sample_variance*(df_guess-2.0)/df_guess).sqrt();
 
             error = false;
-            while !error && dist.abs() > 1e-7 {
+            while !error && dist.abs() > 1e-3 {
 
                 let old_df_guess = df_guess;
                 let old_sd_guess = sd_guess;
@@ -340,7 +340,7 @@ impl All_Data {
                 sd_guess += eps*d_sd;
                 df_guess += eps*d_df;
 
-                dist = ((df_guess-old_df_guess).powi(2)+(sd_guess-old_sd_guess).powi(2)).sqrt();
+                dist = (d_sd).powi(2)+(d_df).powi(2).sqrt();
 
                 //println!("Current guesses: {} {} {} {}", df_guess, sd_guess, dist, eps);
 
