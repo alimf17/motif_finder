@@ -270,7 +270,18 @@ impl All_Data {
 
     }
 
-    fn yule_walker_ar_coefficients_with_bic(){
+    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>) -> Background {
+
+        //let total_sample_variance = raw_data_blocks.iter().flatten(|a| a.powi(2)).sum::<f64>()/((raw_data_blocks.len()-1) as f64);
+
+        let mut bic: f64 = -f64::INFINITY;
+        let mut bic_worse = false;
+
+        
+
+        //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
+        
+        todo!();
 
 
 
@@ -297,6 +308,18 @@ impl All_Data {
             }
         }
         Some(block)
+    }
+
+    //Returns standard deviation and degrees of freedom, in that order
+    fn estimate_t_dist(data: &Vec<f64>) -> (f64, f64) {
+
+        let precision = 1e-3;
+        let total_sample_variance = data.iter().map(|a| a.powi(2)).sum::<f64>()/((data.len()-1) as f64); 
+
+        todo!();
+
+
+
     }
 
 
