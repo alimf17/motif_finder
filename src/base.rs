@@ -7,7 +7,7 @@ use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
-use statrs::function::gamma;
+use statrs::function::gamma::*;
 use statrs::{consts, Result, StatsError};
 use std::f64;
 use std::fmt;

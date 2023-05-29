@@ -7,7 +7,7 @@ use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE};
-use statrs::function::gamma;
+use statrs::function::gamma::*;
 use statrs::{consts, Result, StatsError};
 use std::{f64, ops::Mul};
 use std::fmt;
@@ -17,6 +17,7 @@ use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
 use nalgebra::{DMatrix, DVector, dmatrix,dvector};
+use core::f64::consts::PI;
 
 use serde::{ser::*, Serialize,Serializer, Deserialize};
 use serde::de::{
@@ -310,17 +311,136 @@ impl All_Data {
         Some(block)
     }
 
-    //Returns standard deviation and degrees of freedom, in that order
-    fn estimate_t_dist(data: &Vec<f64>) -> (f64, f64) {
+    pub fn estimate_t_dist(decorrelated_data: &Vec<f64>) -> (f64, f64) {
 
-        let precision = 1e-3;
-        let total_sample_variance = data.iter().map(|a| a.powi(2)).sum::<f64>()/((data.len()-1) as f64); 
+        let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64);
 
-        todo!();
+        let mut error = true;
+        
+        let mut eps = 1e-6;
 
+        let mut df_guess = 3.0f64;
+        let mut sd_guess = (total_sample_variance*(df_guess-2.0)/df_guess).sqrt();
 
+        while error {
+
+            let mut dist = f64::INFINITY;
+
+            df_guess = 3.0f64;
+            sd_guess = (total_sample_variance*(df_guess-2.0)/df_guess).sqrt();
+
+            error = false;
+            while !error && dist.abs() > 1e-7 {
+
+                let old_df_guess = df_guess;
+                let old_sd_guess = sd_guess;
+
+                let (d_sd, d_df) = Self::gradient_t_like(decorrelated_data, sd_guess, df_guess);
+
+                sd_guess += eps*d_sd;
+                df_guess += eps*d_df;
+
+                dist = ((df_guess-old_df_guess).powi(2)+(sd_guess-old_sd_guess).powi(2)).sqrt();
+
+                //println!("Current guesses: {} {} {} {}", df_guess, sd_guess, dist, eps);
+
+                if df_guess < 2.0 || sd_guess < 0. {
+                    error = true;
+                    eps /= 2.;
+                }
+            }
+        }
+
+        (sd_guess, df_guess)
 
     }
+
+    fn gradient_t_like(decorrelated_data: &Vec<f64>, sd: f64, df:f64) -> (f64, f64) {
+
+        let help_series = Self::helper_series(decorrelated_data, sd, df);
+
+        let n = decorrelated_data.len() as f64;
+        let d_sd = (-n+(df+1.0)*help_series)/sd;
+        let mut d_df = 0.5*n*(digamma((df+1.0)/2.0)-digamma(df/2.)-1./df)
+                  +0.5*(df+1.0)*help_series/df;
+
+        for &data in decorrelated_data {
+            d_df -= (1.0+data.powi(2)/(sd.powi(2)*df)).ln()*0.5;
+        }
+
+
+        (d_sd, d_df)
+
+    }
+
+    fn helper_series(decorrelated_data: &Vec<f64>, sd: f64, df:f64) -> f64 {
+
+        let mut sum = 0.0f64;
+
+        for &data in decorrelated_data {
+            sum += 1.0/(sd.powi(2)*df/data.powi(2) + 1.);
+        }
+
+        sum
+    }
+    /*
+    //Returns standard deviation and degrees of freedom, in that order
+    pub fn estimate_t_dist(decorrelated_data: &Vec<f64>) -> (f64, f64) {
+
+        let precision = 1e-3;
+        let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64); 
+
+        let mut old_guess_df = 2.5_f64;
+        let mut guess_df = 8_f64;
+
+        let mut diff = f64::INFINITY;
+        
+        let h = 1e-4;
+
+        while (diff.abs() > precision) {
+            old_guess_df = guess_df;
+
+            let fx = Self::lnlike(decorrelated_data, total_sample_variance, guess_df);
+            let dfx = Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df, h);
+            let ddfx = (Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df+h, h)
+                        -Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df, h))/h;
+
+            guess_df -= (dfx/(ddfx));
+            if guess_df <= 2.0 {
+                guess_df = 100_f64;
+            }
+            diff = guess_df-old_guess_df;
+            println!("guess {}",guess_df);
+        }
+
+        let sd = (total_sample_variance*guess_df/(guess_df-2.0)).sqrt();
+
+        (sd, guess_df)
+
+    }
+
+    
+    fn lnlike(decorrelated_data: &Vec<f64>, total_variance: f64, df: f64) -> f64 {
+
+        let df_only_terms = ln_gamma((df+1.)/2.)-ln_gamma(df/2.)-(total_variance*(df-2.)).ln()-PI.ln()/2.0;
+
+        let mut data_terms = 0.0_f64;
+
+        for &dat in decorrelated_data {
+            data_terms -= ((df+1.)/2.)*(1.0+dat.powi(2)/(total_variance*(df-2.))).ln();
+        }
+
+        df_only_terms+data_terms
+    }
+
+    fn d_lnlike_d_df(decorrelated_data: &Vec<f64>, total_variance: f64, df: f64, h: f64) -> f64 {
+        (Self::lnlike(decorrelated_data, total_variance, df+h)-Self::lnlike(decorrelated_data, total_variance, df))/h
+    }
+
+    */
+
+
+
 
 
 

@@ -11,7 +11,8 @@ use crate::base::bases::Motif;*/
 use crate::base::*;
 use crate::sequence::Sequence;
 use crate::waveform::*;
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
+use crate::data_struct::*;
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, StudentsT};
 use statrs::statistics::{Min, Max};
 use statrs::function::gamma;
 use rand::Rng;
@@ -108,6 +109,17 @@ fn main() {
     let exact_app = exact.elapsed();
 
     println!("Approx: {:?}, Par Approx: {:?}, Exact: {:?}", dur_app,dur_par, exact_app);
+
+    let distr = StudentsT::new(0.0, 0.25, 2.84).unwrap();
+
+    let mut rng2 = rand::thread_rng();
+
+    let samps: Vec<f64> = (0..100000).map(|_| distr.sample(&mut rng2)).collect();
+
+    let exact = Instant::now();
+    let (sd, df) = All_Data::estimate_t_dist(&samps); 
+    let exact_app = exact.elapsed();
+    println!("Dist {} {} {:?}", sd, df, exact_app);
 
     //println!("{}", (&sequence).serialize(Json_Serializer).unwrap());
     //println!("{}", (&background).serialize(Json_Serializer).unwrap());
