@@ -168,6 +168,61 @@ impl All_Data {
         String::from(piece_name)
     }
 
+    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>) -> Background {
+
+
+        let mut bic: f64 = f64::INFINITY;
+        let mut bic_worse = false;
+
+        let mut num_coeffs = 1usize;
+        let mut coeffs: Vec<f64> = Vec::new();
+
+        let data_len = raw_data_blocks.iter().map(|a| a.len()).sum::<usize>();
+        let mut noises: Vec<f64> = Vec::with_capacity(data_len);
+
+        let (mut sd, mut df) = (1.0_f64, 3.0_f64);
+
+        while !bic_worse {
+
+            let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks, num_coeffs);
+
+            let new_coeffs = Self::compute_ar_coeffs(&correlations);
+
+            for data_block in raw_data_blocks {
+                let mut little_noise = Self::undo_ar_correlation(data_block, &coeffs);
+
+                match little_noise {
+                    Some(mut vec) => noises.append(&mut vec),
+                    None => (),
+                };
+            }
+
+            let (pre_sd, pre_df) = Self::estimate_t_dist(&noises);
+            let lnlike = Self::lnlike(&noises, pre_sd, pre_df);
+
+            let new_bic = Self::bic(lnlike, data_len, num_coeffs);
+
+            bic_worse = new_bic > bic;
+
+            if !bic_worse {
+                bic = new_bic;
+                sd = pre_sd;
+                df = pre_df;
+                coeffs = new_coeffs;
+                num_coeffs += 1;
+            }
+
+
+        }
+
+        
+
+        //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
+        
+        Background::new(sd, df, &coeffs)
+
+
+    }
 
 
     fn compute_autocorrelation_coeffs(data: &Vec<Vec<f64>>, mut num_coeffs: usize) -> Vec<f64>{
@@ -271,26 +326,10 @@ impl All_Data {
 
     }
 
-    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>) -> Background {
-
-        //let total_sample_variance = raw_data_blocks.iter().flatten(|a| a.powi(2)).sum::<f64>()/((raw_data_blocks.len()-1) as f64);
-
-        let mut bic: f64 = -f64::INFINITY;
-        let mut bic_worse = false;
-
-        
-
-        //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
-        
-        todo!();
-
-
-
-    }
     
 
     //This adapts the produce_noise function
-    fn undo_ar_correlation(connected: &Vec<f64>, ar_coeffs: Vec<f64>) -> Option<Vec<f64>> {
+    fn undo_ar_correlation(connected: &Vec<f64>, ar_coeffs: &Vec<f64>) -> Option<Vec<f64>> {
 
         if connected.len() <= ar_coeffs.len() {
             return None;
@@ -383,67 +422,21 @@ impl All_Data {
 
         sum
     }
-    /*
-    //Returns standard deviation and degrees of freedom, in that order
-    pub fn estimate_t_dist(decorrelated_data: &Vec<f64>) -> (f64, f64) {
 
-        let precision = 1e-3;
-        let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64); 
 
-        let mut old_guess_df = 2.5_f64;
-        let mut guess_df = 8_f64;
-
-        let mut diff = f64::INFINITY;
-        
-        let h = 1e-4;
-
-        while (diff.abs() > precision) {
-            old_guess_df = guess_df;
-
-            let fx = Self::lnlike(decorrelated_data, total_sample_variance, guess_df);
-            let dfx = Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df, h);
-            let ddfx = (Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df+h, h)
-                        -Self::d_lnlike_d_df(decorrelated_data, total_sample_variance, guess_df, h))/h;
-
-            guess_df -= (dfx/(ddfx));
-            if guess_df <= 2.0 {
-                guess_df = 100_f64;
-            }
-            diff = guess_df-old_guess_df;
-            println!("guess {}",guess_df);
-        }
-
-        let sd = (total_sample_variance*guess_df/(guess_df-2.0)).sqrt();
-
-        (sd, guess_df)
-
-    }
-
-    
-    fn lnlike(decorrelated_data: &Vec<f64>, total_variance: f64, df: f64) -> f64 {
-
-        let df_only_terms = ln_gamma((df+1.)/2.)-ln_gamma(df/2.)-(total_variance*(df-2.)).ln()-PI.ln()/2.0;
-
+    fn lnlike(decorrelated_data: &Vec<f64>, sd: f64, df: f64) -> f64 {
+        let df_only_terms = ln_gamma((df+1.)/2.)-ln_gamma(df/2.)-sd.ln()-PI.ln()/2.0-df.ln()/2.0;
         let mut data_terms = 0.0_f64;
-
         for &dat in decorrelated_data {
-            data_terms -= ((df+1.)/2.)*(1.0+dat.powi(2)/(total_variance*(df-2.))).ln();
+            data_terms -= ((df+1.)/2.)*(1.0+dat.powi(2)/(sd.powi(2)*df)).ln();
         }
-
         df_only_terms+data_terms
     }
 
-    fn d_lnlike_d_df(decorrelated_data: &Vec<f64>, total_variance: f64, df: f64, h: f64) -> f64 {
-        (Self::lnlike(decorrelated_data, total_variance, df+h)-Self::lnlike(decorrelated_data, total_variance, df))/h
+    fn bic(lnlike: f64, data_len: usize, num_coeffs: usize) -> f64 {
+
+        (num_coeffs as f64)*(data_len as f64).ln()-2.0*lnlike
+
     }
-
-    */
-
-
-
-
-
-
-
 
 }
