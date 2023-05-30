@@ -148,7 +148,99 @@ impl All_Data {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, ) {
+    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize) -> (Vec<Vec<(usize, f64)>>, Background) {
+        let file_string = fs::read_to_string(data_file_name).expect("Invalid file name!");
+        let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
+       
+        //let mut locs: Vec<usize> = Vec::with_capacity(data_as_vec.len());
+        //let mut data: Vec<f64> = Vec::with_capacity(data_as_vec.len());
+
+        let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
+        let mut data_iter = data_as_vec.iter();
+
+        let first_line = data_iter.next().expect("FASTA file should not be empty!");
+
+        let header = first_line.split(" ").collect::<Vec<_>>();
+
+        if (header[0] != "loc") || (header[1] != "data") {
+            panic!("Data file is not correctly formatted!");
+        }
+
+
+        //This gets us the raw data and location data, paired together and sorted
+        for line in data_iter {
+
+            let mut line_iter = line.split(" ");
+
+            let loc: usize = line_iter.next().expect("No empty lines allowed").parse().expect("Must lead each line with location");
+            let data: f64 = line_iter.next().expect("Every line must have two entries").parse().expect("All lines must have data after location");
+
+
+            raw_locs_data.push((loc,data));
+
+        }
+
+        raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        //Compress all data so that locations are unique by taking the mean of the data
+
+        let mut refined_locs_data: Vec<(usize, f64)> = Vec::with_capacity(raw_locs_data.len());
+
+        let mut i: usize = 0;
+
+        //Remember, raw_locs_data is sorted, so we will run into all same locations in one stretch
+        //I'm using a while loop instead of a for loop because I will likely have runs of same location
+        //data that come out to only producing a single data row
+        while i < raw_locs_data.len() {
+
+            let curr_loc = raw_locs_data[i].0;
+
+            let mut to_next_unique = 0;
+
+            //Find the run of data which is all the same location
+            //Whether it's stopped by a new location or the end of the data
+            while ((i+to_next_unique) < raw_locs_data.len()) 
+                && (raw_locs_data[i+to_next_unique].0 == curr_loc) {
+                to_next_unique+=1;
+            }
+
+            let mut sum_of_data: f64 = 0.0;
+
+            for j in (i..(i+to_next_unique)) {
+                sum_of_data += raw_locs_data[j].1;
+            }
+
+            //For each location, we want to push it onto the data one time, with the mean of its data points
+            refined_locs_data.push((curr_loc, sum_of_data/(to_next_unique as f64))); 
+
+            //We want to skip to the next unique location
+            i += to_next_unique;
+        }
+
+        //Process the data so that I have uniformly spaced data that is filled in with linear approximations
+        //wherever I think I can use it sanely with the right spacing
+
+        //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
+        //Keep data that has peaks in preparation for being synced with the sequence
+        //Cut up data so that I can derive AR model from not kept data
+
+
+        //This is a rough approximation of the maximum value of the transformed data
+        //That can solely be accounted for by fluctuation
+        //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
+        //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
+        //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
+        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
+
+        todo!()
+
+
+
+        //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
+
+
+
+
 
     }
 
@@ -436,6 +528,27 @@ impl All_Data {
     fn bic(lnlike: f64, data_len: usize, num_coeffs: usize) -> f64 {
 
         (num_coeffs as f64)*(data_len as f64).ln()-2.0*lnlike
+
+    }
+
+    fn lerp(data1: &(usize, f64), data2: &(usize, f64), spacer: usize, to_congruence: usize) -> Vec<(usize, f64)> {
+
+        let begins = data1.0 as f64;
+        let start_dat = data1.1;
+        let ends = data2.0 as f64;
+        let ends_dat = data2.1;
+
+        //This will be empty if we screw up the congruence class being less than the spacing
+        let locs_to_fill: Vec<usize> = ((data1.0+1)..data2.0).filter(|a| (a % spacer) == to_congruence).collect();
+
+        let mut lerped: Vec<(usize, f64)> = Vec::with_capacity(locs_to_fill.len());
+
+        for loc in locs_to_fill {
+            let progress: f64 = ((loc as f64) - begins)/(begins-ends);
+            lerped.push((loc, (1.0-progress)*start_dat+progress*ends_dat));
+        }
+
+        lerped
 
     }
 
