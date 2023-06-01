@@ -27,6 +27,7 @@ use serde::de::{
 
 use std::env;
 use std::fs;
+use log::warn;
 
 use regex::Regex;
 
@@ -148,7 +149,7 @@ impl All_Data {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize) -> (Vec<Vec<(usize, f64)>>, Background) {
+    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool) -> (Vec<Vec<(usize, f64)>>, Background) {
         let file_string = fs::read_to_string(data_file_name).expect("Invalid file name!");
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
@@ -168,19 +169,44 @@ impl All_Data {
 
 
         //This gets us the raw data and location data, paired together and sorted
-        for line in data_iter {
+        for (line_num, line) in data_iter.enumerate() {
 
             let mut line_iter = line.split(" ");
 
-            let loc: usize = line_iter.next().expect("No empty lines allowed").parse().expect("Must lead each line with location");
-            let data: f64 = line_iter.next().expect("Every line must have two entries").parse().expect("All lines must have data after location");
+            let loc: usize = line_iter.next().expect(format!("Line {} is empty!", line_num).as_str())
+                                      .parse().expect(format!("Line {} does not start with a location in base pairs!", line_num).as_str());
 
+            let data: f64 = line_iter.next().expect(format!("Line {} does not have data after location!", line_num).as_str())
+                                     .parse().expect(format!("Line {} does not have data parsable as a float after its location!", line_num).as_str());
 
             raw_locs_data.push((loc,data));
 
         }
 
         raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let start_loc: usize = raw_locs_data[0].0;
+        let last_loc: usize = raw_locs_data.last().unwrap().0;
+
+
+        if last_loc > sequence_len {
+            panic!("This data has sequence locations too large to correspond to your sequence!");
+        }
+
+        let mut hits_end: bool = last_loc == sequence_len;
+        let mut zero_indexed: bool = start_loc == 0;
+
+        if hits_end && zero_indexed {
+            //Same panic as overrunning the sequence, because it overruns the sequence by one
+            panic!("This data has sequence locations too large to correspond to your sequence!");
+        }
+
+        if (!hits_end) && (!zero_indexed) {
+            warn!("Program is assuming that your locations are zero indexed, but doesn't have evidence of this!");
+            zero_indexed = true;
+            hits_end = last_loc == (sequence_len-1);
+        }
+                
 
         //Compress all data so that locations are unique by taking the mean of the data
 
@@ -217,23 +243,96 @@ impl All_Data {
             i += to_next_unique;
         }
 
-        //Process the data so that I have uniformly spaced data that is filled in with linear approximations
-        //wherever I think I can use it sanely with the right spacing
+
+        //Here, refined_locs_data ultimately has one data value for every represented location in the data,
+        //with the data sorted by location in ascending order
+ 
+        let mut start_gaps: Vec<usize> = Vec::new();
+
+        for i in 0..(refined_locs_data.len()-1){
+
+            let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
+            if jump >= fragment_length {
+                start_gaps.push(i);
+            } 
+        }
+
+        let mut max_valid_run: usize = sequence_len;
+
+        if start_gaps.len() >= 2 {
+            max_valid_run = start_gaps.windows(2).map(|a| refined_locs_data[a[1]].0-refined_locs_data[a[0]].0).max().unwrap(); 
+        }
+
+        let num_blocks = if is_circular { 1_usize.max(start_gaps.len()) } else {start_gaps.len() + 1};
+
+        let mut first_blocks: Vec<Vec<(usize, f64)>> = vec![Vec::with_capacity(max_valid_run); num_blocks];
+
+        let mut remaining = true;
+        let mut cut = !is_circular || (is_circular && start_gaps.len() > 0); //If we have a completely uncut circular genome, we technically can't do inference
+                                                                             //But there IS another set of cuts coming that will likely fix this: 
+                                                                             //we will remove parts of the genome that are just noise
+                                                                             //BUT, we still need to track cut, because if it's still true after that, we need to panic
+
+        //This match statement handles our first block, which we need to treat slightly carefully
+        //Once we isolate the first block, we can iterate on all but the last gap straightforwardly
+        //And the last gap only needs to be handled specially if our genome is NOT circular
+        first_blocks[0] = match (start_gaps.len(), is_circular) {
+
+            (0, _) => {remaining = false; refined_locs_data.clone()}, //If there are no gaps, do not cut
+            (1, true) => { //If there is only gap in a circle, cut at that gap
+                let (end, start) = refined_locs_data.split_at(start_gaps[0]);
+                let (mut rewrap, mut get_end) = (start.to_vec(), end.to_vec());
+                get_end = get_end.into_iter().map(|(a,b)| (a+sequence_len, b)).collect(); //We want to treat this as overflow for interpolation purposes
+                rewrap.clone().append(&mut get_end);
+                remaining = false;
+                rewrap},
+            (_, false) => refined_locs_data[0..start_gaps[0]].to_vec(), //If there is a gap on a line, the first fragment should be the beginning to the gap
+            (_, true) => { //If there are many gaps on a circle, glom together the beginning and the end fragments
+
+                let mut rewrap = refined_locs_data[(*start_gaps.last().unwrap())..].to_vec();
+                let mut get_end = refined_locs_data[..start_gaps[0]].to_vec();
+                get_end = get_end.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();//We want to treat this as overflow for interpolation purposes
+                rewrap.clone().append(&mut get_end);
+                rewrap},
+
+        };
+        
+
+        if start_gaps.len() > 1 {
+            for i in 0..(start_gaps.len()-1) {
+                first_blocks[i+1] = refined_locs_data[start_gaps[i]..start_gaps[i+1]].to_vec();
+            }
+        }
+
+        if remaining && !is_circular {
+            first_blocks[num_blocks] = refined_locs_data[start_gaps[start_gaps.len()]..].to_vec(); 
+        }
+       
+        //Now, we have finished first_blocks, which is a vec of Vec<(usize, f64)>s such that I can lerp each block according to the spacer
+
+
+
+        //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer
+
+        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
+
+        //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
+
 
         //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
         //Keep data that has peaks in preparation for being synced with the sequence
         //Cut up data so that I can derive AR model from not kept data
-
 
         //This is a rough approximation of the maximum value of the transformed data
         //That can solely be accounted for by fluctuation
         //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
         //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
         //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
-        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
 
-        todo!()
 
+
+
+        todo!();
 
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
@@ -527,11 +626,11 @@ impl All_Data {
 
     fn bic(lnlike: f64, data_len: usize, num_coeffs: usize) -> f64 {
 
-        (num_coeffs as f64)*(data_len as f64).ln()-2.0*lnlike
+        (2.0+(num_coeffs as f64))*(data_len as f64).ln()-2.0*lnlike
 
     }
 
-    fn lerp(data1: &(usize, f64), data2: &(usize, f64), spacer: usize, to_congruence: usize) -> Vec<(usize, f64)> {
+    fn lerp(data1: &(usize, f64), data2: &(usize, f64)) -> Vec<(usize, f64)> {
 
         let begins = data1.0 as f64;
         let start_dat = data1.1;
@@ -539,7 +638,7 @@ impl All_Data {
         let ends_dat = data2.1;
 
         //This will be empty if we screw up the congruence class being less than the spacing
-        let locs_to_fill: Vec<usize> = ((data1.0+1)..data2.0).filter(|a| (a % spacer) == to_congruence).collect();
+        let locs_to_fill: Vec<usize> = ((data1.0+1)..data2.0).collect();
 
         let mut lerped: Vec<(usize, f64)> = Vec::with_capacity(locs_to_fill.len());
 
