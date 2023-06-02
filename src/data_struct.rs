@@ -31,6 +31,7 @@ use log::warn;
 
 use regex::Regex;
 
+
 #[derive(Serialize, Deserialize)]
 pub struct All_Data {
 
@@ -210,7 +211,7 @@ impl All_Data {
         if !zero_indexed {
 
             for point in raw_locs_data.iter_mut() {
-                *point -= 1;
+                (*point).0 -= 1;
             }
         }
 
@@ -274,7 +275,7 @@ impl All_Data {
         let mut first_blocks: Vec<Vec<(usize, f64)>> = vec![Vec::with_capacity(max_valid_run); num_blocks];
 
         let mut remaining = true;
-        let mut cut = !is_circular || (is_circular && start_gaps.len() > 0); //If we have a completely uncut circular genome, we technically can't do inference
+        let mut cut = !is_circular || (start_gaps.len() > 0); //If we have a completely uncut circular genome, we technically can't do inference
                                                                              //But there IS another set of cuts coming that will likely fix this: 
                                                                              //we will remove parts of the genome that are just noise
                                                                              //BUT, we still need to track cut, because if it's still true after that, we need to panic
@@ -330,26 +331,169 @@ impl All_Data {
         //Cut up data so that I can derive AR model from not kept data
 
         //This is a rough approximation of the maximum value of the transformed data
-        //That can solely be accounted for by fluctuation
+        //that can solely be accounted for by fluctuation when the sd is 1.
         //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
         //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
         //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
-        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
 
+        let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
+        let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
+
+        let data_zone: usize = fragment_length/spacing;
+
+        for block in lerped_blocks {
+
+            let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
+
+            let mut next_ar_ind = 0_usize;
+            let mut curr_data_start = 0_usize;
+
+            let mut check_ind = 0_usize;
+
+            while check_ind < block.len() {
+
+                if poss_peak_vec[check_ind] {
+                    curr_data_start = if (next_ar_ind + data_zone) > check_ind {next_ar_ind} else {check_ind-data_zone}; //the if should only ever activate on the 0th block
+                    if curr_data_start > next_ar_ind { ar_blocks.push(block[next_ar_ind..curr_data_start].to_vec()); }
+
+                    next_ar_ind = block.len().min(check_ind+data_zone+1);
+
+                    while check_ind < next_ar_ind {
+                        if poss_peak_vec[check_ind] {
+                            next_ar_ind = block.len().min(check_ind+data_zone+1);
+                        }
+                        check_ind += 1;
+                    }
+                    data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
+                } else {
+                    check_ind += 1;
+                }
+            }
+        }
+
+        if ar_blocks.len() == 0 {
+            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+        }
+
+        if data_blocks.len() == 0 {
+            panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+        }
+
+        if !cut { //This code is only run if the genome is circular and has no missing data
+
+            let starts_data = (data_blocks[0][0].0 < ar_blocks[0][0].0);
+            let ends_data = ((*(*data_blocks.last().unwrap()).last().unwrap()).0 > 
+                             (*(*ar_blocks.last().unwrap()).last().unwrap()).0);
+            match (starts_data, ends_data) {
+                (true, true) => { //If both the beginning and end are data, glom the beginning onto the end in data
+                    let mut rem_block = data_blocks.remove(0); 
+                    rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                    let Some(end_vec) = data_blocks.last_mut() else {
+                        panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                    };
+                    end_vec.append(&mut rem_block);
+
+                    *end_vec = Self::lerp(&*end_vec, spacing);
+                },
+                (false, false) => { //If both the beginning and end are for AR inference, glom the beginning onto the end for AR inference
+
+                    let mut rem_block = ar_blocks.remove(0);
+                    rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                    let Some(end_vec) = ar_blocks.last_mut() else {
+                        panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+                    };
+                    end_vec.append(&mut rem_block);
+                    *end_vec = Self::lerp(&*end_vec, spacing);
+                },
+                (true, false) => {
+                    let first_force_data = data_blocks[0].iter().position(|(_, b)| b.abs() > peak_thresh).unwrap();
+                    let last_data_place = data_blocks[0][first_force_data].0+sequence_len-data_zone;
+                    let bleed_into_final_ar = last_data_place <= (*(*ar_blocks.last().unwrap()).last().unwrap()).0;
+                    let bleed_into_last_data = last_data_place <= (*ar_blocks.last().unwrap())[0].0;
+
+                    if bleed_into_last_data {
+                        let mut rem_block = data_blocks.remove(0);
+                        rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                        let mut fuse_ar = ar_blocks.pop().unwrap();
+                        let Some(end_vec) = data_blocks.last_mut() else {
+                            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                        };
+
+                        end_vec.append(&mut fuse_ar);
+                        end_vec.append(&mut rem_block);
+                        *end_vec = Self::lerp(&*end_vec, spacing);
+                    } else if bleed_into_final_ar {
+                        let mut rem_block = data_blocks.remove(0);
+                        rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                        let mut split = 1_usize;
+                        let Some(end_vec) = ar_blocks.last_mut() else {
+                            panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+                        };
+                        while((*end_vec)[split].0 < last_data_place) {split+=1;}
+                        let mut begin_fin_dat = end_vec.split_off(split);
+                        begin_fin_dat.append(&mut rem_block);
+                        begin_fin_dat = Self::lerp(&begin_fin_dat, spacing);
+                        data_blocks.push(begin_fin_dat);
+                    } //Don't need a final else. It basically boils down to "else: I don't care"
+                    
+
+                },
+
+                (false, true) => {
+                    let last_force_data = data_blocks.last().unwrap().len()-1-(data_blocks.last().unwrap().iter().rev().position(|(_, b)| b.abs() > peak_thresh).unwrap());
+                    if data_blocks.last().unwrap()[last_force_data].0+data_zone > sequence_len {
+                        
+                        let last_data_place = data_blocks.last().unwrap()[last_force_data].0+data_zone-sequence_len;
+                        let bleed_into_final_ar = last_data_place <= ar_blocks[0][0].0; 
+                        let bleed_into_last_data = last_data_place <= (*((ar_blocks[0]).last().unwrap())).0;
+
+                        if bleed_into_last_data {
+                            let mut rem_block = data_blocks.remove(0);
+                            rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                            let mut fuse_ar = ar_blocks.remove(0);
+                            fuse_ar = fuse_ar.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                            let Some(end_vec) = data_blocks.last_mut() else {
+                                panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                            };
+
+                            end_vec.append(&mut fuse_ar);
+                            end_vec.append(&mut rem_block);
+                            *end_vec = Self::lerp(&*end_vec, spacing);
+                        } else if bleed_into_final_ar {
+
+                            let start_vec = &mut ar_blocks[0];
+                            let mut split = start_vec.len()-2;
+                            while((*start_vec)[split].0 < last_data_place) {split-=1;}
+                            let mut begin_fin_dat = start_vec.drain(0..split).map(|(a, b)| (a+sequence_len, b)).collect::<Vec<_>>();
+                            data_blocks.last_mut().unwrap().append(&mut begin_fin_dat);
+                            *(data_blocks.last_mut().unwrap()) = Self::lerp(data_blocks.last().unwrap(), spacing);
+                        } //Don't need a final else. It basically boils down to "else: I don't care"
+                    
+                    }
+                },
+            };
+
+        }
 
 
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
+        ar_blocks.retain(|a| a.len() > data_zone);
+
+        if ar_blocks.len() == 0 {
+            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+        }
+
+        let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
+
+        let background_dist = Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone);
 
 
-
-
-
-        todo!();
 
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-
+        (data_blocks, background_dist)
 
 
 
@@ -372,8 +516,7 @@ impl All_Data {
         String::from(piece_name)
     }
 
-    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>) -> Background {
-
+    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>, max_order: usize) -> Background {
 
         let mut bic: f64 = f64::INFINITY;
         let mut bic_worse = false;
