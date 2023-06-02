@@ -518,25 +518,21 @@ impl All_Data {
 
     fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>, max_order: usize) -> Background {
 
-        let mut bic: f64 = f64::INFINITY;
-        let mut bic_worse = false;
 
-        let mut num_coeffs = 1usize;
-        let mut coeffs: Vec<f64> = Vec::new();
 
         let data_len = raw_data_blocks.iter().map(|a| a.len()).sum::<usize>();
-        let mut noises: Vec<f64> = Vec::with_capacity(data_len);
 
-        let (mut sd, mut df) = (1.0_f64, 3.0_f64);
-
-        while !bic_worse {
-
+ 
+        let models: Vec<([f64; 3], Vec<f64>)> = (0..max_order).into_par_iter().map(|a| {
+            let num_coeffs = a+1;
             let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks, num_coeffs);
 
             let new_coeffs = Self::compute_ar_coeffs(&correlations);
 
+            let mut noises: Vec<f64> = Vec::with_capacity(data_len);
+            
             for data_block in raw_data_blocks {
-                let mut little_noise = Self::undo_ar_correlation(data_block, &coeffs);
+                let mut little_noise = Self::undo_ar_correlation(data_block, &new_coeffs);
 
                 match little_noise {
                     Some(mut vec) => noises.append(&mut vec),
@@ -548,25 +544,15 @@ impl All_Data {
             let lnlike = Self::lnlike(&noises, pre_sd, pre_df);
 
             let new_bic = Self::bic(lnlike, data_len, num_coeffs);
+            ([pre_sd, pre_df, new_bic], new_coeffs)
+        }).collect();
 
-            bic_worse = new_bic >= bic; //This lets us choose the smallest model possible AND avoids infinite loops: we'll likely only be equal if we did the EXACT same calculation
-
-            if !bic_worse {
-                bic = new_bic;
-                sd = pre_sd;
-                df = pre_df;
-                coeffs = new_coeffs;
-                num_coeffs += 1;
-            }
-
-
-        }
-
+        let ([sd, df, bic], coeffs) = models.iter().min_by(|([_, _, a], _),([_, _, b], _)| a.total_cmp(b)).unwrap(); 
         
 
         //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
         
-        Background::new(sd, df, &coeffs)
+        Background::new(*sd, *df, coeffs)
 
 
     }
