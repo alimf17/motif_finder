@@ -93,7 +93,7 @@ impl All_Data {
     //         If they are not, why not? The FASTA file input shouldn't be fragments: it should be
     //         a reference genome.
     //and the String that will be used to make the file name for the full data struct
-    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Vec<usize> {
+    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Vec<Option<usize>> {
 
         let file_string = fs::read_to_string(fasta_file_name).expect("Invalid file name!");
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
@@ -105,7 +105,7 @@ impl All_Data {
               .chars().all(|c| c.is_whitespace()) {_ = fasta_as_vec.pop();}
 
 
-        let mut base_vec: Vec<usize> = Vec::new();
+        let mut base_vec: Vec<Option<usize>> = Vec::new();
        
         let mut fasta_iter = fasta_as_vec.iter().enumerate();
 
@@ -123,11 +123,11 @@ impl All_Data {
             for (char_pos, chara) in line.chars().enumerate(){
 
                 if (Some(chara) == null_char) {
-                    base_vec.push(BASE_L);
+                    base_vec.push(None);
                 } else {
-                    base_vec.push(*((*GET_BASE_USIZE)
+                    base_vec.push(Some(*((*GET_BASE_USIZE)
                             .get(&chara)
-                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1))))); 
+                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1)))))); 
                 }
             }
 
@@ -206,7 +206,13 @@ impl All_Data {
             zero_indexed = true;
             hits_end = last_loc == (sequence_len-1);
         }
-                
+
+        if !zero_indexed {
+
+            for point in raw_locs_data.iter_mut() {
+                *point -= 1;
+            }
+        }
 
         //Compress all data so that locations are unique by taking the mean of the data
 
@@ -307,17 +313,17 @@ impl All_Data {
         if remaining && !is_circular {
             first_blocks[num_blocks] = refined_locs_data[start_gaps[start_gaps.len()]..].to_vec(); 
         }
-       
+
+
         //Now, we have finished first_blocks, which is a vec of Vec<(usize, f64)>s such that I can lerp each block according to the spacer
 
+        let mut lerped_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(first_blocks.len());
 
+        for block in first_blocks {
+            lerped_blocks.push(Self::lerp(&block, spacing));
+        }
 
         //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer
-
-        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
-
-        //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
-
 
         //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
         //Keep data that has peaks in preparation for being synced with the sequence
@@ -328,6 +334,13 @@ impl All_Data {
         //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
         //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
         //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
+        let poss_peak = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
+
+
+
+        //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
+
+
 
 
 
@@ -393,7 +406,7 @@ impl All_Data {
 
             let new_bic = Self::bic(lnlike, data_len, num_coeffs);
 
-            bic_worse = new_bic > bic;
+            bic_worse = new_bic >= bic; //This lets us choose the smallest model possible AND avoids infinite loops: we'll likely only be equal if we did the EXACT same calculation
 
             if !bic_worse {
                 bic = new_bic;
@@ -630,21 +643,41 @@ impl All_Data {
 
     }
 
-    fn lerp(data1: &(usize, f64), data2: &(usize, f64)) -> Vec<(usize, f64)> {
+    fn lerp(data: &Vec<(usize, f64)>, spacer: usize ) -> Vec<(usize, f64)> {
 
-        let begins = data1.0 as f64;
-        let start_dat = data1.1;
-        let ends = data2.0 as f64;
-        let ends_dat = data2.1;
+        let begins = data[0].0;
+        let ends = (*(data.last().unwrap())).0;
 
-        //This will be empty if we screw up the congruence class being less than the spacing
-        let locs_to_fill: Vec<usize> = ((data1.0+1)..data2.0).collect();
+        let capacity = 1+((ends-begins)/spacer);
+
+        let mut locs_to_fill: Vec<usize> = Vec::with_capacity(capacity);
+
+        let mut loc = begins;
+
+        while loc <= ends {
+            locs_to_fill.push(loc);
+            loc += spacer;
+        }
 
         let mut lerped: Vec<(usize, f64)> = Vec::with_capacity(locs_to_fill.len());
 
+        lerped.push(data[0].clone());
+
+        let mut prev_ind = 0;
+
         for loc in locs_to_fill {
-            let progress: f64 = ((loc as f64) - begins)/(begins-ends);
-            lerped.push((loc, (1.0-progress)*start_dat+progress*ends_dat));
+            let mut curr_ind = prev_ind+1; //This should never cause a problem because we constructed locs_to_fill to always fit inside the block
+            while data[curr_ind].0 < loc {
+                prev_ind = curr_ind;
+                curr_ind += 1;
+            }
+
+            if data[curr_ind].0 == loc {
+                lerped.push(data[curr_ind].clone());
+            } else {
+                let progress: f64 = ((loc - data[prev_ind].0) as f64)/((data[curr_ind].0-data[prev_ind].0) as f64);
+                lerped.push((loc, (1.0-progress)*data[prev_ind].1+progress*data[curr_ind].1));
+            }
         }
 
         lerped
