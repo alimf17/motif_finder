@@ -365,6 +365,8 @@ impl All_Data {
                         }
                         check_ind += 1;
                     }
+
+
                     data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
                 } else {
                     check_ind += 1;
@@ -490,10 +492,11 @@ impl All_Data {
         let background_dist = Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone);
 
 
-
+        let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
+                                                                     .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        (data_blocks, background_dist)
+        (trimmed_data_blocks, background_dist)
 
 
 
@@ -503,12 +506,55 @@ impl All_Data {
 
 
     //TODO: I need a function which marries my processed FASTA file and my processed data
-    //      By the end, I should have a full All_Data instance 
+    //      By the end, I should have a Sequence and Waveform_Def, which I can use in my public function to create an All_Data instance
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, Waveform_Def) {
+        let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
+        let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
+
+        let mut i = 0_usize;
+
+        while i < pre_data.len() {
+
+            let mut no_null_base = true;
 
 
+            let mut bp_ind = pre_data[i][0].0;
+            let bp_prior = bp_ind;
+            let min_target_bp = (*(pre_data[i].last().unwrap())).0;
+
+            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+1+(min_target_bp-bp_prior)/BP_PER_U8};
+
+            let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
+            let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
+            
+            while no_null_base && (bp_ind <= target_bp){ 
+                match pre_sequence[(bp_ind & sequence_len)] { //I don't need to explicitly check for circularity: process_data handled this for me already
+                    Some(bp) => bases_batch.push(bp),
+                    None => no_null_base = false,
+                };
+                bp_ind+=1;
+            }
+
+            if no_null_base {
+                sequence_blocks.push(bases_batch);
+                start_data.append(&mut float_batch);
+            } else {
+                //This gives the 1-indexed position of the null base in vim
+                warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
+            }
+           
+
+        }
+
+        let seq = Sequence::new(sequence_blocks);
+        let wave = Waveform::new(start_data, &seq, spacing);
+
+        let wave_ret = Waveform_Def::from(&wave);
+
+        (seq, wave_ret)
 
 
-    
+    }
 
     fn chop_file_name(name: &str) -> String {
         let re = Regex::new(r"\.\pL+$").unwrap();
@@ -810,6 +856,33 @@ impl All_Data {
         }
 
         lerped
+
+    }
+
+    //This function exists to help fulfill the invariant that each sequence block 
+    //must have 1+floor((sequence block bp-1)/spacer) data points. This function only ever sees non-trivial
+    //use if the spacer is less than BP_PER_U8, which means that there is a lot of data already.
+    //And by the design of my sanitization, the ends of my sanitized data are going to be non-peaky anyway,
+    //either because there's no data there or because I decided the data there was far enough away
+    //from a peak that it can be cut
+    fn trim_data_to_fulfill_data_seq_compatibility(data:  &Vec<(usize, f64)>, spacer: usize) -> Vec<(usize, f64)> {
+
+        
+        let mut trimmed_data = data.clone();
+        if spacer >= BP_PER_U8 {
+            return trimmed_data;
+        }
+
+        let mut cover_bp = (((trimmed_data.len()*spacer) as f64)/(BP_PER_U8 as f64)).ceil()*(BP_PER_U8 as f64);
+
+        //If spacer is 2 or 3 for BP_PER_U8 = 4, this should only drop one element. 
+        //If spacer is 1, it could drop up to three elements
+        while cover_bp >= ((trimmed_data.len()+1)*spacer) as f64 {
+            let _ = trimmed_data.pop();
+            cover_bp = (((trimmed_data.len()*spacer) as f64)/(BP_PER_U8 as f64)).ceil();
+        }
+
+        trimmed_data
 
     }
 
