@@ -67,6 +67,15 @@ fn main() {
     let fasta_file = args[3].as_str();
     let data_file = args[4].as_str();
 
+    //Initialize trace
+    let init = match args.get(5) {
+
+        Some("meme".to_owned()) => todo!(),
+        Some("json".to_owned()) => todo!(),
+        _ => todo!(),
+    }
+
+    //run MCMC and make sure that I'm saving and clearing periodically
     
 
 

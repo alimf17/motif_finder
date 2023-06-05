@@ -921,7 +921,21 @@ pub struct Motif_Set<'a> {
 }
 
 impl<'a> Motif_Set<'a> {
-    
+   
+    pub fn rand_with_one(data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize) -> Self {
+
+        let width = (fragment_length as f64)/6.0;
+
+        let set = vec![Motif::rand_mot(width, data.seq())];
+
+        let signal = set[0].generate_waveform(data);
+
+        let mut mot_set = Motif_Set{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+
+        let _ = mot_set.ln_posterior();
+
+        mot_set
+    }
 
     fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
 
