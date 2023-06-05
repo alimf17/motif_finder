@@ -17,6 +17,8 @@ use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
 
+use regex::Regex;
+use std::fs;
 use nalgebra::{DMatrix, DVector, dvector};
 
 use serde::{ser::*, Serialize,Serializer, Deserialize};
@@ -80,7 +82,7 @@ impl PartialEq for Base {
 impl Base {
 
     //Note: This will break if all the bindings are zeros
-    pub fn new(props: [ f64; 4]) -> Base {
+    pub fn new(props: [ f64; BASE_L]) -> Base {
 
         let mut props = props;
 
@@ -309,6 +311,20 @@ impl Motif {
         };
 
         m
+    }
+
+    pub fn rand_height_pwm(mut pwm: Vec<Base>, peak_width: f64) -> Motif {
+
+        let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+
+        let mut rng = rand::thread_rng();
+
+        let sign: f64 = rng.gen();
+        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
+
+        let peak_height: f64 = sign*height_dist.sample(&mut rng);
+
+        Self::raw_pwm(pwm, peak_height, peak_width)
     }
 
 
@@ -1509,12 +1525,12 @@ impl<'a> Set_Trace<'a> {
 
     }
 
-    fn current_set<'b>(&self) -> Motif_Set<'a> {
+    pub fn current_set<'b>(&self) -> Motif_Set<'a> {
         self.trace[self.trace.len()-1].clone()
     }
 
-    /*    
-    fn save_and_drop_history(&mut self) -> Set_Trace_Def {
+       
+    pub fn save_and_drop_history(&mut self, processed_data: &str) -> Set_Trace_Def {
 
         let len_trace = self.trace.len();
 
@@ -1524,20 +1540,98 @@ impl<'a> Set_Trace<'a> {
 
         Set_Trace_Def {
             trace: trace, 
-            capacity: self.capacity, 
-            data: Waveform_Def::from(&self.data),
-            seq: self.seq.clone(),
-            background: self.background.clone(),
+            capacity: self.capacity,
         }
     }
 
-    //SAFETY: the seq MUST be a clone of what data is currently pointing to, and the set trace MUST be empty
-    //This is EXTREMELY unsafe otherwise. 
-    /*unsafe fn repoint(&mut self) {
-        self.data.repoint(&self.seq);
-    }*/
 
-    */
+    /*
+
+   pub struct Motif_Set<'a> {
+
+    set: Vec<Motif>,
+    width: f64,
+    signal: Waveform<'a>,
+    ln_post: Option<f64>,
+    data: &'a Waveform<'a>,
+    background: &'a Background,
+}
+
+       */
+
+    pub fn trace_from_meme(&'a mut self, meme_file_name: &str, e_value_cutoff: f64, fragment_length: usize) {
+
+        let width: f64 = (fragment_length as f64)/6.0;
+
+        let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
+        let mut meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
+
+        let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)").unwrap();
+
+        let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
+
+        if start_matrix_lines.len() == 0 {
+            panic!("Cannot read this file: it is invalid MEME output");
+        }
+
+        let mut set: Vec<Motif> = Vec::new();
+
+        for line in start_matrix_lines {
+            let captures = re.captures(meme_as_vec[line]).unwrap();
+            let alphabet_len: usize = captures[1].parse().unwrap();
+
+            assert!(alphabet_len == BASE_L, "MEME alphabet must be the same length as supplied alphabet");
+
+            let motif_len: usize = captures[2].parse().unwrap();
+            assert!((motif_len >= MIN_BASE) && (motif_len <= MAX_BASE), "Motif length must be compatible with supplied minimum and maximum");
+
+
+            let e_value: f64 = captures[3].parse().unwrap();
+
+            if (set.len() > 0) && (e_value > e_value_cutoff) {
+                break;
+            }
+            
+            let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
+
+            for i in 1..(motif_len+1) {
+                let mut props: [ f64; BASE_L] = [0.0; BASE_L];
+                let mut line_split = meme_as_vec[line+i].split_whitespace();
+                for j in 0..BASE_L {
+                    props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", line+i+1).as_str())
+                               .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", line+i+1).as_str());
+                }
+            
+                base_vec.push(Base::new(props));
+            }
+            
+            set.push(Motif::rand_height_pwm(base_vec, width));    
+
+        }
+
+
+        let mut signal = self.data.derive_zero();
+
+        for mot in &set {
+            signal += &(mot.generate_waveform(self.data));
+        }
+
+        let mut full_set = Motif_Set {
+            set: set,
+            width: width, 
+            signal: signal, 
+            ln_post: None, 
+            data: self.data, 
+            background: self.background
+        };
+
+        let _ = full_set.ln_posterior();
+
+        self.trace.push(full_set);
+
+
+    }
+    
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1545,15 +1639,48 @@ pub struct Set_Trace_Def {
 
     trace: Vec<Motif_Set_Def>,
     capacity: usize,
-    data_name: String,
 
 }
+
+
 
 
 impl Set_Trace_Def {
- 
+
+    //Panics: all Motif_Set_Defs in the trace must be of the same dimension and spacing as the data.
+    //        We also check to make sure that the first set's posterior density is accurate
+    pub fn get_set_trace<'a>(self, data: &'a Waveform, background: &'a Background) -> Set_Trace<'a> {
+    
+        for tr in &(self.trace) {
+            let a_signal = &tr.signal;
+
+            if (a_signal.len() != data.read_wave().len()) || (a_signal.spacer() != data.spacer()) {
+                panic!("This trace cannot be interpreted as coming from the proposed data");
+            }
+        }
+
+        let trace = unsafe{ self.trace.into_iter().map(|a| a.get_motif_set(data, background)).collect::<Vec<_>>()};
+
+        let mut compare = trace[0].clone();
+        compare.ln_post = None;
+        let check_ln_post = compare.ln_posterior();
+
+        //All operations should be the same, so we check float equality.
+
+        assert!(Some(check_ln_post) == trace[0].ln_post, "ln posterior of trace doesn't match with data");
+
+        Set_Trace {
+            trace: trace,
+            capacity: self.capacity,
+            data: data,
+            background: background,
+        }
+
+
+    }
 
 }
+
 
 
 
@@ -1787,8 +1914,8 @@ mod tester{
         let duration = start_gen.elapsed();
         println!("Done gen {} bp {:?}", bp, duration);
 
-        println!("{} gamma", gamma::gamma(4.));
-        println!("{} gamma", gamma::ln_gamma(4.));
+        println!("{} gamma", gamma(4.));
+        println!("{} gamma", ln_gamma(4.));
 
         //println!("{:?}", wave.raw_wave());
 

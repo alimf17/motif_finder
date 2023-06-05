@@ -57,10 +57,11 @@ impl All_Data {
     //TODO: I need to create a master function which takes in a fasta file and a IPOD/ChIP-seq data set 
     //      with a spacer and boolean indicating circularity, and outputs an All_Data instance
 
-    pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, compatible_data_name: &str, is_circular: bool, sequence_len:usize, 
-                                 fragment_length: usize, null_char: &Option<char>, spacing: usize) -> Self {
+    pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, sequence_len:usize, 
+                                 fragment_length: usize, null_char: &Option<char>, spacing: usize) -> (Self, String) {
 
-        let file_out = output_dir.to_owned()+"/"+compatible_data_name+DATA_SUFFIX;
+
+        let file_out = output_dir.to_owned()+"/"+&Self::chop_file_name(fasta_file)+"_"+&Self::chop_file_name(data_file)+DATA_SUFFIX;
 
         let check_initialization = fs::read_to_string(file_out.as_str());
 
@@ -86,11 +87,11 @@ impl All_Data {
 
         match json {
 
-            Ok(j_str) => fs::write(file_out, j_str).expect("Your path doesn't exist"),
+            Ok(j_str) => fs::write(file_out.as_str(), j_str).expect("Your path doesn't exist"),
             Err(error) => unreachable!("Something deeply wrong in the data has occurred. It shouldn't be possible to get here."),
         };
 
-        full_data
+        (full_data, file_out)
 
 
     }
@@ -606,8 +607,13 @@ impl All_Data {
     }
 
     fn chop_file_name(name: &str) -> String {
+        
+        let named_split = name.split("/").collect::<Vec<_>>();
+
+        let named = if named_split[named_split.len()-1] == "" {named_split[named_split.len()-2]} else {named_split[named_split.len()-1]};
+
         let re = Regex::new(r"\.\pL+$").unwrap();
-        let piece_name = re.replace(name, "");
+        let piece_name = re.replace(named, "");
         String::from(piece_name)
     }
 
