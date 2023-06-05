@@ -31,6 +31,7 @@ use log::warn;
 
 use regex::Regex;
 
+const DATA_SUFFIX: &str = "_data.json";
 
 #[derive(Serialize, Deserialize)]
 pub struct All_Data {
@@ -55,8 +56,46 @@ impl All_Data {
   
     //TODO: I need to create a master function which takes in a fasta file and a IPOD/ChIP-seq data set 
     //      with a spacer and boolean indicating circularity, and outputs an All_Data instance
-    //Important getters for the other structs to access the data from. 
 
+    pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, compatible_data_name: &str, is_circular: bool, sequence_len:usize, 
+                                 fragment_length: usize, null_char: &Option<char>, spacing: usize) -> Self {
+
+        let file_out = output_dir.to_owned()+"/"+compatible_data_name+DATA_SUFFIX;
+
+        let check_initialization = fs::read_to_string(file_out.as_str());
+
+        match check_initialization {
+            Ok(try_json) => return serde_json::from_str(try_json.as_str()).expect("Provided data file not in proper format for inference!"),
+            Err(error) => (), //We just want the full preprocessing to try to continue if we get an error from read_to_string
+        };
+
+        let pre_sequence = Self::process_fasta(fasta_file, *null_char);
+
+        let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular);
+ 
+        let (seq, data) = Self::synchronize_sequence_and_data(pre_sequence, pre_data, sequence_len, spacing); 
+
+        let full_data: All_Data = All_Data {seq: seq, data: data, background: background};
+
+        let wave = full_data.validated_data(); //This won't be returned: it's just a validation check.
+
+        //This probably isn't necessary, but helps ensure that the validation check doesn't get optimized away by the compiler
+        assert!(spacing == wave.spacer(), "Somehow, the data waveform got mangled");
+        
+        let json = serde_json::to_string(&full_data);
+
+        match json {
+
+            Ok(j_str) => fs::write(file_out, j_str).expect("Your path doesn't exist"),
+            Err(error) => unreachable!("Something deeply wrong in the data has occurred. It shouldn't be possible to get here."),
+        };
+
+        full_data
+
+
+    }
+
+    //Important getters for the other structs to access the data from. 
     pub fn validated_data(&self) -> Waveform {
 
         let len = self.data.len();
@@ -92,11 +131,21 @@ impl All_Data {
     //with null bases being marked with an index of BASE_L.
     //WARNING: ALL sequences in your FASTA file will be considered a single continguous block. 
     //         If they are not, why not? The FASTA file input shouldn't be fragments: it should be
-    //         a reference genome.
+    //         a reference genome. If you have multiple chromsomes that you're trying to throw into the inference
+    //         you can pretend that they're contiguous by throwing in your null characters a number of times 
+    //         equal to your fragment length. Note: you will have to massage your position data if you do this.
+    //         For example, if you have two linear chromosomes, where chr1 is 29384 bp long, and your fragment
+    //         length is 350bp, then, for zero indexed data, locations from 0 to 29383 will be chr1
+    //         29384 to 29733 will point to the fake spacer, 29384 would be position 0 on chr2, 
+    //         29386 would be position 2 on chr2, etc. Note: this motif finder cannot support a system with
+    //         multiple chromosomes where any of the chromosomes are circular. You CAN try to throw them in
+    //         but the only possible fix here would have to not know that one of the chromosomes is circular.
+    //         If it's really important that you need to do inference on that chromosome with circularity, 
+    //         do multiple inferences.
     //and the String that will be used to make the file name for the full data struct
     fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Vec<Option<usize>> {
 
-        let file_string = fs::read_to_string(fasta_file_name).expect("Invalid file name!");
+        let file_string = fs::read_to_string(fasta_file_name).expect("Invalid FASTA file name!");
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
         
         //We want to trim the whitespace from the bottom of the Fasta file
@@ -151,7 +200,7 @@ impl All_Data {
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
     fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool) -> (Vec<Vec<(usize, f64)>>, Background) {
-        let file_string = fs::read_to_string(data_file_name).expect("Invalid file name!");
+        let file_string = fs::read_to_string(data_file_name).expect("Invalid data file name!");
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
         //let mut locs: Vec<usize> = Vec::with_capacity(data_as_vec.len());
@@ -160,7 +209,7 @@ impl All_Data {
         let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
         let mut data_iter = data_as_vec.iter();
 
-        let first_line = data_iter.next().expect("FASTA file should not be empty!");
+        let first_line = data_iter.next().expect("Data file should not be empty!");
 
         let header = first_line.split(" ").collect::<Vec<_>>();
 
