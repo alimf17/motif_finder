@@ -17,6 +17,8 @@ use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
 
+use log::warn;
+
 use regex::Regex;
 use std::fs;
 use nalgebra::{DMatrix, DVector, dvector};
@@ -26,6 +28,9 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
+
+use serde_json::{Result as JsonResult, Value};
+
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
@@ -63,7 +68,7 @@ static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-19.0));
 
 static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
-const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
+pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
 //BEGIN BASE
 
@@ -1425,7 +1430,7 @@ impl<'a> Set_Trace<'a> {
     //         To ensure the safety of this function, there is a recalculation step that occurs if the 
     //         sequence or data changes. I assure you, you do not want this recalculation to occur:
     //         It's going to be very slow
-    pub fn push_set(&'a mut self, set: Motif_Set<'a>) {
+    pub fn push_set(&mut self, set: Motif_Set<'a>) {
 
         /*        Motif_Set {
             set: set,
@@ -1460,7 +1465,7 @@ impl<'a> Set_Trace<'a> {
 
     }
 
-    pub fn push_set_def(&'a mut self, set: Motif_Set_Def) {
+    pub fn push_set_def(&mut self, set: Motif_Set_Def) {
 
         /*        Motif_Set {
             set: set,
@@ -1486,13 +1491,23 @@ impl<'a> Set_Trace<'a> {
 
     }
 
+    pub fn push_last_state_from_json(&mut self, json_file: &str) {
+
+        let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
+
+        let prior_state: Motif_Set_Def = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
+
+        self.push_set_def(prior_state);
+
+    }
+
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
-    unsafe fn push_set_def_trust_like(&'a mut self, set: Motif_Set_Def) {
+    unsafe fn push_set_def_trust_like(&mut self, set: Motif_Set_Def) {
         self.trace.push(set.get_motif_set(&self.data, &self.background));
     }
 
-    unsafe fn push_set_def_trust_like_many(&'a mut self, sets: Vec<Motif_Set_Def>) {
+    unsafe fn push_set_def_trust_like_many(&mut self, sets: Vec<Motif_Set_Def>) {
         for set in sets {
             self.trace.push(set.get_motif_set(&self.data, &self.background));
         }
@@ -1502,16 +1517,18 @@ impl<'a> Set_Trace<'a> {
     //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
     //Base leaps run once: after the RJ steps but before the HMC steps: this is basically designed so that each set of steps goes from
     //most drastic to least drastic changes
-    pub fn advance<R: Rng + ?Sized>(&'a mut self, rng: &mut R, momentum_sd: f64, hmc_trace_steps: usize, hmc_epsilon: f64, num_rj_steps: usize, num_hmc_steps: usize) -> [usize; 5] { //1 for each of the RJ moves, plus one for hmc
+    pub fn advance<R: Rng + ?Sized>(&mut self, rng: &mut R, momentum_sd: f64, hmc_trace_steps: usize, hmc_epsilon: f64, num_rj_steps: usize, num_hmc_steps: usize) -> ([usize; 5],[usize; 5]) { //1 for each of the RJ moves, plus one for hmc
         
         let momentum_dist = Normal::new(0.0, momentum_sd).unwrap();
 
+        let mut num_trials: [usize;5] = [0; 5];
         let mut num_acceptances: [usize; 5] = [0; 5];
 
         for _ in 0..num_rj_steps {
 
             let setty = self.current_set();
             let (mut set, move_type, accept) = setty.run_rj_move();
+            num_trials[move_type] += 1;
             if accept{
                 num_acceptances[move_type] += 1;
             }
@@ -1528,6 +1545,7 @@ impl<'a> Set_Trace<'a> {
         for _ in 0..num_hmc_steps {
 
             let (set, accept) = self.current_set().hmc(hmc_trace_steps, hmc_epsilon, &momentum_dist, rng);
+            num_trials[4] += 1;
             if accept {
                 num_acceptances[4] += 1;
             }
@@ -1535,7 +1553,7 @@ impl<'a> Set_Trace<'a> {
         }
 
 
-        num_acceptances
+        (num_acceptances, num_trials)
 
     }
 
@@ -1543,8 +1561,17 @@ impl<'a> Set_Trace<'a> {
         self.trace[self.trace.len()-1].clone()
     }
 
+    pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
+
+        let init_set: Motif_Set_Def = Motif_Set_Def::from(&(self.trace[0]));
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
+
+        fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap());
+
+    }
        
-    pub fn save_and_drop_history(&mut self, processed_data: &str) -> Set_Trace_Def {
+    pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
 
         let len_trace = self.trace.len();
 
@@ -1552,10 +1579,16 @@ impl<'a> Set_Trace<'a> {
         let trace = self.trace.drain(0..(len_trace-1)).map(|a| Motif_Set_Def::from(&a)).collect();
 
 
-        Set_Trace_Def {
+        let history = Set_Trace_Def {
             trace: trace, 
             capacity: self.capacity,
-        }
+        };
+
+        let trace_file: String = format!("{}/{}_trace_from_step_{}.json",output_dir,run_name,zeroth_step);
+
+        fs::write(trace_file.as_str(), serde_json::to_string(&trace_file).unwrap());
+
+        self.save_initial_state(output_dir, run_name);
     }
 
 
@@ -1573,8 +1606,9 @@ impl<'a> Set_Trace<'a> {
 
        */
 
-    pub fn trace_from_meme(&'a mut self, meme_file_name: &str, e_value_cutoff: f64, fragment_length: usize) {
+    pub fn trace_from_meme(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64, fragment_length: usize) {
 
+        let mut rng = rand::thread_rng();
         let width: f64 = (fragment_length as f64)/6.0;
 
         let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
@@ -1590,8 +1624,8 @@ impl<'a> Set_Trace<'a> {
 
         let mut set: Vec<Motif> = Vec::new();
 
-        for line in start_matrix_lines {
-            let captures = re.captures(meme_as_vec[line]).unwrap();
+        for (mot_num, line) in start_matrix_lines.iter().enumerate() {
+            let captures = re.captures(meme_as_vec[*line]).unwrap();
             let alphabet_len: usize = captures[1].parse().unwrap();
 
             assert!(alphabet_len == BASE_L, "MEME alphabet must be the same length as supplied alphabet");
@@ -1610,16 +1644,36 @@ impl<'a> Set_Trace<'a> {
 
             for i in 1..(motif_len+1) {
                 let mut props: [ f64; BASE_L] = [0.0; BASE_L];
-                let mut line_split = meme_as_vec[line+i].split_whitespace();
+                let mut line_split = meme_as_vec[*line+i].split_whitespace();
                 for j in 0..BASE_L {
-                    props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", line+i+1).as_str())
-                               .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", line+i+1).as_str());
+                    props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", *line+i+1).as_str())
+                               .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", *line+i+1).as_str());
                 }
             
                 base_vec.push(Base::new(props));
             }
+
+            let mut motif = Motif::rand_height_pwm(base_vec, width);
             
-            set.push(Motif::rand_height_pwm(base_vec, width));    
+            if !seq.kmer_in_seq(&(motif.best_motif())) {
+
+                let mut no_mots_within_hamm = true;
+                let mut hamming: usize = 1;
+                let mut close_kmer_ids: Vec<usize> = Vec::new();
+                while (no_mots_within_hamm) {
+                    close_kmer_ids = seq.all_kmers_within_hamming(&(motif.best_motif()), hamming);
+                    no_mots_within_hamm = close_kmer_ids.len() == 0;
+                    hamming += 1;
+                }
+
+                hamming -= 1;
+                warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming));
+
+                motif = motif.scramble_by_id_to_valid(*close_kmer_ids.choose(&mut rng).unwrap(), false, seq)
+
+            }
+
+            set.push(motif);    
 
         }
 

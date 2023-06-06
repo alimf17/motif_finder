@@ -6,7 +6,7 @@ use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
-use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE};
+use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, RJ_MOVE_NAMES};
 use statrs::function::gamma::*;
 use statrs::{consts, Result, StatsError};
 use std::{f64, ops::Mul};
@@ -57,11 +57,11 @@ impl All_Data {
     //TODO: I need to create a master function which takes in a fasta file and a IPOD/ChIP-seq data set 
     //      with a spacer and boolean indicating circularity, and outputs an All_Data instance
 
-    pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, sequence_len:usize, 
-                                 fragment_length: usize, null_char: &Option<char>, spacing: usize) -> (Self, String) {
+    pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
+                                 fragment_length: usize, spacing: usize, null_char: &Option<char>) -> (Self, String) {
 
 
-        let file_out = output_dir.to_owned()+"/"+&Self::chop_file_name(fasta_file)+"_"+&Self::chop_file_name(data_file)+DATA_SUFFIX;
+        let file_out = format!("{}/{}_{}_{}{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
 
         let check_initialization = fs::read_to_string(file_out.as_str());
 
@@ -71,6 +71,8 @@ impl All_Data {
         };
 
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);
+
+        let sequence_len = pre_sequence.len();
 
         let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular);
  
