@@ -840,7 +840,7 @@ impl Motif {
 
         let binds = self.return_bind_score(DATA.seq());
 
-        let n = self.len()*(BASE_L-1);
+        let n = 1+self.len()*(BASE_L-1);
 
 
         let d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
@@ -1251,6 +1251,7 @@ impl<'a> Motif_Set<'a> {
            //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
            let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
        
+           println!("{} {} lens", motif_grad.len(), grad_vec.len());
            for i in 0..motif_grad.len() {
                motif_grad[i] = grad_vec[i];
            }
@@ -1329,6 +1330,52 @@ impl<'a> Motif_Set<'a> {
        
    }
 
+   /*
+
+pub struct Motif_Set<'a> {
+
+    set: Vec<Motif>, 
+    width: f64, 
+    signal: Waveform<'a>,
+    ln_post: Option<f64>,
+    data: &'a Waveform<'a>, 
+    background: &'a Background,
+}
+
+      */
+
+    #[cfg(test)]
+    fn numerical_gradient(&self) -> Vec<f64> {
+        let h: f64 = 0.0001;
+
+        let num_motifs = self.set.len();
+
+        let curr_like = self.calc_ln_post();
+
+        let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
+ 
+//unsafe fn add_momentum(&self, eps: f64, momentum: &[f64]) -> Self {
+
+            let len_gradient_form = 1+a.len()*(BASE_L-1);
+
+            let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
+
+                let mut perturb_vec = vec![0.0_f64; len_gradient_form];
+                perturb_vec[i] = h;
+                let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice())};
+
+                let mut alter_set = self.clone();
+                let new_ln_like = alter_set.replace_motif(mod_mot,k);
+                (new_ln_like-curr_like)/h
+            }).collect::<Vec<f64>>();
+
+            motif_grad
+            
+        }).flatten().collect();
+
+        gradient
+
+    }
 
 
 
@@ -1890,6 +1937,42 @@ mod tester{
 */
     
     #[test]
+    fn gradient_test() {
+
+
+        let mut rng = fastrand::Rng::new();
+
+        let block_n: usize = 200;
+        let u8_per_block: usize = 4375;
+        let bp_per_block: usize = u8_per_block*4;
+        let bp: usize = block_n*bp_per_block;
+        let u8_count: usize = u8_per_block*block_n;
+
+        println!("begin grad set gen");
+        let start_gen = Instant::now();
+        //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
+        let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let wave: Waveform = Waveform::create_zero(&sequence, 5);
+        let duration = start_gen.elapsed();
+        println!("grad gen {} bp {:?}", bp, duration);
+
+        let corrs: Vec<f64> = vec![0.9, -0.1];
+        let background = Background::new(0.25, 2.64, &corrs);
+        let motif_set = Motif_Set::rand_with_one(&wave, &background, 350);
+
+        let analytical_grad = motif_set.gradient();
+        let numerical_grad = motif_set.numerical_gradient();
+
+        println!("Analytical gradient: {:?}.", analytical_grad);
+        println!("Numerical gradient:  {:?}.", numerical_grad);
+    }
+
+    #[test]
     fn it_works() {
         let base = 3;
         let try_base: Base = Base::rand_new();
@@ -2287,4 +2370,12 @@ mod tester{
 
 
     }
+
+
+
+
+
+
+
+
 }
