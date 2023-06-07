@@ -1,8 +1,8 @@
 
-use motif_finder::sequence::seq::Sequence;
+use motif_finder::sequence::Sequence;
 use rand::Rng;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
-use motif_finder::base::bases::Motif;
+use motif_finder::base::Motif;
 
 fn main() {
 

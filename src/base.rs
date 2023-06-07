@@ -5,7 +5,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
-use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use statrs::function::gamma::*;
 use statrs::{consts, Result, StatsError};
@@ -806,7 +806,7 @@ impl Motif {
                                         .produce_noise(DATA, noise.background)};
         let d_ad_like_d_grad_form_h = d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) 
                                     * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT));
+                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) *(-1.0);
       
 
         let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
@@ -821,12 +821,12 @@ impl Motif {
             let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
 
             d_ad_like_d_grad_form_binds[index] = unsafe {
-                  - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
+                  - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                            .produce_noise(DATA, noise.background))
                   * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                   * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                  / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) } ;
-            
+                  / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) *(-1.0) } ;
+           
         }
 
             
@@ -849,7 +849,7 @@ impl Motif {
                                                .produce_noise(DATA, background)};
                 d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))
                 * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT))
+                / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) * (-1.)
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -858,13 +858,15 @@ impl Motif {
 
                 let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
 
-                unsafe {
-                      - (&(self.only_pos_waveform_from_binds(&binds, base_id, bp, DATA)
+                let result = unsafe {
+                      - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                                .produce_noise(DATA, background))
                       * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                       * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                      / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) 
-                }
+                      / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) * (-1.0)
+                };
+
+                result
             }
         }).collect();
 
@@ -915,7 +917,7 @@ impl fmt::Display for Motif {
 
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
-pub struct Motif_Set<'a> {
+pub struct MotifSet<'a> {
 
     set: Vec<Motif>, 
     width: f64, 
@@ -925,7 +927,7 @@ pub struct Motif_Set<'a> {
     background: &'a Background,
 }
 
-impl<'a> Motif_Set<'a> {
+impl<'a> MotifSet<'a> {
    
     pub fn rand_with_one(data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize) -> Self {
 
@@ -935,7 +937,7 @@ impl<'a> Motif_Set<'a> {
 
         let signal = set[0].generate_waveform(data);
 
-        let mut mot_set = Motif_Set{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+        let mut mot_set = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
 
         let _ = mot_set.ln_posterior();
 
@@ -958,7 +960,7 @@ impl<'a> Motif_Set<'a> {
 
     fn derive_set(&self) -> Self {
 
-        Motif_Set {
+        MotifSet {
             set: self.set.clone(),
             width: self.width, 
             signal: self.signal.clone(),
@@ -1245,13 +1247,15 @@ impl<'a> Motif_Set<'a> {
        let mut finished_compute: usize = 0;
 
        for motif in &self.set {
-           
+      
            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
+           println!("inds a {} {}", finished_compute, compute_to);
            let motif_grad = &mut gradient[finished_compute..compute_to];
            //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
            let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
        
            println!("{} {} lens", motif_grad.len(), grad_vec.len());
+           println!("{:?}", grad_vec);
            for i in 0..motif_grad.len() {
                motif_grad[i] = grad_vec[i];
            }
@@ -1332,7 +1336,7 @@ impl<'a> Motif_Set<'a> {
 
    /*
 
-pub struct Motif_Set<'a> {
+pub struct MotifSet<'a> {
 
     set: Vec<Motif>, 
     width: f64, 
@@ -1354,8 +1358,6 @@ pub struct Motif_Set<'a> {
 
         let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
  
-//unsafe fn add_momentum(&self, eps: f64, momentum: &[f64]) -> Self {
-
             let len_gradient_form = 1+a.len()*(BASE_L-1);
 
             let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
@@ -1377,6 +1379,42 @@ pub struct Motif_Set<'a> {
 
     }
 
+    #[cfg(test)]
+    fn no_par_gradient(&self) -> Vec<f64> {
+
+       let noise = self.signal.produce_noise(self.data, self.background);
+
+       let mut len_grad: usize = self.set.len();
+
+       for i in 0..self.set.len() {
+           len_grad += self.set[i].len()*(BASE_L-1);
+       }
+
+       let mut gradient = vec![0.0_f64; len_grad];
+
+       let mut finished_compute: usize = 0;
+
+       for motif in &self.set {
+      
+           let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
+           println!("inds a {} {}", finished_compute, compute_to);
+           let motif_grad = &mut gradient[finished_compute..compute_to];
+           //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
+           let (g, mut grad_vec) = motif.single_motif_grad(self.data, &noise);
+       
+           grad_vec.insert(0, g);
+           println!("{} {} lens", motif_grad.len(), grad_vec.len());
+           println!("{:?}", grad_vec);
+           for i in 0..motif_grad.len() {
+               motif_grad[i] = grad_vec[i];
+           }
+          
+           finished_compute = compute_to;
+       }
+
+       gradient
+
+   }
 
 
 
@@ -1386,19 +1424,19 @@ pub struct Motif_Set<'a> {
 
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Motif_Set_Def {
+pub struct MotifSetDef {
 
     set: Vec<Motif>,
     width: f64,
-    signal: Waveform_Def,
+    signal: WaveformDef,
     ln_post: f64,
 
 }
 
-impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
-    fn from(other: &'a Motif_Set) -> Self {
+impl<'a> From<&'a MotifSet<'a>> for MotifSetDef {
+    fn from(other: &'a MotifSet) -> Self {
 
-        let signal = Waveform_Def::from(&other.signal);
+        let signal = WaveformDef::from(&other.signal);
 
         Self {
             set: other.set.clone(), 
@@ -1409,18 +1447,18 @@ impl<'a> From<&'a Motif_Set<'a>> for Motif_Set_Def {
     }
 }
 
-impl Motif_Set_Def {
+impl MotifSetDef {
 
     //SAFETY: data must be the same dimensions as self.signal, both in absolute length of the signal and the
     //        values at each position of the point_lens, start_lens, and spacer
     //        Memory safety may be POSSIBLE with less strict requirements, but it's guarenteed with these
     //        Which also guarentee the correctness of this code. 
-    pub unsafe fn get_motif_set<'a>(self, data: &'a Waveform, background: &'a Background) -> Motif_Set<'a> {
+    pub unsafe fn get_motif_set<'a>(self, data: &'a Waveform, background: &'a Background) -> MotifSet<'a> {
         
         let set = self.set.clone();
         let signal = self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq());
 
-        Motif_Set {
+        MotifSet {
             set: set,
             width: self.width,
             signal: signal,
@@ -1442,8 +1480,8 @@ impl Motif_Set_Def {
 //THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
 //SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
 //AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
-pub struct Set_Trace<'a> {
-    trace: Vec<Motif_Set<'a>>,
+pub struct SetTrace<'a> {
+    trace: Vec<MotifSet<'a>>,
     capacity: usize,
     data: &'a Waveform<'a>, 
     background: &'a Background,
@@ -1454,16 +1492,16 @@ pub struct Set_Trace<'a> {
     //Create an "advance" function which does the appropriate number of HMCs, base leaps, and RJ steps
     //Create an "output and reset" type of function which outputs all motifs but the final one to a file and starts us to just that motif
     //Create an initialize function that reads in the prepared sequence, waveform, and background distribution from some pre initialized source
-    //          and allows us to either start from a prior Set_Trace file, from a MEME motif file, or from completely anew
+    //          and allows us to either start from a prior SetTrace file, from a MEME motif file, or from completely anew
 
-impl<'a> Set_Trace<'a> {
+impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_empty(capacity: usize, data: &'a Waveform<'a>, background: &'a Background) -> Set_Trace<'a> {
+    pub fn new_empty(capacity: usize, data: &'a Waveform<'a>, background: &'a Background) -> SetTrace<'a> {
 
 
-        Set_Trace{
-            trace: Vec::<Motif_Set<'a>>::with_capacity(capacity),
+        SetTrace{
+            trace: Vec::<MotifSet<'a>>::with_capacity(capacity),
             capacity: capacity, 
             data: data, 
             background: background,
@@ -1477,9 +1515,9 @@ impl<'a> Set_Trace<'a> {
     //         To ensure the safety of this function, there is a recalculation step that occurs if the 
     //         sequence or data changes. I assure you, you do not want this recalculation to occur:
     //         It's going to be very slow
-    pub fn push_set(&mut self, set: Motif_Set<'a>) {
+    pub fn push_set(&mut self, set: MotifSet<'a>) {
 
-        /*        Motif_Set {
+        /*        MotifSet {
             set: set,
             width: self.width,
             signal: signal,
@@ -1512,9 +1550,9 @@ impl<'a> Set_Trace<'a> {
 
     }
 
-    pub fn push_set_def(&mut self, set: Motif_Set_Def) {
+    pub fn push_set_def(&mut self, set: MotifSetDef) {
 
-        /*        Motif_Set {
+        /*        MotifSet {
             set: set,
             width: self.width,
             signal: signal,
@@ -1542,7 +1580,7 @@ impl<'a> Set_Trace<'a> {
 
         let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
 
-        let prior_state: Motif_Set_Def = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
+        let prior_state: MotifSetDef = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
 
         self.push_set_def(prior_state);
 
@@ -1550,11 +1588,11 @@ impl<'a> Set_Trace<'a> {
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
-    unsafe fn push_set_def_trust_like(&mut self, set: Motif_Set_Def) {
+    unsafe fn push_set_def_trust_like(&mut self, set: MotifSetDef) {
         self.trace.push(set.get_motif_set(&self.data, &self.background));
     }
 
-    unsafe fn push_set_def_trust_like_many(&mut self, sets: Vec<Motif_Set_Def>) {
+    unsafe fn push_set_def_trust_like_many(&mut self, sets: Vec<MotifSetDef>) {
         for set in sets {
             self.trace.push(set.get_motif_set(&self.data, &self.background));
         }
@@ -1604,13 +1642,13 @@ impl<'a> Set_Trace<'a> {
 
     }
 
-    pub fn current_set<'b>(&self) -> Motif_Set<'a> {
+    pub fn current_set<'b>(&self) -> MotifSet<'a> {
         self.trace[self.trace.len()-1].clone()
     }
 
     pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
 
-        let init_set: Motif_Set_Def = Motif_Set_Def::from(&(self.trace[0]));
+        let init_set: MotifSetDef = MotifSetDef::from(&(self.trace[0]));
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
 
@@ -1622,11 +1660,11 @@ impl<'a> Set_Trace<'a> {
 
         let len_trace = self.trace.len();
 
-        //We want to keep the last element in the Set_Trace, so that the markov chain can proceed
-        let trace = self.trace.drain(0..(len_trace-1)).map(|a| Motif_Set_Def::from(&a)).collect();
+        //We want to keep the last element in the SetTrace, so that the markov chain can proceed
+        let trace = self.trace.drain(0..(len_trace-1)).map(|a| MotifSetDef::from(&a)).collect();
 
 
-        let history = Set_Trace_Def {
+        let history = SetTraceDef {
             trace: trace, 
             capacity: self.capacity,
         };
@@ -1641,7 +1679,7 @@ impl<'a> Set_Trace<'a> {
 
     /*
 
-   pub struct Motif_Set<'a> {
+   pub struct MotifSet<'a> {
 
     set: Vec<Motif>,
     width: f64,
@@ -1731,7 +1769,7 @@ impl<'a> Set_Trace<'a> {
             signal += &(mot.generate_waveform(self.data));
         }
 
-        let mut full_set = Motif_Set {
+        let mut full_set = MotifSet {
             set: set,
             width: width, 
             signal: signal, 
@@ -1750,9 +1788,9 @@ impl<'a> Set_Trace<'a> {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Set_Trace_Def {
+pub struct SetTraceDef {
 
-    trace: Vec<Motif_Set_Def>,
+    trace: Vec<MotifSetDef>,
     capacity: usize,
 
 }
@@ -1760,11 +1798,11 @@ pub struct Set_Trace_Def {
 
 
 
-impl Set_Trace_Def {
+impl SetTraceDef {
 
-    //Panics: all Motif_Set_Defs in the trace must be of the same dimension and spacing as the data.
+    //Panics: all MotifSetDefs in the trace must be of the same dimension and spacing as the data.
     //        We also check to make sure that the first set's posterior density is accurate
-    pub fn get_set_trace<'a>(self, data: &'a Waveform, background: &'a Background) -> Set_Trace<'a> {
+    pub fn get_set_trace<'a>(self, data: &'a Waveform, background: &'a Background) -> SetTrace<'a> {
     
         for tr in &(self.trace) {
             let a_signal = &tr.signal;
@@ -1784,7 +1822,7 @@ impl Set_Trace_Def {
 
         assert!(Some(check_ln_post) == trace[0].ln_post, "ln posterior of trace doesn't match with data");
 
-        Set_Trace {
+        SetTrace {
             trace: trace,
             capacity: self.capacity,
             data: data,
@@ -1963,13 +2001,16 @@ mod tester{
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, &corrs);
-        let motif_set = Motif_Set::rand_with_one(&wave, &background, 350);
+        let motif_set = MotifSet::rand_with_one(&wave, &background, 350);
 
         let analytical_grad = motif_set.gradient();
         let numerical_grad = motif_set.numerical_gradient();
 
-        println!("Analytical gradient: {:?}.", analytical_grad);
-        println!("Numerical gradient:  {:?}.", numerical_grad);
+
+        println!("Analytical    Numerical    Difference(abs)    Quotient");
+        for i in 0..analytical_grad.len() {
+            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i].abs(), numerical_grad[i]/analytical_grad[i]);
+        }
     }
 
     #[test]

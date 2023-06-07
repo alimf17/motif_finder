@@ -159,7 +159,7 @@ impl Sequence {
 
         let mut kmer_nums: HashMap<usize, usize> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
 
-        for k in (MIN_BASE..MAX_BASE+1) {
+        for k in MIN_BASE..MAX_BASE+1 {
 
             let kmer_arr = self.generate_kmers(k);
             kmer_nums.insert(k, kmer_arr.len());
@@ -278,7 +278,7 @@ impl Sequence {
 
         let mut mot : u64 = 0;
 
-        for i in (0..bases.len()) {
+        for i in 0..bases.len() {
             mot += (bases[i] as u64) << (i*BITS_PER_BP);
         }
 
@@ -354,15 +354,15 @@ impl Sequence {
             let mut terminate = found ||  (*unique_kmer_ptr.offset(lowbound) > look_for) || (*unique_kmer_ptr.offset(upbound) < look_for) ; 
             while !terminate {
 
-                found =  (*unique_kmer_ptr.offset(midcheck) == look_for);
+                found = look_for == *unique_kmer_ptr.offset(midcheck);
                 if !found {
-                    if(*unique_kmer_ptr.offset(midcheck) > look_for) {
+                    if *unique_kmer_ptr.offset(midcheck) > look_for {
                         upbound = midcheck-1;
                     } else {
                         lowbound = midcheck+1;
                     }
                     midcheck = (upbound+lowbound)/2;
-                    terminate = (upbound < lowbound);
+                    terminate = upbound < lowbound;
 
                 } else {
                     terminate = true;
@@ -409,12 +409,11 @@ impl Sequence {
         let mut hamming: usize = 0;
         
         while (check > 0) && (hamming <= threshold) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
-            hamming += (((check & U64_BITMASK) > 0) as usize);
+            hamming += ((check & U64_BITMASK) > 0) as usize;
             check = check >> 2;
         }
 
-        (hamming <= threshold)
-
+        hamming <= threshold
     }
 
     //This gives the id of the kmers in the HashMap vector that are under the hamming distance threshold

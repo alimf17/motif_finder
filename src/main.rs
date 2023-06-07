@@ -68,8 +68,8 @@ fn main() {
     //9) Either the word "meme" or the word "json". If one of these is not the argument,
     //   no other arguments will be considered.
     //10) The name of the initial condition file. Can either be a meme or json file. If 
-    //   it is a JSON file containing the Set_Trace_Def, the name of the processed data
-    //   as implied by the Fasta and data files will be checked against the name in the Set_Trace_Def. 
+    //   it is a JSON file containing the SetTraceDef, the name of the processed data
+    //   as implied by the Fasta and data files will be checked against the name in the SetTraceDef. 
     //   If they're not identical, the program will panic on the spot
     let args: Vec<String> = env::args().collect();
 
@@ -100,14 +100,14 @@ fn main() {
     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
     //Initialize trace
-    let mut current_trace: Set_Trace = Set_Trace::new_empty(capacity, &data, &background);
+    let mut current_trace: SetTrace = SetTrace::new_empty(capacity, &data, &background);
 
     let check: Option<&str> = match args.get(9) { Some(x) => Some(x.as_str()), None => None};
     match check {
 
         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length),
         Some("json") => current_trace.push_last_state_from_json(args.get(10).expect("Must inlcude a string indicating a Json output file").as_str()),
-        _ => current_trace.push_set(Motif_Set::rand_with_one(&data, &background, fragment_length)),
+        _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, fragment_length)),
     };
 
     //run MCMC and make sure that I'm saving and clearing periodically

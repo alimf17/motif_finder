@@ -247,7 +247,7 @@ impl<'a> Waveform<'a> {
                                                                             //of the kernel to hit the next base in the cc
         
         let min_kern_cc = max(cc, place_bp);
-        let nex_kern_cc = min(((self.point_lens[block]*self.spacer) as isize)+place_bp, ((peak.len()+completion) as isize));
+        let nex_kern_cc = min(((self.point_lens[block]*self.spacer) as isize)+place_bp, (peak.len()+completion) as isize);
 
         let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
         let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
@@ -284,7 +284,7 @@ impl<'a> Waveform<'a> {
         let mut len_penalties = vec![0usize; end_dats.len()];
 
         for k in 0..end_dats.len() {
-            len_penalties[k] = ((k+1)*background.ar_corrs.len());
+            len_penalties[k] = (k+1)*background.ar_corrs.len();
         }
 
         let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
@@ -302,7 +302,7 @@ impl<'a> Waveform<'a> {
             
             for i in 0..l_c {
                 for j in 0..block.len() {
-                    block[j] -= (background.ar_corrs[i]*resid[sind+l_c+j-(i+1)]);
+                    block[j] -= background.ar_corrs[i]*resid[sind+l_c+j-(i+1)];
                 }
             }
 
@@ -349,11 +349,6 @@ impl<'a> Waveform<'a> {
         self.seq
     }
 
-    /*
-    //SAFETY: the seq MUST be a clone of what data is currently pointing to
-    pub unsafe fn repoint(&mut self, seq: *const Sequence) {
-        self.seq = &*seq;
-    }*/
 }
 
 impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {
@@ -470,12 +465,12 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Waveform_Def {
+pub struct WaveformDef {
     wave: Vec<f64>,
     spacer: usize,
 
 }
-impl<'a> From<&'a Waveform<'a>> for Waveform_Def {
+impl<'a> From<&'a Waveform<'a>> for WaveformDef {
     fn from(other: &'a Waveform) -> Self {
         Self {
             wave: other.raw_wave(),
@@ -484,7 +479,7 @@ impl<'a> From<&'a Waveform<'a>> for Waveform_Def {
     }
 }
 
-impl Waveform_Def {
+impl WaveformDef {
 
     //SAFETY: If the relevant lengths of the waveform do not correspond to the sequence, this will be unsafe. 
     //        By correspond, I mean that every element of point_lens needs to be 1+seq.block_lens/spacer
@@ -721,7 +716,7 @@ impl<'a> Noise<'a> {
 
         }
 
-        println!("ad_calc {:?}", time.elapsed());
+        //println!("ad_calc {:?}", time.elapsed());
         Ad
     }
 
@@ -741,7 +736,7 @@ impl<'a> Noise<'a> {
         }
 
 
-        println!("ad_grad {:?}", start.elapsed());
+        //println!("ad_grad {:?}", start.elapsed());
         derivative
 
     }
@@ -835,7 +830,7 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
         //let rhs_r = rhs.resids();
 
         //if(self.resids.len() != rhs_r.len()){
-        if(self.resids.len() != rhs.len()){
+        if self.resids.len() != rhs.len() {
             panic!("Residuals aren't the same length?!")
         }
 
@@ -845,7 +840,7 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
         let mut sum = 0.0;
 
         for i in 0..self.resids.len() {
-            sum+= (self.resids[i]*rhs[i]);
+            sum+= self.resids[i]*rhs[i];
         }
         sum
     }

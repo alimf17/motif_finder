@@ -4,7 +4,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
-use crate::waveform::{Kernel, Waveform, Waveform_Def, Noise, Background};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, RJ_MOVE_NAMES};
 use statrs::function::gamma::*;
@@ -37,7 +37,7 @@ const DATA_SUFFIX: &str = "_data.json";
 pub struct All_Data {
 
     seq: Sequence, 
-    data: Waveform_Def, 
+    data: WaveformDef, 
     background: Background
 
 }
@@ -558,8 +558,8 @@ impl All_Data {
 
 
     //TODO: I need a function which marries my processed FASTA file and my processed data
-    //      By the end, I should have a Sequence and Waveform_Def, which I can use in my public function to create an All_Data instance
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, Waveform_Def) {
+    //      By the end, I should have a Sequence and WaveformDef, which I can use in my public function to create an All_Data instance
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, WaveformDef) {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
 
@@ -601,7 +601,7 @@ impl All_Data {
         let seq = Sequence::new(sequence_blocks);
         let wave = Waveform::new(start_data, &seq, spacing);
 
-        let wave_ret = Waveform_Def::from(&wave);
+        let wave_ret = WaveformDef::from(&wave);
 
         (seq, wave_ret)
 
