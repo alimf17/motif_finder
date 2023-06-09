@@ -72,7 +72,7 @@ pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif
 
 //BEGIN BASE
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Base {
    props: [ f64; BASE_L],
 }
@@ -273,11 +273,9 @@ impl Base {
     }
 
 
-    //bp MUST be less than the BASE_L and nonnegative, or else this will produce undefined behavior
+    //bp MUST be less than the BASE_L, or else this will produce undefined behavior
     pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
-        //self.props[bp]/Self::max(&self.props) //This is the correct answer
-        *self.props.get_unchecked(bp) //Put bases in proportion binding form
-        
+        *self.props.get_unchecked(bp)
     }
 
 
@@ -825,7 +823,7 @@ impl Motif {
                            .produce_noise(DATA, noise.background))
                   * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                   * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                  / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) *(-1.0) } ;
+                  / (prop_bp*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)) *(-1.0) } ;
            
         }
 
@@ -863,7 +861,7 @@ impl Motif {
                                .produce_noise(DATA, background))
                       * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                       * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                      / (*PROP_UPPER_CUTOFF-*PROP_CUTOFF) * (-1.0)
+                      / ((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*prop_bp) * (-1.0)
                 };
 
                 result
@@ -969,6 +967,10 @@ impl<'a> MotifSet<'a> {
             background: self.background, //pointer
         }
 
+    }
+
+    fn get_nth_motif(&self, n: usize) -> Motif {
+        self.set[n].clone()
     }
 
     //This is our prior on the number of motifs
@@ -1350,7 +1352,7 @@ pub struct MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 0.0001;
+        let h: f64 = 1e-8;
 
         let num_motifs = self.set.len();
 
@@ -2001,15 +2003,41 @@ mod tester{
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, &corrs);
-        let motif_set = MotifSet::rand_with_one(&wave, &background, 350);
+        let mut motif_set = MotifSet::rand_with_one(&wave, &background, 350);
+
+        _ = motif_set.add_motif(Motif::rand_mot(58., wave.seq()));
+      
 
         let analytical_grad = motif_set.gradient();
         let numerical_grad = motif_set.numerical_gradient();
 
+        let b: Base = Base::new([0.1, 0.2, 0.3, 0.4]);
+
+        let b2 = b.add_in_hmc([0.0; 3]);
+
+        let b3 = b.add_in_hmc([1.0, 0.0, 0.0]);
+
+        println!("b {:?} b2 {:?} b3 {:?}", b, b2, b3);
+
+        let mot = motif_set.get_nth_motif(0);
+
+        let mut mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
+
+        mom[4] = 1.0;
+
+        let mot2 = unsafe{mot.add_momentum(1.0, &mom)};
+
+        let motb = mot.pwm()[1].clone();
+
+        let motb2 = motb.add_in_hmc([1.0, 0.0, 0.0]);
+
+        let mot2b = mot2.pwm()[1].clone();
+
+        println!("motb: {:?}, mot2b: {:?}. motb2: {:?}", motb, mot2b, motb2);
 
         println!("Analytical    Numerical    Difference(abs)    Quotient");
         for i in 0..analytical_grad.len() {
-            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i].abs(), numerical_grad[i]/analytical_grad[i]);
+            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], -(numerical_grad[i]-analytical_grad[i])/numerical_grad[i]);
         }
     }
 

@@ -3,6 +3,7 @@ mod base;
 mod sequence;
 mod waveform;
 mod data_struct;
+mod modified_t;
 
 use crate::base::*;
 use crate::sequence::Sequence;

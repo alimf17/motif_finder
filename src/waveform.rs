@@ -529,6 +529,7 @@ impl From<StudentsTDef> for StudentsT {
 
 }
 
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Background {
     #[serde(with = "StudentsTDef")]
@@ -620,7 +621,7 @@ impl Background {
 
         let ind = Self::get_lookup_index(calc);
         let diff = calc-unsafe{self.get_near_f64_from_ind(ind)};
-        unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(diff)+*self.dpdf_lookup.get_unchecked(ind)*diff.powi(2)} //quadratic approx
+        unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(diff)+*self.dpdf_lookup.get_unchecked(ind)*diff.powi(2)/2.0} //quadratic approx
     }
     pub fn pdf(&self, calc: f64) -> f64{
         let ind = Self::get_lookup_index(calc);
@@ -1151,7 +1152,7 @@ mod tests{
         }
 
         println!("calc v try {} {}", n1.ad_calc(), ad_try);
-        assert!(((n1.ad_calc()-ad_try)/ad_try).abs() < 5e-2);//Remember, I'm only calculating an approximation. It's going to be a bit off
+        assert!(((n1.ad_calc()-ad_try)/ad_try).abs() < 1e-4);//Remember, I'm only calculating an approximation. It's going to be a bit off
 
 
         let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
