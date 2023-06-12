@@ -2,7 +2,7 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
-use statrs::function::{gamma::*, erf::*};
+use statrs::function::{gamma::*, erf::*, beta::*};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use num_traits::Float;
 
@@ -18,6 +18,7 @@ use serde::{Serialize, Deserialize};
 const LN_GAMMA_3_HALFS: f64 = -0.120782237635245222;
 const M_SQRT_PI: f64 = 1.772453850905516027298167483341;
 const NUM_BGRAT_TERMS: usize = 30;
+const M_LN_2: f64 = 0.693147180559945309417232121458176;
 
 const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
@@ -194,31 +195,34 @@ impl FastT {
 
         let q2 = (x/self.scale).powi(2);
 
-        let b = self.scale/2.;
+        let b = self.freedom/2.;
 
         let major_branch = q2 >= self.freedom;
 
         //inp is technically always mathematically the same thing, but we calculate it slightly 
         //differently because theoretically the same and numerically the same aren't the same thing
-        let inp = if major_branch {1./(1.+q2/self.scale)} else { self.scale/(self.scale+q2)};
+        let inp = if major_branch {1./(1.+q2/self.freedom)} else { self.freedom/(self.freedom+q2)};
 
-        if major_branch {
-            let w = modified_bpser(b, inp, 1e-14);
-            return (w, (-w.exp()).ln_1p());
+        let (prew, prew1) = if major_branch {
+            let w = modified_bpser(0.5, b, inp, 1e-14);
+            (w, (-w.exp()).ln_1p())
+        } else if inp >= 0.29 {
+            let w1 = modified_bpser(b, 0.5, 1.0-inp, 1e-14);
+            ((-w1.exp()).ln_1p(), w1)
+        } else {
+            let n = 20;
+            let mut w1 = modified_bup(b, inp, 1e-14, n);
+            w1 = modified_bgrat(b+(n as f64), inp, w1, 1e-14);
+            ((-w1.exp()).ln_1p(), w1)
+        };
+
+        println!("x: {}, q2: {}, inp: {}, b: {}, Ix: {}, Ixf: {},prew: {}, prew1: {}", x, q2,inp, b,beta_inc(0.5, b, inp)/beta(0.5, b), beta_inc(b, 0.5, inp)/beta(b,0.5),prew, prew1);
+        if (x > 0.0) {
+            ((-0.5*(prew.exp())).ln_1p(), prew1-M_LN_2)
+        } else {
+            (prew1-M_LN_2, (-0.5*prew.exp()).ln_1p())
         }
-
-        if inp >= 0.29 {
-            let w1 = modified_bpser(b, inp, 1e-14);
-            return ((-w1.exp()).ln_1p(), w1);
-        }
-
-        let n = 20;
-
-        let mut w1 = modified_bup(b, inp, 1e-14, n);
-
-        w1 = modified_bgrat(b+(n as f64), inp, w1, 1e-14);
-
-        ((-w1.exp()).ln_1p(), w1)
+       
     }
 
 }
@@ -233,15 +237,15 @@ impl FastT {
 //Also, we are using the ln_gamma function from statrs instead of 
 //the official R implementation: it's accurate up to about 6 bits at
 //the very end of our floats and takes ~60ns regardless of input
-fn modified_bpser(b: f64, x: f64, eps: f64) -> f64 {
+fn modified_bpser(a: f64, b: f64, x: f64, eps: f64) -> f64 {
 
     if x == 0. {return -f64::INFINITY;  }
     if( x.is_nan() ) {return f64::NAN; }
 
-    let a0 = 0.5_f64.min(b);
-    let b0 = 0.5_f64.max(b);
+    let a0 = a.min(b);
+    let b0 = a.max(b);
  
-    let ln_dens = x.ln()/2.-ln_beta_with_3_halfs(b0);
+    let ln_dens = x.ln()/2.-ln_beta(a0,b0);
 
     let mut sum = 0.0;
     let mut c = 0.0;
@@ -253,7 +257,7 @@ fn modified_bpser(b: f64, x: f64, eps: f64) -> f64 {
     while (n < 1e7) && (w.abs() > tol) {
         n+=1.0;
         c *= (0.5 - (b/n) + 0.5) * x;
-        w = c / (0.5 + n);
+        w = c / (a + n);
         sum += w;
     }
 
@@ -364,6 +368,10 @@ fn modified_brcmp(a: f64, x: f64) -> f64 {
 
     //implemented
 
+}
+
+fn ln_beta(a: f64, b:f64) -> f64 {
+    ln_gamma(a+1.)+ln_gamma(b+1.)-ln_gamma(a+b+1.)
 }
 
 fn ln_beta_with_3_halfs(a: f64) -> f64 {

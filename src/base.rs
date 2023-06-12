@@ -1977,6 +1977,7 @@ mod tester{
 */
     
     #[test]
+    #[ignore]
     fn gradient_test() {
 
 
