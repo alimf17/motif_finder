@@ -238,6 +238,7 @@ impl FastT {
         let inp = 1./(1.+q2/self.freedom); 
 
         let t = Instant::now();
+        
         let prew = bpser(a, inp, 1e-8);
 
         println!("inp: {} bpser: {:?}", inp, t.elapsed());
@@ -392,14 +393,13 @@ mod tests{
     use crate::modified_t::ln_gamma;
     use crate::modified_t::BackgroundDist;
     use std::time::{Duration, Instant};
-
+    use statrs::function::gamma;
     #[test]
     fn attempt() {
 
         let dis = BackgroundDist::new(0.25, 2.84);
 
         println!("lge {}", ln_gamma(4.).exp());
-        let t = Instant::now();
         let mut rng = rand::thread_rng();
         let data = [2.2291285570e+0,  4.1510439540e-1, -5.8846691870e-1, -1.4300281780e+0, -1.0174699610e+0,  9.6801737090e-1,  6.1547874390e-1,  1.0320017990e+0, 9.8058816140e-1, 5.7552069380e-1];
 
@@ -413,13 +413,16 @@ mod tests{
             assert!(((c-cd[i]).abs() < 1e-6) && ((s-sf[i]).abs() < 1e-6));
         }
 
+        for _ in 0..50 {
         let a: f64 = rng.gen::<f64>();
-        let (c, s) = dis.ln_cd_and_sf(a);
-        println!("A {} c {} s {}", a, c, s);
+        let t = Instant::now();
+        let c = gamma::ln_gamma(a);
+        
 
 
         println!("t {:?}", t.elapsed());
-
+        println!("A {} c {} ", a, c);
+        }
         /*let mut rng = rand::thread_rng();
 
         let nums: Vec<f64> = (0..1000000).map(|_| rng.gen::<f64>()).collect();
