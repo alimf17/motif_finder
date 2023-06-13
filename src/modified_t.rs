@@ -5,7 +5,7 @@ use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichl
 use statrs::function::{gamma::*, erf::*, beta::*};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use num_traits::Float;
-
+use log::warn;
 use serde::{Serialize, Deserialize};
 
 //I apologize for this struct in advance, in particular, the FastT implementation.
@@ -205,6 +205,8 @@ impl FastT {
 
         let (prew, prew1) = if major_branch {
             let w = modified_bpser(0.5, b, inp, 1e-14);
+            let w_alt = bpser(0.5, b, inp, 1e-16);
+            println!("mb: {}, b: {}", w, w_alt);
             (w, (-w.exp()).ln_1p())
         } else if inp >= 0.29 {
             let w1 = modified_bpser(b, 0.5, 1.0-inp, 1e-14);
@@ -266,6 +268,41 @@ fn modified_bpser(a: f64, b: f64, x: f64, eps: f64) -> f64 {
     //implemented
 }
 
+fn bpser(a: f64, b: f64, x: f64, eps: f64) -> f64 {
+
+    let a0 = a.min(b);
+
+    let b0 = a.max(b);
+
+    let mut ans: f64 = a * x.ln()-ln_gamma(a+1.)-ln_gamma(b) + ln_gamma(a+b);
+
+    println!("preser: {}, x: {}, a: {}, b: {}", ans, x, a, b);
+
+    /* ----------------------------------------------------------------------- */
+    /*		       COMPUTE THE SERIES */
+    /* ----------------------------------------------------------------------- */
+    let tol: f64 = eps / a;
+    let mut n: f64 = 0.;
+    let mut sum: f64 = 0_f64;
+    let mut c: f64 = 1.;
+    let mut w: f64 = f64::INFINITY;
+    while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
+        n += 1.;
+        c *= (0.5 - (b / n)+0.5 ) * x;
+        w = c / (a + n);
+        sum += w;
+    }     
+    if(w.abs() > tol) { // the series did not converge (in time)
+                        // warn only when the result seems to matter:
+        warn!("bpser ans doesn't seem to have converged");
+    }
+    
+    if (a*sum > -1.) {ans += (a * sum).ln_1p();}
+    else {
+        ans = -f64::INFINITY;
+    }
+    return ans;
+} /* bpser */
 
 fn modified_bup(a: f64, x:f64, eps: f64, n: usize) -> f64 {
 
@@ -291,7 +328,7 @@ fn modified_bup(a: f64, x:f64, eps: f64, n: usize) -> f64 {
 
     retval+w
 
-    //implemented
+        //implemented
 
 }
 
