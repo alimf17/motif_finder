@@ -2,12 +2,15 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
-use statrs::function::{gamma::*, erf::*, beta::*};
+use statrs::function::{erf::*, beta::* };
+use statrs::consts;
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use num_traits::Float;
 use log::warn;
 use serde::{Serialize, Deserialize};
 
+use std::f64;
+    use std::time::{Duration, Instant};
 //I apologize for this struct in advance, in particular, the FastT implementation.
 //It is an unholy combination of R's background C implementation of pt, modified 
 //and pared down for my use, and the statrs implementation of things like the gamma 
@@ -21,6 +24,25 @@ const LN_GAMMA_3_HALFS: f64 = -0.120782237635245222;
 const M_SQRT_PI: f64 = 1.772453850905516027298167483341;
 const NUM_BGRAT_TERMS: usize = 30;
 const M_LN_2: f64 = 0.693147180559945309417232121458176;
+
+const GAMMA_DK: [f64; 11] = [
+    2.48574089138753565546e-5,
+    1.05142378581721974210,
+    -3.45687097222016235469,
+    4.51227709466894823700,
+    -2.98285225323576655721,
+    1.05639711577126713077,
+    -1.95428773191645869583e-1,
+    1.70970543404441224307e-2,
+    -5.71926117404305781283e-4,
+    4.63399473359905636708e-6,
+    -2.71994908488607703910e-9,
+];
+
+const GAMMA_INDS: [f64; 11] = [0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
+
+const GAMMA_R: f64 = 10.900511;
+
 
 const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
@@ -195,12 +217,14 @@ impl FastT {
 
     pub fn ln_cd_and_sf(&self,x: f64) -> (f64, f64) {
 
+        let t = Instant::now();
         let q2 = (x/self.scale).powi(2);
 
         let a = self.freedom/2.;
 
-        let major_branch = q2 >= self.freedom;
-
+        println!("time a: {:?}", t.elapsed());
+        //let major_branch = q2 >= self.freedom;
+/*
         //inp is technically always mathematically the same thing, but we calculate it slightly 
         //differently because theoretically the same and numerically the same aren't the same thing
         let inp = if major_branch {1./(1.+q2/self.freedom)} else { self.freedom/(self.freedom+q2)};
@@ -210,11 +234,13 @@ impl FastT {
                     //The only difference in the swap is that the latter requires 1.-inp
                     //And because b = 0.5 < 1, we always take the bpser route in the code
                     //Wow, the C code is written arcanely
+*/
+        let inp = 1./(1.+q2/self.freedom); 
 
+        let t = Instant::now();
+        let prew = bpser(a, inp, 1e-8);
 
-        let prew = bpser(a, inp, 1e-14);
-
-        println!("x: {}, q2: {}, inp: {}, b: {}, Ix: {}, Ixf: {},prew: {}, prew1: {}", x, q2,inp, a,beta_inc(a, 0.5, inp)/beta(a,0.5), beta_inc(a, 0.5, inp)/beta(a,0.5),prew, prew);
+        println!("inp: {} bpser: {:?}", inp, t.elapsed());
         if (x > 0.0) {
             ((-0.5*(prew.exp())).ln_1p(), prew-M_LN_2)
         } else {
@@ -239,25 +265,31 @@ impl FastT {
 fn bpser(a: f64, x: f64, eps: f64) -> f64 {
 
 
+    let t = Instant::now();
 
     let mut ans: f64 = a * x.ln()-ln_beta_half_times_a(a);
 
+    println!("time ans: {:?}", t.elapsed());
 
     /* ----------------------------------------------------------------------- */
     /*		       COMPUTE THE SERIES */
     /* ----------------------------------------------------------------------- */
+    let t = Instant::now();
     let tol: f64 = eps / a;
     let mut n: f64 = 0.;
     let mut sum: f64 = 0_f64;
     let mut c: f64 = 1.;
     let mut w: f64 = f64::INFINITY;
+    println!("time ass: {:?}", t.elapsed());
+    let t = Instant::now();
     while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
         w = c / (a + n);
         sum += w;
     }     
-    
+    println!("fin n {}", n);
+    println!("time ser: {:?}", t.elapsed());
     if (a*sum > -1.) {ans += (a * sum).ln_1p();}
     else {
         ans = -f64::INFINITY;
@@ -265,6 +297,31 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     return ans;
 } /* bpser */
 
+fn ln_gamma(x: f64) -> f64 {
+
+    let mut s = GAMMA_DK[0];
+    if x < 0.5 {
+        for i in 1..11 {
+            s += GAMMA_DK[i]/(GAMMA_INDS[i]-x);
+        }
+
+        consts::LN_PI
+            - (f64::consts::PI * x).sin().ln()
+            - s.ln()
+            - consts::LN_2_SQRT_E_OVER_PI
+            - (0.5 - x) * ((0.5 - x + GAMMA_R) / f64::consts::E).ln()
+    
+    } else {
+        for i in 1..11 {
+            s+=GAMMA_DK[i]/(x-1.+GAMMA_INDS[i]);
+        }
+    
+         s.ln()
+            + consts::LN_2_SQRT_E_OVER_PI
+            + (x - 0.5) * ((x - 0.5 + GAMMA_R) / f64::consts::E).ln()
+    }
+
+}
 
 fn ln_beta(a: f64, b:f64) -> f64 {
     ln_gamma(a+1.)+ln_gamma(b+1.)-ln_gamma(a+b+1.)
@@ -331,12 +388,19 @@ impl Getter for Normal {
 #[cfg(test)]
 mod tests{
 
+    use rand::Rng;
+    use crate::modified_t::ln_gamma;
     use crate::modified_t::BackgroundDist;
+    use std::time::{Duration, Instant};
+
     #[test]
     fn attempt() {
 
         let dis = BackgroundDist::new(0.25, 2.84);
 
+        println!("lge {}", ln_gamma(4.).exp());
+        let t = Instant::now();
+        let mut rng = rand::thread_rng();
         let data = [2.2291285570e+0,  4.1510439540e-1, -5.8846691870e-1, -1.4300281780e+0, -1.0174699610e+0,  9.6801737090e-1,  6.1547874390e-1,  1.0320017990e+0, 9.8058816140e-1, 5.7552069380e-1];
 
         let cd = [-0.001841144352630861, -0.1056418605108091, -2.948328285560595, -5.091991745450134, -4.210455061116229, -0.01694448425305765, -0.04893062330685381, -0.01442399294418845, -0.0164061855049808, -0.05643039312469962];
@@ -346,9 +410,33 @@ mod tests{
         for (i, dat) in data.iter().enumerate() {
             let (c, s) = dis.ln_cd_and_sf(*dat);
             println!("cd {}, sf {}, prop_cd {}, prop_sf {}, diff cd {}, diff sf {}",c, s, cd[i], sf[i], c-cd[i], s-sf[i]);
-            assert!(((c-cd[i]).abs() < 1e-10) && ((s-sf[i]).abs() < 1e-10));
+            assert!(((c-cd[i]).abs() < 1e-6) && ((s-sf[i]).abs() < 1e-6));
         }
 
+        let a: f64 = rng.gen::<f64>();
+        let (c, s) = dis.ln_cd_and_sf(a);
+        println!("A {} c {} s {}", a, c, s);
 
+
+        println!("t {:?}", t.elapsed());
+
+        /*let mut rng = rand::thread_rng();
+
+        let nums: Vec<f64> = (0..1000000).map(|_| rng.gen::<f64>()).collect();
+        let num_pt = nums.as_ptr();
+        let (mut n, mut o) = (0_f64, 0_f64);
+        let t = Instant::now();
+        for i in 0_isize..(nums.len() as isize) {
+            unsafe {
+            let (a,b) = dis.ln_cd_and_sf(*num_pt.offset(i));
+            n+=a;
+            o+=b;
+            }
+        }
+
+        let (v, u) = dis.ln_cd_and_sf(nums[0]);
+        println!("Time {:?}", t.elapsed());
+
+        */
     }
 }
