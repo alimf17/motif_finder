@@ -259,7 +259,9 @@ impl FastT {
 
     fn maclaurin_cdf(&self, x: f64) -> f64 {
         let g = (-ln_beta_half(self.freedom/2.)).exp()/(self.freedom.sqrt());
-        0.5+g*(x-((self.freedom+1.)/self.freedom)*x.powi(3)/6.+(3.*(self.freedom+1.)*(self.freedom+3.)/self.freedom.powi(2))*x.powi(5)/120.)
+        0.5+g*(x-((self.freedom+1.)/self.freedom)*x.powi(3)/6.
+               +(3.*(self.freedom+1.)*(self.freedom+3.)/self.freedom.powi(2))*x.powi(5)/120.
+               -15.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*x.powi(7)/(self.freedom.powi(3)*5040.))
     }
 
 }
@@ -297,7 +299,7 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     //println!("time ass: {:?}", t.elapsed());
     //let t = Instant::now();
     //while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
-    while n < 40. {
+    while n < 50. { //This 40 was not theoretically derived, but numerically experimented for
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
         w = c / (a + n);
