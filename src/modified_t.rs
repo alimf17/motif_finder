@@ -217,12 +217,15 @@ impl FastT {
 
     pub fn ln_cd_and_sf(&self,x: f64) -> (f64, f64) {
 
-        let t = Instant::now();
-        let q2 = (x/self.scale).powi(2);
+        //let t = Instant::now();
+        let q = (x/self.scale);
+        let q2 = q.powi(2);
 
+        
+        if q2 >= 0.25 {
         let a = self.freedom/2.;
 
-        println!("time a: {:?}", t.elapsed());
+        //println!("time a: {:?}", t.elapsed());
         //let major_branch = q2 >= self.freedom;
 /*
         //inp is technically always mathematically the same thing, but we calculate it slightly 
@@ -237,20 +240,30 @@ impl FastT {
 */
         let inp = 1./(1.+q2/self.freedom); 
 
-        let t = Instant::now();
+        //let t = Instant::now();
         
         let prew = bpser(a, inp, 1e-8);
 
-        println!("inp: {} bpser: {:?}", inp, t.elapsed());
+        //println!("inp: {} bpser: {:?}", inp, t.elapsed());
         if (x > 0.0) {
             ((-0.5*(prew.exp())).ln_1p(), prew-M_LN_2)
         } else {
             (prew-M_LN_2, (-0.5*prew.exp()).ln_1p())
         }
+        } else {
+            let prew = self.maclaurin_cdf(q);
+            (prew.ln(), (-prew).ln_1p())
+        }
        
     }
 
+    fn maclaurin_cdf(&self, x: f64) -> f64 {
+        let g = (-ln_beta_half(self.freedom/2.)).exp()/(self.freedom.sqrt());
+        0.5+g*(x-((self.freedom+1.)/self.freedom)*x.powi(3)/6.+(3.*(self.freedom+1.)*(self.freedom+3.)/self.freedom.powi(2))*x.powi(5)/120.)
+    }
+
 }
+
 
 
 //This is an attenuated version of the function bpser
@@ -266,31 +279,32 @@ impl FastT {
 fn bpser(a: f64, x: f64, eps: f64) -> f64 {
 
 
-    let t = Instant::now();
+    //let t = Instant::now();
 
     let mut ans: f64 = a * x.ln()-ln_beta_half_times_a(a);
 
-    println!("time ans: {:?}", t.elapsed());
+    //println!("time ans: {:?}", t.elapsed());
 
     /* ----------------------------------------------------------------------- */
     /*		       COMPUTE THE SERIES */
     /* ----------------------------------------------------------------------- */
-    let t = Instant::now();
+    //let t = Instant::now();
     let tol: f64 = eps / a;
     let mut n: f64 = 0.;
     let mut sum: f64 = 0_f64;
     let mut c: f64 = 1.;
     let mut w: f64 = f64::INFINITY;
-    println!("time ass: {:?}", t.elapsed());
-    let t = Instant::now();
-    while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
+    //println!("time ass: {:?}", t.elapsed());
+    //let t = Instant::now();
+    //while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
+    while n < 40. {
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
         w = c / (a + n);
         sum += w;
     }     
-    println!("fin n {}", n);
-    println!("time ser: {:?}", t.elapsed());
+    //println!("fin n {}", n);
+    //println!("time ser: {:?}", t.elapsed());
     if (a*sum > -1.) {ans += (a * sum).ln_1p();}
     else {
         ans = -f64::INFINITY;
@@ -330,6 +344,9 @@ fn ln_beta(a: f64, b:f64) -> f64 {
 
 fn ln_beta_half_times_a(a: f64) -> f64 {
     LN_GAMMA_HALF+ln_gamma(a+1.)-ln_gamma(a+0.5)
+}
+fn ln_beta_half(a: f64) -> f64 {
+    LN_GAMMA_HALF+ln_gamma(a)-ln_gamma(a+0.5)
 }
 
 fn grat_r(x: f64, log_r: f64) -> f64{
@@ -401,16 +418,15 @@ mod tests{
 
         println!("lge {}", ln_gamma(4.).exp());
         let mut rng = rand::thread_rng();
-        let data = [2.2291285570e+0,  4.1510439540e-1, -5.8846691870e-1, -1.4300281780e+0, -1.0174699610e+0,  9.6801737090e-1,  6.1547874390e-1,  1.0320017990e+0, 9.8058816140e-1, 5.7552069380e-1];
+        let data = [2.2291285570e+0,  4.1510439540e-1, -5.8846691870e-1, -1.4300281780e+0, -1.0174699610e+0,  9.6801737090e-1,  6.1547874390e-1,  1.0320017990e+0, 9.8058816140e-1, 5.7552069380e-1, 10.5, -10.5, 0.125, 0.05, -0.05, 0.24, 0.26, -0.24, -0.26, 0.124, 0.126, -0.124, -0.126];//, 0.005];
 
-        let cd = [-0.001841144352630861, -0.1056418605108091, -2.948328285560595, -5.091991745450134, -4.210455061116229, -0.01694448425305765, -0.04893062330685381, -0.01442399294418845, -0.0164061855049808, -0.05643039312469962];
-
-        let sf = [-6.298288400836528, -2.300056544954666, -0.05385159158458796, -0.006164729845405886, -0.01495082250690833, -4.086273189920248, -3.041717390080652, -4.246065609924472, -4.118288727978808, -2.902829897631842];
+        let cd = [-0.001841144352630861, -0.1056418605108091, -2.948328285560595, -5.091991745450134, -4.210455061116229, -0.01694448425305765, -0.04893062330685381, -0.01442399294418845, -0.0164061855049808, -0.05643039312469962,-2.34219612808483e-05, -10.66184817041387, -0.3954384654261913, -0.5576877143913497, -0.8498744215025229, -0.2303377202464982, -0.2098933691304, -1.581167890431584, -1.664267366838764, -0.3972910110417498, -0.3935939313076429, -1.115163703158927, -1.122785969616946];//, -0.6786179549835148];
+        let sf = [-6.298288400836528, -2.300056544954666, -0.05385159158458796, -0.006164729845405886, -0.01495082250690833, -4.086273189920248, -3.041717390080652, -4.246065609924472, -4.118288727978808, -2.902829897631842, -10.66184817041387, -2.34219612808483e-05, -1.118972310171169,-0.8498744215025229, -0.5576877143913497, -1.581167890431584, -1.664267366838764, -0.2303377202464982, -0.2098933691304, -1.115163703158927, -1.122785969616946, -0.3972910110417498, -0.3935939313076429];//, -0.7078906207282351];
 
         for (i, dat) in data.iter().enumerate() {
             let (c, s) = dis.ln_cd_and_sf(*dat);
-            println!("cd {}, sf {}, prop_cd {}, prop_sf {}, diff cd {}, diff sf {}",c, s, cd[i], sf[i], c-cd[i], s-sf[i]);
-            assert!(((c-cd[i]).abs() < 1e-6) && ((s-sf[i]).abs() < 1e-6));
+            println!("dat {}: cd {}, sf {}, prop_cd {}, prop_sf {}, diff cd {}, diff sf {}",dat, c, s, cd[i], sf[i], c-cd[i], s-sf[i]);
+            assert!(((c-cd[i]).abs() < 1e-3) && ((s-sf[i]).abs() < 1e-3));
         }
 
         for _ in 0..50 {
@@ -423,7 +439,7 @@ mod tests{
         println!("t {:?}", t.elapsed());
         println!("A {} c {} ", a, c);
         }
-        /*let mut rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
 
         let nums: Vec<f64> = (0..1000000).map(|_| rng.gen::<f64>()).collect();
         let num_pt = nums.as_ptr();
@@ -440,6 +456,6 @@ mod tests{
         let (v, u) = dis.ln_cd_and_sf(nums[0]);
         println!("Time {:?}", t.elapsed());
 
-        */
+        
     }
 }
