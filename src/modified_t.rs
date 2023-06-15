@@ -74,6 +74,12 @@ impl BackgroundDist {
             BackgroundDist::FastT(fast) => fast.ln_cd_and_sf(x)
         }
     }
+    pub fn cd_and_sf(&self,x: f64) -> (f64, f64) {
+        match self {
+            BackgroundDist::Normal(norm) => (norm.cdf(x), norm.sf(x)),
+            BackgroundDist::FastT(fast) => fast.cd_and_sf(x)
+        }
+    }
 }
 
 impl ContinuousCDF<f64, f64> for BackgroundDist {
@@ -218,6 +224,35 @@ trait ContinuousLnCDF<K: Float, T: Float>: Min<K> + Max<K> {
 
 impl FastT {
 
+    pub fn cd_and_sf(&self,x: f64) -> (f64, f64) {
+
+        //let t = Instant::now();
+        let q = (x/self.scale);
+        let q2 = q.powi(2);
+
+        
+        if q.abs() >= IMPL_CUT {
+        let a = self.freedom/2.;
+
+        let inp = 1./(1.+q2/self.freedom); 
+
+        //let t = Instant::now();
+        
+        let prew = bpser(a, inp, 1e-8).exp();
+
+        //println!("inp: {} bpser: {:?}", inp, t.elapsed());
+        if (x > 0.0) {
+            (1.-prew/2., prew/2.)
+        } else {
+            (prew/2., 1.-prew/2.)
+        }
+        } else {
+            let prew = self.maclaurin_cdf(q);
+            (prew, 1.-prew)
+        }
+       
+    }
+
     pub fn ln_cd_and_sf(&self,x: f64) -> (f64, f64) {
 
         //let t = Instant::now();
@@ -228,19 +263,6 @@ impl FastT {
         if q.abs() >= IMPL_CUT {
         let a = self.freedom/2.;
 
-        //println!("time a: {:?}", t.elapsed());
-        //let major_branch = q2 >= self.freedom;
-/*
-        //inp is technically always mathematically the same thing, but we calculate it slightly 
-        //differently because theoretically the same and numerically the same aren't the same thing
-        let inp = if major_branch {1./(1.+q2/self.freedom)} else { self.freedom/(self.freedom+q2)};
-                    //This will always be <= 0.5                    This will always be >= 0.5
-                    //  (no swap)                                   (swap)
-                    //So in both cases, once incorporating the swap, a = self.freedom/2., b = 0.5
-                    //The only difference in the swap is that the latter requires 1.-inp
-                    //And because b = 0.5 < 1, we always take the bpser route in the code
-                    //Wow, the C code is written arcanely
-*/
         let inp = 1./(1.+q2/self.freedom); 
 
         //let t = Instant::now();
@@ -442,7 +464,12 @@ mod tests{
         };
 
         let (cs, sf) = dis.ln_cd_and_sf(IMPL_CUT*scale);
+        let (asc, asf) = dis.cd_and_sf(IMPL_CUT*scale);
         println!("cut {} mac {} {} bpser {} {} diffc {}", IMPL_CUT*scale, f.ln(), (-f).ln_1p(), cs, sf, cs-f.ln());
+
+        println!("confirm ln and arith: exp of ln: {}, arith {}", cs.exp(), asc);
+
+        assert!(((cs.exp()-asc).abs() < 1e-6) && ((sf.exp()-asf).abs() < 1e-6), "ln and arith incompatible");
 
         for _ in 0..50 {
         let a: f64 = rng.gen::<f64>();
