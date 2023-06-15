@@ -8,8 +8,10 @@ use std::cmp::min;
 use core::f64::consts::PI;
 
 use crate::sequence::Sequence;
+use crate::modified_t::{BackgroundDist, BackgroundDistDef};
 use statrs::distribution::StudentsT;
 use statrs::distribution::{Continuous, ContinuousCDF};
+
 use statrs::Result as otherResult;
 
 

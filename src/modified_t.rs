@@ -46,6 +46,8 @@ const GAMMA_R: f64 = 10.900511;
 
 const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
+const IMPL_CUT: f64 = 0.6;
+
 pub enum BackgroundDist {
     Normal(Normal),
     FastT(FastT),
@@ -135,6 +137,7 @@ impl Max<f64> for BackgroundDist {
         return f64::INFINITY
     }
 }
+
 #[derive(Serialize, Deserialize)]
 struct FastT {
     scale: f64,
@@ -222,7 +225,7 @@ impl FastT {
         let q2 = q.powi(2);
 
         
-        if q2 >= 0.25 {
+        if q.abs() >= IMPL_CUT {
         let a = self.freedom/2.;
 
         //println!("time a: {:?}", t.elapsed());
@@ -261,7 +264,8 @@ impl FastT {
         let g = (-ln_beta_half(self.freedom/2.)).exp()/(self.freedom.sqrt());
         0.5+g*(x-((self.freedom+1.)/self.freedom)*x.powi(3)/6.
                +(3.*(self.freedom+1.)*(self.freedom+3.)/self.freedom.powi(2))*x.powi(5)/120.
-               -15.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*x.powi(7)/(self.freedom.powi(3)*5040.))
+               -15.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*x.powi(7)/(self.freedom.powi(3)*5040.)
+               +105.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*(self.freedom+7.)*x.powi(9)/(self.freedom.powi(3)*362880.))
     }
 
 }
@@ -410,13 +414,14 @@ mod tests{
 
     use rand::Rng;
     use crate::modified_t::ln_gamma;
-    use crate::modified_t::BackgroundDist;
+    use crate::modified_t::{BackgroundDist, IMPL_CUT};
     use std::time::{Duration, Instant};
     use statrs::function::gamma;
     #[test]
     fn attempt() {
 
-        let dis = BackgroundDist::new(0.25, 2.84);
+        let scale = 0.25;
+        let dis = BackgroundDist::new(scale, 2.84);
 
         println!("lge {}", ln_gamma(4.).exp());
         let mut rng = rand::thread_rng();
@@ -430,6 +435,14 @@ mod tests{
             println!("dat {}: cd {}, sf {}, prop_cd {}, prop_sf {}, diff cd {}, diff sf {}",dat, c, s, cd[i], sf[i], c-cd[i], s-sf[i]);
             assert!(((c-cd[i]).abs() < 1e-3) && ((s-sf[i]).abs() < 1e-3));
         }
+
+        let f = match &dis {
+            BackgroundDist::Normal(norm) => 0.5,
+            BackgroundDist::FastT(fast) => fast.maclaurin_cdf(IMPL_CUT),
+        };
+
+        let (cs, sf) = dis.ln_cd_and_sf(IMPL_CUT*scale);
+        println!("cut {} mac {} {} bpser {} {} diffc {}", IMPL_CUT*scale, f.ln(), (-f).ln_1p(), cs, sf, cs-f.ln());
 
         for _ in 0..50 {
         let a: f64 = rng.gen::<f64>();
