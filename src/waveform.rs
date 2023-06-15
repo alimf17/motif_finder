@@ -8,7 +8,7 @@ use std::cmp::min;
 use core::f64::consts::PI;
 
 use crate::sequence::Sequence;
-use crate::modified_t::{BackgroundDist, BackgroundDistDef};
+use crate::modified_t::*;
 use statrs::distribution::StudentsT;
 use statrs::distribution::{Continuous, ContinuousCDF};
 
@@ -40,6 +40,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
+//use serde_with::serde_as;
 use serde_big_array::BigArray;
 const WIDE: f64 = 3.0;
 
@@ -53,7 +54,7 @@ const MAX_DT_FLOAT: f64 = 15.96875;
 const EXP_OFFSET: u64 = (1023_u64-12) << 52;
 
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Kernel{
 
     peak_width: f64,
@@ -534,17 +535,8 @@ impl From<StudentsTDef> for StudentsT {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Background {
-    #[serde(with = "StudentsTDef")]
-    pub dist: StudentsT,
+    pub dist: BackgroundDist,
     pub ar_corrs: Vec<f64>,
-    #[serde(with = "BigArray")]
-    pub cdf_lookup: [f64; 8192],
-    #[serde(with = "BigArray")]
-    pub f64_lookup: [f64; 8192],
-    #[serde(with = "BigArray")]
-    pub pdf_lookup: [f64; 8192],
-    #[serde(with = "BigArray")]
-    pub dpdf_lookup: [f64; 8192],
 }
 
 impl Background {
@@ -563,30 +555,19 @@ impl Background {
             }
         }
 
-        let dist = StudentsT::new(0., sigma_background, df).unwrap();
+        let dist = BackgroundDist::new(sigma_background, df);
 
 
-        let mut domain = [0.0_f64; 8192];
-        
-        for sign in 0_u64..2 {
-            for rest in 0_u64..4096 {
-                //This gives us 8 abscissa bits and 3 effective sign bits to play with: the 1023-12 indicates that the minimum 
-                //exponent we care about is 2^(-12)
-                domain[((4096*sign+rest) as usize)] = unsafe{ std::mem::transmute::<u64, f64>((sign << 63) + (1023-12 << 52) + (rest << 44))};
-            }
-        }
-
-
-        let cdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.cdf(a)).collect::<Vec<_>>().try_into().unwrap();
-        let pdf_lookup: [f64; 8192] = domain.iter().map(|&a| dist.pdf(a)).collect::<Vec<_>>().try_into().unwrap();
-
-        let dpdf_lookup: [f64; 8192] = domain.iter().map(|&a| (a/sigma_background)*dist.pdf(a)*(df+1.)/(df+(a/sigma_background).powi(2)))
-                                             .collect::<Vec<_>>().try_into().unwrap();
-
-        Background{dist: dist, ar_corrs:ar_corrs.clone(), cdf_lookup:cdf_lookup, f64_lookup: domain, pdf_lookup:pdf_lookup, dpdf_lookup:dpdf_lookup}
+        Background{dist: dist, ar_corrs:ar_corrs.clone()}
     }
 
 
+    //The functions get_near_u64, get_near_f64,  
+    //and get_lookup_index are all legacy code from when 
+    //I had to implement my distribution with lookup tables
+    //and raw f64 bit manipulation to derive array indices.
+    //They're mainly still here because they're so terrifying that
+    //I love them and I can't bear to part with them.
     fn get_near_u64(calc: f64) -> u64 {
 
         let mut bit_check: u64 = calc.to_bits();
@@ -606,10 +587,6 @@ impl Background {
         unsafe{ std::mem::transmute::<u64, f64>(Self::get_near_u64(calc))}
     }
 
-    //SAFETY: you need to know that you have a valid lookup index
-    unsafe fn get_near_f64_from_ind(&self, ind: usize) -> f64 {
-        *self.f64_lookup.get_unchecked(ind)
-    }
 
     fn get_lookup_index(calc: f64) -> usize {
 
@@ -619,25 +596,28 @@ impl Background {
         
     }
 
+    pub fn ln_cd_and_sf(&self, calc: f64) -> (f64, f64) {
+        self.dist.ln_cd_and_sf(calc)
+    }
+    pub fn cd_and_sf(&self, calc: f64) -> (f64, f64) {
+        self.dist.cd_and_sf(calc)
+    }
     pub fn cdf(&self, calc: f64) -> f64{
-
-        let ind = Self::get_lookup_index(calc);
-        let diff = calc-unsafe{self.get_near_f64_from_ind(ind)};
-        unsafe{ *self.cdf_lookup.get_unchecked(ind) + *self.pdf_lookup.get_unchecked(ind)*(diff)+*self.dpdf_lookup.get_unchecked(ind)*diff.powi(2)/2.0} //quadratic approx
+        self.dist.cdf(calc)
     }
     pub fn pdf(&self, calc: f64) -> f64{
-        let ind = Self::get_lookup_index(calc);
-        unsafe{ *self.pdf_lookup.get_unchecked(ind) + *self.dpdf_lookup.get_unchecked(ind)*(calc-self.get_near_f64_from_ind(ind))} //linear approx
+        self.dist.pdf(calc)
     }
 
-    //SAFETY: you need to know that you have a valid lookup index
-    unsafe fn cdf_from_ind(&self, calc_ind: usize) -> f64{
-        *self.cdf_lookup.get_unchecked(calc_ind)
+    pub fn ln_cdf(&self, calc: f64) -> f64{
+        self.dist.ln_cdf(calc)
     }
-    unsafe fn pdf_from_ind(&self, calc_ind: usize) -> f64{
-        *self.pdf_lookup.get_unchecked(calc_ind)
+    pub fn ln_sf(&self, calc: f64) -> f64{
+        self.dist.ln_sf(calc)
     }
-
+    pub fn ln_pdf(&self, calc: f64) -> f64{
+        self.dist.ln_pdf(calc)
+    }
 
 
 }
@@ -661,7 +641,7 @@ impl<'a> Noise<'a> {
         self.resids.clone()
     }
     
-    pub fn dist(&self) -> StudentsT {
+    pub fn dist(&self) -> BackgroundDist {
         self.background.dist.clone()
     }
 
@@ -688,15 +668,7 @@ impl<'a> Noise<'a> {
         }
 
         
-        /*let mut prerank = rx.iter().enumerate().map(|(a, (b, _))| (a as f64,b)).collect::<Vec<_>>();
-
-        prerank.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
-
-        let ranks = prerank.iter().map(|(a,_)| *a).collect::<Vec<_>>();
-        */
         ranks
-        //let inds = (0..self.resids.len()).collect::<Vec<usize>>();
-        //self.rankVec(&inds).iter().map(|&a| a as f64).collect::<Vec<f64>>()
         
         
     }
@@ -713,13 +685,12 @@ impl<'a> Noise<'a> {
         let mut Ad = -(n as f64);
         for i in 0..n {
 
-            let cdf = self.background.cdf(forward[i]);
-            let rev_sf = 1.0-self.background.cdf(forward[n-1-i]);
-            Ad-= (cdf.ln()+rev_sf.ln()) * ((2*i+1) as f64)/(n as f64)
+            let cdf = self.background.ln_cdf(forward[i]);
+            let rev_sf = self.background.ln_sf(forward[n-1-i]);
+            Ad -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
 
         }
 
-        //println!("ad_calc {:?}", time.elapsed());
         Ad
     }
 
@@ -734,8 +705,8 @@ impl<'a> Noise<'a> {
         let mut derivative: Vec<f64> = vec![0.0; self.resids.len()];
 
         for i in 0..self.resids.len() {
-            let cdf = unsafe{ self.background.cdf(self.resids[i])};
-            derivative[i] = ((unsafe{self.background.pdf(self.resids[i])})/((1.0-cdf)*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
+            let (cdf, sf) = self.background.cd_and_sf(self.resids[i]);
+            derivative[i] = ((self.background.pdf(self.resids[i]))/(sf*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
         }
 
 
@@ -744,40 +715,6 @@ impl<'a> Noise<'a> {
 
     }
 
-/*
-    pub fn ad_grad(&self) -> Vec<f64> {
-
-        let mut preforward: Vec<_> = self.resids.iter().enumerate().collect();
-
-        preforward.sort_unstable_by(|(_,a),(_,b)| a.partial_cmp(b).unwrap());
-
-        let forward = preforward.iter().map(|(_,b)| *b);
-        let inds = preforward.iter().map(|(a,_)| *a);
-
-        let n = forward.len() as f64;
-        let finds = forward.map(|&f| Background::get_lookup_index(f));
-        let pdf = finds.clone().map(|a| unsafe{ self.background.pdf_from_ind(a)});
-        let cdf = finds.map(|a| unsafe{ self.background.cdf_from_ind(a)} );
-
-
-
-        /*
-        let derivative: Vec<f64> = forward.iter().zip(ranks)
-                                    .map(|(&a, b)| (self.background.dist.pdf(a)/(self.background.dist.sf(a)*(n as f64)))*(2.*(n as f64)-(((2*b+1) as f64)/self.background.dist.cdf(a))))
-                                    .collect();*/ 
-       
-        let mut calc_derivative: Vec<(usize, f64)> = cdf.zip(pdf).zip(inds).enumerate()
-                                    .map(|(r, ((c, p), i))| (i, (p/((1.0-c)*n))*(2.*(n)-(((2.*(r as f64)+1.))/c))))
-                                    .collect();
-
-        calc_derivative.sort_unstable_by(|(a,_),(b, _)| a.cmp(b));
-
-        let derivative = calc_derivative.iter().map(|(_,a)| *a).collect::<Vec<_>>();
-
-        derivative
-
-    }
-*/
     fn low_val(lA: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
@@ -1146,10 +1083,11 @@ mod tests{
 
         for i in 0..noise_length {
 
-            let ln_cdf = n1.dist().cdf(noise_arr[i]).ln();
-            let ln_sf = (1.-n1.dist().cdf(noise_arr[noise_length-1-i])).ln();
+            let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
+            let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
             let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
 
+            
             ad_try -= (mult*(ln_cdf+ln_sf));
         }
 

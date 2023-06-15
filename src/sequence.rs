@@ -510,7 +510,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn seq_check2(){
 
         let mut rng = fastrand::Rng::new();

@@ -289,7 +289,7 @@ impl Base {
 
 //BEGIN MOTIF
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Motif {
 
     peak_height: f64,
@@ -1352,7 +1352,7 @@ pub struct MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 1e-8;
+        let h: f64 = 1e-2;
 
         let num_motifs = self.set.len();
 
@@ -1365,8 +1365,10 @@ pub struct MotifSet<'a> {
             let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
 
                 let mut perturb_vec = vec![0.0_f64; len_gradient_form];
+               
                 perturb_vec[i] = h;
                 let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice())};
+
 
                 let mut alter_set = self.clone();
                 let new_ln_like = alter_set.replace_motif(mod_mot,k);
@@ -1977,14 +1979,13 @@ mod tester{
 */
     
     #[test]
-    #[ignore]
     fn gradient_test() {
 
 
         let mut rng = fastrand::Rng::new();
 
         let block_n: usize = 200;
-        let u8_per_block: usize = 4375;
+        let u8_per_block: usize = 435;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -2039,7 +2040,10 @@ mod tester{
         println!("Analytical    Numerical    Difference(abs)    Quotient");
         for i in 0..analytical_grad.len() {
             println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], -(numerical_grad[i]-analytical_grad[i])/numerical_grad[i]);
+            assert!(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2);
         }
+
+
     }
 
     #[test]

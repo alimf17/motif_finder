@@ -48,7 +48,10 @@ const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
 const IMPL_CUT: f64 = 0.6;
 
+#[derive(Serialize, Deserialize, Clone)]
 pub enum BackgroundDist {
+
+    #[serde(with = "NormalDef")]
     Normal(Normal),
     FastT(FastT),
 }
@@ -144,8 +147,8 @@ impl Max<f64> for BackgroundDist {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct FastT {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct FastT {
     scale: f64,
     freedom: f64,
 }
@@ -214,7 +217,7 @@ impl Max<f64> for FastT {
     }
 }
 
-trait ContinuousLnCDF<K: Float, T: Float>: Min<K> + Max<K> {
+pub trait ContinuousLnCDF<K: Float, T: Float>: Min<K> + Max<K> {
 
     fn ln_cdf(&self, x: K) -> T;
     fn ln_sf(&self, x: K) -> T;
@@ -391,7 +394,6 @@ fn logspace_add(lnx: f64, lny: f64) -> f64 {
     lnx.max(lny)+(-(lnx-lny).abs()).exp().ln_1p()
 }
 
-#[derive(Serialize, Deserialize)]
 pub enum BackgroundDistDef {
     Normal(NormalDef),
     FastT(FastT),
@@ -408,8 +410,11 @@ impl From<BackgroundDistDef> for BackgroundDist {
 
 
 #[derive(Serialize, Deserialize)]
-struct NormalDef {
+#[serde(remote = "Normal")]
+pub struct NormalDef {
+    #[serde(getter = "Normal::get_mean")]
     mean: f64,
+    #[serde(getter = "Normal::get_sd")]
     std_dev: f64,
 }
 
@@ -418,8 +423,8 @@ impl From<NormalDef> for Normal {
         Normal::new(def.mean, def.std_dev).unwrap()
     }
 }
-/*
-trait Getter {
+ 
+pub trait Getter {
     fn get_mean(&self) -> f64;
     fn get_sd(&self) -> f64;
 }
@@ -427,8 +432,7 @@ trait Getter {
 impl Getter for Normal {
     fn get_mean(&self) -> f64 { self.mean().unwrap() }
     fn get_sd(&self) -> f64 { self.std_dev().unwrap() }
-}*/
-
+}
 
 
 #[cfg(test)]
