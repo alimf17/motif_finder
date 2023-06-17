@@ -251,17 +251,17 @@ impl Base {
     }
 
     fn prop_to_hmc(p: f64) -> f64 {
-        (p-*PROP_CUTOFF).ln()-(*PROP_UPPER_CUTOFF-p).ln()
+        let r = (p-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
+        r.ln()-(-r).ln_1p()
     }
 
-    fn hmc_to_prop(h: f64) -> f64 {
-        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*h.exp()/(1.0+h.exp()))
+    fn hmc_to_prop(m: f64) -> f64 {
+        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*m.exp()/(1.0+m.exp()))
     }
 
     fn d_prop_d_hmc(p: f64) -> f64 {
 
-        let h = Self::prop_to_hmc(p);
-        (*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(4.*(h/2.).cosh().powi(2))
+        (p-*PROP_CUTOFF)*(*PROP_UPPER_CUTOFF-p)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
     }
 
     pub fn rev(&self) -> Base {
@@ -860,7 +860,7 @@ impl Motif {
             d_ad_like_d_grad_form_binds[index] = unsafe {
                   - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                            .produce_noise(DATA, noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp) /*calc derivative*/ } ;
+                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp) } ;
            
         }
 
@@ -899,9 +899,6 @@ impl Motif {
                       - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                                .produce_noise(DATA, background))
                       * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) * (-1.0)
-                      // * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                      // / ((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)) * (-1.0) //+ (2.*prop_bp-(*PROP_UPPER_CUTOFF+*PROP_CUTOFF))/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
-                      //TODO: incorporate the derivative of the ln prior here: rememeber, our transform means we don't always have a uniform prior REALLY, for both height and bases
                 };
 
                 result
@@ -2084,7 +2081,7 @@ mod tester{
         let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave)};
         let mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
 
-        let h = 1e-3;
+        let h = 1e-6;
 
         println!("Mot \n {}", mot);
         for (j, (&bp, &p)) in bps.iter().zip(pos.iter()).enumerate() {
@@ -2101,14 +2098,21 @@ mod tester{
             let w2 = wave2.raw_wave();
             let wc = wave_check.raw_wave();
 
+            let t = Instant::now();
             let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
             let prop_bp2 = unsafe{mot2.pwm()[p].rel_bind(bp)};
+            let rat = (prop_bp2-prop_bp)/h;
+            println!("rat time {:?}", t.elapsed());
+            println!("rat: {}", rat);
             let normalizer = Base::d_prop_d_hmc(prop_bp); //(*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
             let mut i = 0;
             let mut calc: f64 = (w2[i]-w1[i])/h;
             let mut ana: f64 = wc[i];
             println!("Wave checking {} in pos {}", BPS[bp], p);
             println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}, ratio: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer, ((prop_bp2-prop_bp)/h)/normalizer);
+            let ratio = ((prop_bp2-prop_bp)/h)/normalizer;
+            println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
+                                          unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
             while (i < (w2.len()-1)) && ((calc == 0.) || (ana == 0.)) {
                 calc = (w2[i]-w1[i])/h;
                 ana = wc[i];
@@ -2121,7 +2125,7 @@ mod tester{
 
             let num_diff = calc/normalizer;
             let num_diff_b = calc_b/normalizer;
-            println!("{} {} {} {} {} {} {}",  num_diff, ana, (num_diff/ana), num_diff_b/ana_b, normalizer.ln(), (calc/ana),((calc/ana)/normalizer)-(normalizer.ln()));
+            println!("{} {} {} {} {} {} {}",  num_diff, ana, (num_diff/ana)/ratio, (num_diff_b/ana_b)/ratio, normalizer.ln(), (calc/ana),((calc/ana)/normalizer)-(normalizer.ln()));
 
         }
 
