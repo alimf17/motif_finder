@@ -12,7 +12,8 @@ use rand::Rng;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a loop of use statements
 
-pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole 
+pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole
+                                  //Don't try to get cute and set this > 8.
 pub const BP_PER_U8: usize = 8/BITS_PER_BP; 
 const PLACE_VALS: [u8; BP_PER_U8] = [1, 4, 16, 64]; //NOTICE: this only works when BASE_L == 4. 
                                             //Because a u8 contains 8 bits of information (duh)
@@ -73,13 +74,17 @@ impl Sequence {
 
             //SAFETY: We have unsafe code that relies on these invariants being upheld
             if block.len() % BP_PER_U8 != 0 {
-                panic!("All blocks must have a number of base pairs divisible by BP_PER_U8.");
+                panic!("All blocks must have a number of base pairs divisible by {}.", BP_PER_U8);
             }
 
             if block.len() <= MAX_BASE {
                 panic!("All blocks must be longer than your maximum possible motif size!");
             }
- 
+
+            //SAFETY: This is quite possibly the most important guarentee this code has of safety. 
+            //If you're getting a panic here, don't try to bull around it. The entire 
+            //likelihood calculation algorithm relies on this assertion being statically guarenteed in all
+            //uses of Sequence
             if block.iter().any(|&a| a >= BASE_L) {
                 panic!("All sequence bases must map to a valid base!")
             }
@@ -252,6 +257,8 @@ impl Sequence {
     
     }
 
+
+    //SAFETY: THIS function is safe. But unsafe code relies on it always producing values < BASE_L
     pub fn code_to_bases(coded: u8) -> [usize ; BP_PER_U8] {
 
         let mut V: [usize; BP_PER_U8] = [0; BP_PER_U8];

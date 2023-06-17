@@ -439,8 +439,7 @@ impl Getter for Normal {
 mod tests{
 
     use rand::Rng;
-    use crate::modified_t::ln_gamma;
-    use crate::modified_t::{BackgroundDist, IMPL_CUT};
+    use super::*;
     use std::time::{Duration, Instant};
     use statrs::function::gamma;
     #[test]

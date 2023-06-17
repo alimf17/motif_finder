@@ -8,7 +8,7 @@ use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use statrs::function::gamma::*;
-use statrs::{consts, Result, StatsError};
+use statrs::{consts, StatsError};
 use std::f64;
 use std::fmt;
 use std::collections::{VecDeque, HashMap};
@@ -50,9 +50,11 @@ const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
 
+static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
+
 const PROB_POS_PEAK: f64 = 0.9;
 
-pub const THRESH: f64 = 1e-3; 
+pub const THRESH: f64 = 1e-3; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
@@ -126,14 +128,6 @@ impl Base {
 
 
 
-    //Safety: props must be an array with 
-    //      1) exactly one element = 1.0
-    //      2) all other elements between *PROP_CUTOFF and *PROP_UPPER_CUTOFF
-    //Otherwise, this WILL break. HARD. And in ways I can't determine
-    pub unsafe fn proper_new(props: [ f64; BASE_L]) -> Base {
-        Base { props }
-    }
-
 
 
 
@@ -162,7 +156,7 @@ impl Base {
             }
         }
 
-        unsafe {Base::proper_new(att) }
+        Base { props: att}
     }
 
     pub fn from_bp(best: usize) -> Base {
@@ -241,9 +235,9 @@ impl Base {
             if i == best {
                 new_props[i] = 1.0;
             } else {
-                let mut dg = -((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(self.props[i]-*PROP_CUTOFF)-1.0).ln();
+                let mut dg =  Self::prop_to_hmc(self.props[i]);
                 dg += addend[ind];
-                dg = *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(1.0+((-dg).exp())));
+                dg = Self::hmc_to_prop(dg); 
                 new_props[i] = dg;
                 ind += 1;
             }
@@ -254,6 +248,20 @@ impl Base {
 
 
 
+    }
+
+    fn prop_to_hmc(p: f64) -> f64 {
+        (p-*PROP_CUTOFF).ln()-(*PROP_UPPER_CUTOFF-p).ln()
+    }
+
+    fn hmc_to_prop(h: f64) -> f64 {
+        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*h.exp()/(1.0+h.exp()))
+    }
+
+    fn d_prop_d_hmc(p: f64) -> f64 {
+
+        let h = Self::prop_to_hmc(p);
+        (*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(4.*(h/2.).cosh().powi(2))
     }
 
     pub fn rev(&self) -> Base {
@@ -273,7 +281,11 @@ impl Base {
     }
 
 
-    //bp MUST be less than the BASE_L, or else this will produce undefined behavior
+    
+    //SAFETY: bp MUST be less than the BASE_L, or else this will produce undefined behavior
+    //        Why do I do this in an unsafe way? My code is literally half again as fast when this
+    //        is unsafe. When we use the bases from the Sequence object, the initialization of Sequence
+    //        ensures that this is within bounds, but the compiler isn't smart enough to know that. 
     pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
         *self.props.get_unchecked(bp)
     }
@@ -318,14 +330,14 @@ impl Motif {
 
     pub fn rand_height_pwm(mut pwm: Vec<Base>, peak_width: f64) -> Motif {
 
-        let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+        //let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
         let mut rng = rand::thread_rng();
 
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*height_dist.sample(&mut rng);
+        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(&mut rng);
 
         Self::raw_pwm(pwm, peak_height, peak_width)
     }
@@ -338,14 +350,14 @@ impl Motif {
 
         pwm = best_bases.iter().map(|a| Base::from_bp(*a)).collect();
 
-        let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+        //let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
         let mut rng = rand::thread_rng();
 
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*height_dist.sample(&mut rng);
+        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(&mut rng);
 
         let kernel = Kernel::new(peak_width, peak_height);
 
@@ -488,15 +500,21 @@ impl Motif {
     pub fn height_prior(&self) -> f64 {
 
         let mut prior = if self.peak_height > 0.0 { PROB_POS_PEAK.ln() } else { (1.0-PROB_POS_PEAK).ln() };
-        prior += TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap().ln_pdf(self.peak_height.abs());
+        prior += (*HEIGHT_DIST).ln_pdf(self.peak_height.abs());
         prior
+    }
+
+
+    pub fn d_height_prior(&self) -> f64 {
+        (*HEIGHT_DIST).d_ln_pdf(self.peak_height.abs())
     }
 
 
     //BINDING FUNCTIONS
 
-    //If kmer is not the same length as the pwm, this will produce undefined behavior
-    pub unsafe fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
+    //SAFETY: If kmer is not the same length as the pwm, or if it doesn't use
+    //        all values < BASE_L, this will produce undefined behavior
+    unsafe fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
         
 
         //let kmer: Vec<usize> = kmer_slice.to_vec();
@@ -558,10 +576,13 @@ impl Motif {
 
                 ind = 4*block_starts[i]+(j as usize);
 
-                
+               
+                //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                 let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
 
-                
+                //SAFETY: this is one of places where we rely on Sequence being implemented correctly 
+                //        in particular, code_to_bases should never be able to return a value >= 
+                //        BASE_L in its implementation.
                 (bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) };
                 
             }
@@ -622,7 +643,7 @@ impl Motif {
 
         let lens = DATA.seq().block_lens();
 
-        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
+        let (bind_score_floats, _) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-(self.len()-1)/2) {
@@ -630,8 +651,9 @@ impl Motif {
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
-                                                                                         //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
-                                                                                         //has zeros where we can be going over the motif length. With THRESH, this preserves safety
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
 
                     //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
                     //count+=1;
@@ -657,7 +679,7 @@ impl Motif {
 
         let lens = DATA.seq().block_lens();
 
-        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
+        let (bind_score_floats, _) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
@@ -665,6 +687,9 @@ impl Motif {
                     //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
                 }
             }
         }
@@ -691,6 +716,9 @@ impl Motif {
                 if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
                 }
             }
         }
@@ -717,9 +745,10 @@ impl Motif {
                 if binds.0[starts[i]*BP_PER_U8+j] > THRESH {
                     actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
-                    occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//UNSAFE //Note: this technically means that we round down if the motif length is even
-                                                                                         //We CAN technically violate the safety guarentee for place peak, but return_bind_score()
-                                                                                         //has zeros where we can be going over the motif length. With THRESH, this preserves safety
+                    occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
 
                     //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
                 }
@@ -749,6 +778,9 @@ impl Motif {
                     //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
                     actual_kernel = &base_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
                 }
             }
         }
@@ -760,6 +792,7 @@ impl Motif {
     }
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
+    //        You must also ensure that bp < BASE_L, and that motif_pos < self.len()
     unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, DATA: &'a Waveform) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = DATA.derive_zero();
@@ -772,11 +805,15 @@ impl Motif {
 
         let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
 
+        let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
                 if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
-                    actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]);
+                    actual_kernel = &self.kernel*((binds.0[starts[i]*BP_PER_U8+j])/bind);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
+                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
+                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
+                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
                 }
             }
         }
@@ -802,7 +839,7 @@ impl Motif {
         //End preuse generation
         let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
                                         .produce_noise(DATA, noise.background)};
-        let d_ad_like_d_grad_form_h = d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) 
+        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) +self.d_height_prior())
                                     * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
                                     / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) *(-1.0);
       
@@ -814,16 +851,16 @@ impl Motif {
 
             let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
             let mut bp = index % (BASE_L-1);
-            bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we just skipped it like we're supposed to
+            bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
+                                                                           //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
+                                                                           //This is important, because statically guarentees the safety of using rel_bind
 
             let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
 
             d_ad_like_d_grad_form_binds[index] = unsafe {
                   - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                            .produce_noise(DATA, noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat
-                  * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                  / (prop_bp*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)) *(-1.0) } ;
+                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp) /*calc derivative*/ } ;
            
         }
 
@@ -845,23 +882,26 @@ impl Motif {
             if i == 0 {
                 let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
                                                .produce_noise(DATA, background)};
-                d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))
+                (d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))+self.d_height_prior())
                 * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
                 / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) * (-1.)
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
                 let mut bp = index % (BASE_L-1);
-                bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we just skipped it like we're supposed to
+                bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
+                                                                           //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
+                                                                           //This is important, because statically guarentees the safety of using rel_bind
 
-                let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
+                let prop_bp = self.pwm[base_id].rel_bind(bp) ;
 
                 let result = unsafe {
                       - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                                .produce_noise(DATA, background))
-                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
-                      * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
-                      / ((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*prop_bp) * (-1.0)
+                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) * (-1.0)
+                      // * (*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)
+                      // / ((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)) * (-1.0) //+ (2.*prop_bp-(*PROP_UPPER_CUTOFF+*PROP_CUTOFF))/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
+                      //TODO: incorporate the derivative of the ln prior here: rememeber, our transform means we don't always have a uniform prior REALLY, for both height and bases
                 };
 
                 result
@@ -883,7 +923,7 @@ impl Motif {
 
 impl fmt::Display for Motif { 
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const DIGITS: usize = 5;
+        const DIGITS: usize = 10;
         
         //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
         write!(f, "Peak height: {:.DIGITS$}. Total peak width (bp): {}\n", self.peak_height, self.kernel.len());
@@ -903,9 +943,9 @@ impl fmt::Display for Motif {
 
             match j {
                 (true, true) => panic!("Something pathological is going on!"),
-                (true, false) => write!(f, "[{:.5?},\n", base),
-                (false, false) => write!(f, " {:.5?},\n", base),
-                (false, true) => write!(f, " {:.5?}]\n", base),
+                (true, false) => write!(f, "[{base:.DIGITS$?},\n", base = base, DIGITS = DIGITS),
+                (false, false) => write!(f, " {base:.DIGITS$?},\n", base = base, DIGITS = DIGITS),
+                (false, true) => write!(f, " {base:.DIGITS$?}]\n", base = base, DIGITS = DIGITS),
             };
         }
         Ok(())
@@ -1248,8 +1288,9 @@ impl<'a> MotifSet<'a> {
 
        let mut finished_compute: usize = 0;
 
-       for motif in &self.set {
-      
+       for i in 0..self.set.len() {
+           
+           let motif = &self.set[i];
            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
            println!("inds a {} {}", finished_compute, compute_to);
            let motif_grad = &mut gradient[finished_compute..compute_to];
@@ -1368,7 +1409,6 @@ pub struct MotifSet<'a> {
                
                 perturb_vec[i] = h;
                 let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice())};
-
 
                 let mut alter_set = self.clone();
                 let new_ln_like = alter_set.replace_motif(mod_mot,k);
@@ -1849,16 +1889,26 @@ pub struct TruncatedLogNormal {
     scale: f64,
     min: f64, 
     max: f64,
+    ref_dist: LogNormal,
 }
 
 impl TruncatedLogNormal {
 
-    pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal> {
+    pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal, StatsError> {
         if location.is_nan() || scale.is_nan() || scale <= 0.0 || (min > max) || (max < 0.0) {
             Err(StatsError::BadParams)
         } else {
             let min = if min >= 0.0 {min} else {0.0} ;
-            Ok(TruncatedLogNormal { location: location, scale: scale, min: min, max: max })
+            let ref_dist = LogNormal::new(location, scale).unwrap();
+            Ok(TruncatedLogNormal { location: location, scale: scale, min: min, max: max, ref_dist: ref_dist })
+        }
+    }
+
+    pub fn d_ln_pdf(&self, x: f64) -> f64 {
+        if x < self.min || x > self.max {
+            0.0
+        } else {
+            -(x.ln()+self.scale.powi(2)-self.location)/(x*self.scale.powi(2))
         }
     }
     
@@ -1900,8 +1950,7 @@ impl ContinuousCDF<f64, f64> for TruncatedLogNormal {
             1.0
         } else {
 
-            let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
-            lndist.cdf(x)/(lndist.cdf(self.max)-lndist.cdf(self.min))
+            self.ref_dist.cdf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
         }
     }
 
@@ -1911,8 +1960,7 @@ impl ContinuousCDF<f64, f64> for TruncatedLogNormal {
         } else if x >= self.max() {
             0.0
         } else {
-            let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
-            lndist.sf(x)/(lndist.cdf(self.max)-lndist.cdf(self.min))
+            self.ref_dist.sf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
         }
     }
 }
@@ -1926,8 +1974,7 @@ impl Continuous<f64, f64> for TruncatedLogNormal {
         } else {
             let d = (x.ln() - self.location) / self.scale;
             let usual_density = (-0.5 * d * d).exp() / (x * consts::SQRT_2PI * self.scale);
-            let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
-            let scale_density = lndist.cdf(self.max)-lndist.cdf(self.min);
+            let scale_density = self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min);
 
             usual_density/scale_density
 
@@ -1940,8 +1987,7 @@ impl Continuous<f64, f64> for TruncatedLogNormal {
         } else {
             let d = (x.ln() - self.location) / self.scale;
             let usual_density = (-0.5 * d * d) - consts::LN_SQRT_2PI - (x * self.scale).ln();
-            let lndist: LogNormal = LogNormal::new(self.location, self.scale).unwrap();
-            let scale_density = (lndist.cdf(self.max)-lndist.cdf(self.min)).ln();
+            let scale_density = (self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min)).ln();
 
             usual_density-scale_density
         }
@@ -1970,14 +2016,23 @@ mod tester{
     use std::collections::VecDeque;
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
-    /*const MIN_HEIGHT: f64 = 3.;
-    const MAX_HEIGHT: f64 = 30.;
-    const LOG_HEIGHT_MEAN: f64 = 2.30258509299; //This is ~ln(10). Can't use ln in a constant
-    const LOG_HEIGHT_SD: f64 = 0.25;
+   
+    fn produce_bps_and_pos(seq_motif: &Vec<usize>) -> (Vec<usize>, Vec<usize>) {
 
-    const BASE_L: usize = 4;
-*/
-    
+        let mut bps: Vec<usize> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
+        let mut pos: Vec<usize> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
+        
+        for i in 0..seq_motif.len() {
+            let mut b = 0;
+            for j in 0..(BASE_L-1) {
+                if seq_motif[i] == b { b+=1;}
+                bps.push(b);
+                pos.push(i);
+                b+=1;
+            }
+        }
+        (bps, pos)
+    }
     #[test]
     fn gradient_test() {
 
@@ -2008,7 +2063,7 @@ mod tester{
         let mut motif_set = MotifSet::rand_with_one(&wave, &background, 350);
 
         _ = motif_set.add_motif(Motif::rand_mot(58., wave.seq()));
-      
+     
 
         let analytical_grad = motif_set.gradient();
         let numerical_grad = motif_set.numerical_gradient();
@@ -2022,27 +2077,82 @@ mod tester{
         println!("b {:?} b2 {:?} b3 {:?}", b, b2, b3);
 
         let mot = motif_set.get_nth_motif(0);
+        let (bps, pos) = produce_bps_and_pos(&(mot.best_motif()));
+        let mot_a = motif_set.get_nth_motif(1);
+        let (bps_a, pos_a) = produce_bps_and_pos(&(mot_a.best_motif()));
+        let bind1 = mot.return_bind_score(&wave.seq());
+        let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave)};
+        let mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
 
-        let mut mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
+        let h = 1e-3;
 
-        mom[4] = 1.0;
+        println!("Mot \n {}", mot);
+        for (j, (&bp, &p)) in bps.iter().zip(pos.iter()).enumerate() {
+        
+            let wave_check = unsafe{mot.only_pos_waveform_from_binds( &bind1, bp, p, &wave)};
+            let mut mommy = mom.clone();
+            mommy[j+1] = h;
+        
+            let mot2 = unsafe{mot.add_momentum(1.0, &mommy)};
+       
+            let wave2 = mot2.generate_waveform(&wave);
 
-        let mot2 = unsafe{mot.add_momentum(1.0, &mom)};
+            let w1 = wave1.raw_wave();
+            let w2 = wave2.raw_wave();
+            let wc = wave_check.raw_wave();
 
-        let motb = mot.pwm()[1].clone();
+            let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
+            let prop_bp2 = unsafe{mot2.pwm()[p].rel_bind(bp)};
+            let normalizer = Base::d_prop_d_hmc(prop_bp); //(*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
+            let mut i = 0;
+            let mut calc: f64 = (w2[i]-w1[i])/h;
+            let mut ana: f64 = wc[i];
+            println!("Wave checking {} in pos {}", BPS[bp], p);
+            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}, ratio: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer, ((prop_bp2-prop_bp)/h)/normalizer);
+            while (i < (w2.len()-1)) && ((calc == 0.) || (ana == 0.)) {
+                calc = (w2[i]-w1[i])/h;
+                ana = wc[i];
+                i += 1;
+            }
+            
+            let calc_b = (w2[i+1]-w1[i+1])/h;
+            let ana_b = wc[i+1];
 
-        let motb2 = motb.add_in_hmc([1.0, 0.0, 0.0]);
 
-        let mot2b = mot2.pwm()[1].clone();
+            let num_diff = calc/normalizer;
+            let num_diff_b = calc_b/normalizer;
+            println!("{} {} {} {} {} {} {}",  num_diff, ana, (num_diff/ana), num_diff_b/ana_b, normalizer.ln(), (calc/ana),((calc/ana)/normalizer)-(normalizer.ln()));
 
-        println!("motb: {:?}, mot2b: {:?}. motb2: {:?}", motb, mot2b, motb2);
-
-        println!("Analytical    Numerical    Difference(abs)    Quotient");
-        for i in 0..analytical_grad.len() {
-            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], -(numerical_grad[i]-analytical_grad[i])/numerical_grad[i]);
-            assert!(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2);
         }
 
+
+        let mut grad_reses: Vec<Result<(), String>> = Vec::with_capacity(analytical_grad.len());
+        println!("Analytical    Numerical    Difference(abs)    Quotient");
+        for i in 0..analytical_grad.len() {
+            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], 1./((analytical_grad[i])/numerical_grad[i]));
+            let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
+            if success {
+                grad_reses.push(Ok(()));
+            } else {
+                let zeroth_mot = i <= mot.len()*(BASE_L-1);
+                let mot_num = if zeroth_mot {0} else {1};
+                let ind = if zeroth_mot {i} else {i - ((mot.len()*(BASE_L-1))+1)};
+                
+                let loc_message = if ind == 0 { "height".to_owned() } else {
+                    let bp = if zeroth_mot {bps[ind-1]} else {bps_a[ind-1]};
+                    let po = if zeroth_mot {pos[ind-1]} else {pos_a[ind-1]};
+                    format!("binding at position {} of base {}", po, BPS[bp])};
+
+                grad_reses.push(Err(format!("In motif {}, the {} yields a bad gradient. Absolute difference {}, relative difference {}", mot_num, loc_message, numerical_grad[i]-analytical_grad[i], (numerical_grad[i]-analytical_grad[i])/numerical_grad[i])));
+            }
+        }
+ 
+        let error_messages: Vec<_> = grad_reses.iter().filter(|a| a.is_err()).map(|a| a.clone().err().unwrap()).collect();
+
+        if error_messages.len() > 0 {
+            for em in error_messages { println!("{}", em);}
+            panic!();
+        }
 
     }
 
