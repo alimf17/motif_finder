@@ -46,7 +46,7 @@ const GAMMA_R: f64 = 10.900511;
 
 const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
-const IMPL_CUT: f64 = 0.6;
+const IMPL_CUT: f64 = 1.; //
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BackgroundDist {
@@ -287,10 +287,19 @@ impl FastT {
 
     fn maclaurin_cdf(&self, x: f64) -> f64 {
         let g = (-ln_beta_half(self.freedom/2.)).exp()/(self.freedom.sqrt());
-        0.5+g*(x-((self.freedom+1.)/self.freedom)*x.powi(3)/6.
-               +(3.*(self.freedom+1.)*(self.freedom+3.)/self.freedom.powi(2))*x.powi(5)/120.
-               -15.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*x.powi(7)/(self.freedom.powi(3)*5040.)
-               +105.*(self.freedom+1.)*(self.freedom+3.)*(self.freedom+5.)*(self.freedom+7.)*x.powi(9)/(self.freedom.powi(3)*362880.))
+
+        let mut n: f64 = 1.;
+        let mut sum: f64 = 0.5+g*x;
+        let mut term: f64 = 1.;
+        let x2 = x.powi(2);
+        while n < 50. {
+            //println!("n {} sum {}", n, sum);
+            term *= -x2*(self.freedom-1.+2.*n)/(self.freedom*2.*n);
+            sum += g*x*term/(2.*n+1.);
+            n += 1.;
+        }
+
+        sum
     }
 
 }
@@ -458,7 +467,7 @@ mod tests{
         for (i, dat) in data.iter().enumerate() {
             let (c, s) = dis.ln_cd_and_sf(*dat);
             println!("dat {}: cd {}, sf {}, prop_cd {}, prop_sf {}, diff cd {}, diff sf {}",dat, c, s, cd[i], sf[i], c-cd[i], s-sf[i]);
-            assert!(((c-cd[i]).abs() < 1e-3) && ((s-sf[i]).abs() < 1e-3));
+            assert!(((c-cd[i]).abs() < 1e-3) && ((s-sf[i]).abs() < 1e-6));
         }
 
         let f = match &dis {

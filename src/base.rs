@@ -833,7 +833,7 @@ impl Motif {
 
         let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
-        let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+        let d_ad_like_d_ad_stat: f64 = Noise::ad_deriv(noise.ad_calc());
         
 
         //End preuse generation
@@ -1273,8 +1273,9 @@ impl<'a> MotifSet<'a> {
 
        let noise = self.signal.produce_noise(self.data, self.background);
        let d_ad_stat_d_noise = noise.ad_grad();
-       let d_ad_like_d_ad_stat = Noise::ad_diff(noise.ad_calc());
+       let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
+       println!("{} {:?} dd", d_ad_like_d_ad_stat, d_ad_stat_d_noise);
        let mut len_grad: usize = self.set.len();
 
        for i in 0..self.set.len() {
@@ -1390,7 +1391,7 @@ pub struct MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 1e-2;
+        let h: f64 = 1e-5;
 
         let num_motifs = self.set.len();
 

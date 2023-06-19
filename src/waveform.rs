@@ -676,7 +676,7 @@ impl<'a> Noise<'a> {
 
     pub fn ad_calc(&self) -> f64 {
 
-        let time = Instant::now();
+        //let time = Instant::now();
         let mut forward: Vec<f64> = self.resids();
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
@@ -697,7 +697,7 @@ impl<'a> Noise<'a> {
     
     pub fn ad_grad(&self) -> Vec<f64> {
 
-        let start = Instant::now();
+        //let start = Instant::now();
         let ranks = self.rank();
 
         let n = self.resids.len() as f64;
@@ -718,22 +718,79 @@ impl<'a> Noise<'a> {
     fn low_val(lA: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
+        /*const C: f64 = PI*PI/8.0;
         let cfs = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
 
         let expo = (0..6).map(|a| 2.0*(a as f64)-1.0).collect::<Vec<f64>>();
 
         let p: f64 = cfs.iter().zip(expo)
                         .map(|(&c, e)| c*e*lA.sqrt().powf(e-2.0)/2.0 + C*c*lA.sqrt().powf(e-4.0)).sum();
-
-        -C/lA+p.ln()
+*/
+        -C/lA+Self::polynomial_sqrt_la(lA).ln()
 
     }
 
+    fn deriv_low_val(la: f64) -> f64 {
+
+        const C: f64 = PI*PI/8.0;
+        C/(la*la) + Self::deriv_polynomial_sqrt_la(la)/Self::polynomial_sqrt_la(la)
+
+    }
+
+    fn polynomial_sqrt_la(la: f64) -> f64 {
+
+        const C: f64 = PI*PI/8.0;
+        const cfs: [f64; 6] = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
+        const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
+
+        let mut p: f64 = 0.;
+        let root_la = la.sqrt();
+
+        for i in 0..cfs.len() {
+            p+= cfs[i]*expo[i]*root_la.powf(expo[i]-2.)/2.+C*cfs[i]*root_la.powf(expo[i]-4.);
+        }
+
+        return p
+
+    }
+
+    fn deriv_polynomial_sqrt_la(la:f64) -> f64 {
+
+        const C: f64 = PI*PI/8.0;
+        const cfs: [f64; 6] = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
+        const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
+
+        let mut p: f64 = 0.;
+        let root_la = la.sqrt();
+
+        for i in 0..cfs.len() {
+            p+= cfs[i]*expo[i]*(expo[i]-2.)*root_la.powf(expo[i]-4.)/4.+C*cfs[i]*(expo[i]-4.)*root_la.powf(expo[i]-6.)/2.;
+        }
+
+        return p
+
+    }
 
     fn high_val(hA: f64) -> f64 {
 
         (3.0/(hA*PI)).ln()/2.0-hA
 
+    }
+
+    fn deriv_high_val(ha: f64) -> f64 {
+        -0.5/ha-1.
+    }
+
+    fn weight_fn(a: f64) -> f64 {
+        const A0: f64 = 2.64;
+        const k: f64 = 84.44556;
+        1.0/(1.0+(a/A0).powf(k))
+    }
+
+    fn deriv_weight_fn(a: f64) -> f64 {
+        const A0: f64 = 2.64;
+        const k: f64 = 84.44556;
+        -(k/A0)*(a/A0).powf(k-1.)/Self::weight_fn(a).powi(2)
     }
 
     pub fn ad_like(A: f64) -> f64 {
@@ -751,11 +808,17 @@ impl<'a> Noise<'a> {
 
     pub fn ad_diff(A: f64) -> f64 {
 
-        const h: f64 = 0.00001;
+        const h: f64 = 0.0000001;
         (Self::ad_like(A+h)-Self::ad_like(A))/h
 
     }
 
+    pub fn ad_deriv(a: f64) -> f64 {
+        let w = Self::weight_fn(a);
+        w*Self::deriv_low_val(a)+(1.-w)*Self::deriv_high_val(a)
+            +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
+       
+    }
 
 
 }
@@ -961,6 +1024,21 @@ mod tests{
 
     use statrs::distribution::ContinuousCDF;
 
+    fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
+
+        let h = 0.00001;
+        let back = n.background;
+        let ad = n.ad_calc();
+        let mut grad = vec![0_f64; n.resids.len()]; 
+        for i in 0..grad.len() {
+             let mut n_res = n.resids();
+             n_res[i] += h;
+             let nnoise = Noise::new(n_res, back);
+             grad[i] = (nnoise.ad_calc()-ad)/h;
+        }
+        grad
+    }
+
     #[test]
     fn wave_check(){
 
@@ -1103,16 +1181,18 @@ mod tests{
 
         //let h = 0.0000001;
         let noise_ad = n1.ad_calc();
+        println!("diff {} deriv {} diffmderiv {}", Noise::ad_diff(noise_ad), Noise::ad_deriv(noise_ad), Noise::ad_diff(noise_ad)-Noise::ad_deriv(noise_ad));
         let mut noise_arr = n1.resids();
         for i in 0..noise_length {
             let mut noisy = noise_arr.clone();
-            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*(1./512.)};
+            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*std::mem::transmute::<u64,f64>(0x3df0000000000000) };//*(1./2048.)};
             noisy[i] += h;
             println!("{:?} {} post h and h", noisy, h);
             let n1_plus_h = Noise::new(noisy, &background);
             let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
-            println!("{} {} ad_grad", n1.ad_grad()[i], diff);
-            assert!(((n1.ad_grad()[i]-diff)/diff).abs() < 5e-2);//Remember, I'm only calculating an approximation. It's going to be a bit off
+            println!("{} {} {} {} ad_grad", n1.ad_grad()[i], diff, (n1.ad_grad()[i]-diff)/diff, h);
+            assert!(((n1.ad_grad()[i]-diff)/diff).abs() < 1e-4);//Remember, I'm only calculating an approximation. It's going to be a bit off. And this does get better as I 
+                                                                //reduce h, up to a point (whereupon I'm almost certain I'm running into numerical issues)
         }
 
 
