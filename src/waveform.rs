@@ -112,7 +112,7 @@ impl Kernel {
 }
 
 //CANNOT BE SERIALIZED
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Waveform<'a> {
     wave: Vec<f64>,
     spacer: usize,
@@ -533,7 +533,7 @@ impl From<StudentsTDef> for StudentsT {
 }
 
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Background {
     pub dist: BackgroundDist,
     pub ar_corrs: Vec<f64>,
@@ -1021,7 +1021,7 @@ mod tests{
    
     use super::*;
     use crate::sequence::Sequence;
-
+    use rand::Rng;
     use statrs::distribution::ContinuousCDF;
 
     fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
@@ -1182,6 +1182,9 @@ mod tests{
         //let h = 0.0000001;
         let noise_ad = n1.ad_calc();
         println!("diff {} deriv {} diffmderiv {}", Noise::ad_diff(noise_ad), Noise::ad_deriv(noise_ad), Noise::ad_diff(noise_ad)-Noise::ad_deriv(noise_ad));
+
+        let mut rng = rand::thread_rng();
+        let ads: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>()).collect();
         let mut noise_arr = n1.resids();
         for i in 0..noise_length {
             let mut noisy = noise_arr.clone();

@@ -30,7 +30,7 @@ pub const U64_BITMASK: u64 = (1_u64  << BITS_PER_BP)-1;
 //   4) I've developed this thing for 5 years over two different programming languages 
 //   5) I still screw it up when I have to do it manually. 
 //   6) Save yourself. 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,

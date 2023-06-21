@@ -48,7 +48,7 @@ const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
 const IMPL_CUT: f64 = 1.; //
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum BackgroundDist {
 
     #[serde(with = "NormalDef")]
@@ -147,7 +147,7 @@ impl Max<f64> for BackgroundDist {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FastT {
     scale: f64,
     freedom: f64,
@@ -403,6 +403,7 @@ fn logspace_add(lnx: f64, lny: f64) -> f64 {
     lnx.max(lny)+(-(lnx-lny).abs()).exp().ln_1p()
 }
 
+#[derive(Debug)]
 pub enum BackgroundDistDef {
     Normal(NormalDef),
     FastT(FastT),
@@ -418,7 +419,7 @@ impl From<BackgroundDistDef> for BackgroundDist {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(remote = "Normal")]
 pub struct NormalDef {
     #[serde(getter = "Normal::get_mean")]

@@ -7,6 +7,7 @@ use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
+use crate::modified_t::ContinuousLnCDF;
 use statrs::function::gamma::*;
 use statrs::{consts, StatsError};
 use std::f64;
@@ -30,6 +31,7 @@ use serde::de::{
 };
 
 use serde_json::{Result as JsonResult, Value};
+use core::fmt::{Debug, Formatter};
 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
@@ -227,18 +229,20 @@ impl Base {
 
         let best = Self::argmax(&self.props);
 
-        let mut new_props = [0.0_f64 ; BASE_L];
+        let mut new_props = self.props.clone();
 
         let mut ind: usize = 0;
 
         for i in 0..self.props.len() {
             if i == best {
                 new_props[i] = 1.0;
-            } else {
+            } else if addend[ind] != 0.0 {
                 let mut dg =  Self::prop_to_hmc(self.props[i]);
                 dg += addend[ind];
                 dg = Self::hmc_to_prop(dg); 
                 new_props[i] = dg;
+                ind += 1;
+            } else {
                 ind += 1;
             }
 
@@ -262,6 +266,12 @@ impl Base {
     fn d_prop_d_hmc(p: f64) -> f64 {
 
         (p-*PROP_CUTOFF)*(*PROP_UPPER_CUTOFF-p)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
+    }
+
+    fn d_ln_prior_d_hmc(p: f64) -> f64 {
+
+        //0.
+        (*PROP_UPPER_CUTOFF+*PROP_CUTOFF-2.*p)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
     }
 
     pub fn rev(&self) -> Base {
@@ -301,7 +311,7 @@ impl Base {
 
 //BEGIN MOTIF
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Motif {
 
     peak_height: f64,
@@ -385,6 +395,30 @@ impl Motif {
         
 
     }
+    pub fn rand_mot_with_height(peak_height: f64, peak_width: f64, seq: &Sequence) -> Motif {
+
+        let mut rng = rand::thread_rng();
+
+        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+        let mot = seq.random_valid_motif(num_bases);
+
+        let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
+
+        pwm = mot.iter().map(|a| Base::from_bp(*a)).collect();
+
+
+        let kernel = Kernel::new(peak_width, peak_height);
+
+        Motif {
+            peak_height: peak_height,
+            kernel: kernel,
+            pwm: pwm,
+        }
+
+        
+
+    }
 
     pub fn make_opposite(&self) -> Motif {
 
@@ -426,12 +460,14 @@ impl Motif {
     unsafe fn add_momentum(&self, eps: f64, momentum: &[f64]) -> Self {
 
         let mut new_mot = self.clone();
+        
+        if momentum[0] != 0.0 {
+            let mut h = -((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
+            h += (eps*momentum[0]);
+            h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h).exp())));
+            new_mot.peak_height = self.peak_height.signum()*h;
 
-        let mut h = -((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
-        h += (eps*momentum[0]);
-        h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h).exp())));
-        new_mot.peak_height = self.peak_height.signum()*h;
-
+        }
         new_mot.kernel = Kernel::new(self.kernel.get_sd(), new_mot.peak_height);
 
         for i in 0..self.len() {
@@ -506,7 +542,11 @@ impl Motif {
 
 
     pub fn d_height_prior(&self) -> f64 {
-        (*HEIGHT_DIST).d_ln_pdf(self.peak_height.abs())
+        (*HEIGHT_DIST).d_ln_pdf(self.peak_height.abs())*self.peak_height.signum()
+    }
+
+    pub fn d_height_prior_d_hmc(&self) -> f64 {
+        (*HEIGHT_DIST).d_ln_pdf_d_hmc(self.peak_height.abs())*self.peak_height.signum()
     }
 
 
@@ -833,15 +873,15 @@ impl Motif {
 
         let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
-        let d_ad_like_d_ad_stat: f64 = Noise::ad_deriv(noise.ad_calc());
+        let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
         
 
         //End preuse generation
         let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
                                         .produce_noise(DATA, noise.background)};
-        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) +self.d_height_prior())
+        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) )
                                     * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) *(-1.0);
+                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) *(-1.0)- self.d_height_prior_d_hmc();
       
 
         let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
@@ -860,7 +900,8 @@ impl Motif {
             d_ad_like_d_grad_form_binds[index] = unsafe {
                   - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                            .produce_noise(DATA, noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp) } ;
+                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp)  //- Base::d_ln_prior_d_hmc(prop_bp)
+            }
            
         }
 
@@ -882,7 +923,7 @@ impl Motif {
             if i == 0 {
                 let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
                                                .produce_noise(DATA, background)};
-                (d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))+self.d_height_prior())
+                (d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))-self.d_height_prior_d_hmc())
                 * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
                 / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) * (-1.)
             } else {
@@ -898,7 +939,7 @@ impl Motif {
                 let result = unsafe {
                       - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                                .produce_noise(DATA, background))
-                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) * (-1.0)
+                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) * (-1.0) //-Base::d_ln_prior_d_hmc(prop_bp)
                 };
 
                 result
@@ -949,6 +990,37 @@ impl fmt::Display for Motif {
     }
 }
 
+impl fmt::Debug for Motif { 
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const DIGITS: usize = 10;
+        
+        //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
+        write!(f, "Peak height: {:.DIGITS$}. Total peak width (bp): {}\n", self.peak_height, self.kernel.len());
+       
+        //I want people to be free to define their own bases, if they like
+        //But they will have to change it in the code for formatting: it's not my problem
+        //The two extra spaces on either side let the output align in a pretty way
+        for b in BPS { write!(f, "  {:<DIGITS$}  ", b); }
+        write!(f, "\n");
+
+        for i in 0..self.pwm.len() {
+
+            let base = self.pwm[i].show();
+            let begin: bool = (i == 0);
+            let end: bool = (i == self.pwm.len()-1);
+            let j = (begin, end);
+
+            match j {
+                (true, true) => panic!("Something pathological is going on!"),
+                (true, false) => write!(f, "[{base:.DIGITS$?},\n", base = base, DIGITS = DIGITS),
+                (false, false) => write!(f, " {base:.DIGITS$?},\n", base = base, DIGITS = DIGITS),
+                (false, true) => write!(f, " {base:.DIGITS$?}]\n", base = base, DIGITS = DIGITS),
+            };
+        }
+        write!(f, "\n");
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
@@ -969,6 +1041,21 @@ impl<'a> MotifSet<'a> {
         let width = (fragment_length as f64)/6.0;
 
         let set = vec![Motif::rand_mot(width, data.seq())];
+
+        let signal = set[0].generate_waveform(data);
+
+        let mut mot_set = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+
+        let _ = mot_set.ln_posterior();
+
+        mot_set
+    }
+
+    pub fn rand_with_one_height(peak_height: f64, data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize) -> Self {
+
+        let width = (fragment_length as f64)/6.0;
+
+        let set = vec![Motif::rand_mot_with_height(peak_height, width, data.seq())];
 
         let signal = set[0].generate_waveform(data);
 
@@ -1273,9 +1360,8 @@ impl<'a> MotifSet<'a> {
 
        let noise = self.signal.produce_noise(self.data, self.background);
        let d_ad_stat_d_noise = noise.ad_grad();
-       let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+       let d_ad_like_d_ad_stat = Noise::ad_diff(noise.ad_calc());
 
-       println!("{} {:?} dd", d_ad_like_d_ad_stat, d_ad_stat_d_noise);
        let mut len_grad: usize = self.set.len();
 
        for i in 0..self.set.len() {
@@ -1391,11 +1477,11 @@ pub struct MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 1e-5;
+        let h: f64 = 5e-7;
 
         let num_motifs = self.set.len();
 
-        let curr_like = self.calc_ln_post();
+        let curr_post = self.calc_ln_post();
 
         let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
  
@@ -1409,8 +1495,9 @@ pub struct MotifSet<'a> {
                 let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice())};
 
                 let mut alter_set = self.clone();
-                let new_ln_like = alter_set.replace_motif(mod_mot,k);
-                (new_ln_like-curr_like)/h
+                let new_ln_post = alter_set.replace_motif(mod_mot,k);
+                println!("mod i: {} \n {:?}", i, alter_set);
+                (new_ln_post-curr_post)/h
             }).collect::<Vec<f64>>();
 
             motif_grad
@@ -1462,6 +1549,21 @@ pub struct MotifSet<'a> {
 
 
 
+}
+
+/*
+       set: Vec<Motif>,
+    width: f64,
+    signal: Waveform<'a>,
+    ln_post: Option<f64>,
+    data: &'a Waveform<'a>,
+    background: &'a Background,
+*/
+
+impl Debug for MotifSet<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "width:{}, ln_post: {:?}, background: {:?} \n set: {:#?}", self.width, self.ln_post, self.background, self.set)
+    }
 }
 
 
@@ -1909,7 +2011,16 @@ impl TruncatedLogNormal {
             -(x.ln()+self.scale.powi(2)-self.location)/(x*self.scale.powi(2))
         }
     }
-    
+   
+    fn d_ln_pdf_d_hmc(&self, x: f64) -> f64 {
+
+        if x < self.min || x > self.max {
+            unreachable!("The height translation from hmc height seems to be going awry");
+        } else {
+            self.d_ln_pdf(x)*(x-self.min)*(self.max-x)/(self.max-self.min)
+        }
+
+    }
 }
 
 impl ::rand::distributions::Distribution<f64> for TruncatedLogNormal {
@@ -1993,6 +2104,18 @@ impl Continuous<f64, f64> for TruncatedLogNormal {
 }
 
 
+impl ContinuousLnCDF<f64, f64> for TruncatedLogNormal {
+
+    fn ln_cdf(&self, x: f64) -> f64{
+        self.cdf(x).ln()
+    }
+
+    fn ln_sf(&self, x: f64) -> f64 {
+        self.sf(x).ln()
+    }
+}
+
+
 
 //}
 
@@ -2058,9 +2181,9 @@ mod tester{
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, &corrs);
-        let mut motif_set = MotifSet::rand_with_one(&wave, &background, 350);
+        let mut motif_set = MotifSet::rand_with_one_height(13.2, &wave, &background, 350);
 
-        _ = motif_set.add_motif(Motif::rand_mot(58., wave.seq()));
+        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq()));
      
 
         let analytical_grad = motif_set.gradient();
@@ -2085,6 +2208,7 @@ mod tester{
         let h = 1e-6;
 
         println!("Mot \n {}", mot);
+        println!("Mot_a \n {}", mot_a);
         for (j, (&bp, &p)) in bps.iter().zip(pos.iter()).enumerate() {
         
             let wave_check = unsafe{mot.only_pos_waveform_from_binds( &bind1, bp, p, &wave)};
@@ -2110,11 +2234,11 @@ mod tester{
             let mut calc: f64 = (w2[i]-w1[i])/h;
             let mut ana: f64 = wc[i];
             println!("Wave checking {} in pos {}", BPS[bp], p);
-            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}, ratio: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer, ((prop_bp2-prop_bp)/h)/normalizer);
+            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}, ratio: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer, Base::d_ln_prior_d_hmc(prop_bp));
             let ratio = ((prop_bp2-prop_bp)/h)/normalizer;
             println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
                                           unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
-            while (i < (w2.len()-1)) && ((calc == 0.) || (ana == 0.)) {
+            while (i < (w2.len()-2)) && ((calc == 0.) || (ana == 0.)) {
                 calc = (w2[i]-w1[i])/h;
                 ana = wc[i];
                 i += 1;
@@ -2132,8 +2256,11 @@ mod tester{
 
 
         let mut grad_reses: Vec<Result<(), String>> = Vec::with_capacity(analytical_grad.len());
-        println!("Analytical    Numerical    Difference(abs)    Quotient");
+        println!("Analytical    Numerical    Difference(abs)    Quotient    Prior par");
         for i in 0..analytical_grad.len() {
+            if i == 0 || i == ((BASE_L-1)*mot.len()+1) {
+                println!("height!");
+            }
             println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], 1./((analytical_grad[i])/numerical_grad[i]));
             let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
             if success {
