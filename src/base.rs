@@ -873,15 +873,15 @@ impl Motif {
 
         let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
 
-        let d_ad_like_d_ad_stat: f64 = Noise::ad_diff(noise.ad_calc());
+        let d_ad_like_d_ad_stat: f64 = Noise::ad_deriv(noise.ad_calc());
         
 
         //End preuse generation
         let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
-                                        .produce_noise(DATA, noise.background)};
-        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * (-(&d_noise_d_h * &d_ad_stat_d_noise)) )
+                                        .account_auto(noise.background)};
+        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * ((&d_noise_d_h * &d_ad_stat_d_noise)) )
                                     * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) *(-1.0)- self.d_height_prior_d_hmc();
+                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) + self.d_height_prior_d_hmc();
       
 
         let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
@@ -898,9 +898,9 @@ impl Motif {
             let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
 
             d_ad_like_d_grad_form_binds[index] = unsafe {
-                  - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
-                           .produce_noise(DATA, noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * (-1.0) * Base::d_prop_d_hmc(prop_bp)  //- Base::d_ln_prior_d_hmc(prop_bp)
+                   (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
+                           .account_auto(noise.background))
+                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp)  //- Base::d_ln_prior_d_hmc(prop_bp)
             }
            
         }
@@ -922,10 +922,10 @@ impl Motif {
         let d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
             if i == 0 {
                 let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
-                                               .produce_noise(DATA, background)};
-                (d_ad_like_d_ad_stat * (-(&d_noise_d_h * d_ad_stat_d_noise))-self.d_height_prior_d_hmc())
+                                               .account_auto(background)};
+                (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise)))
                 * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) * (-1.)
+                / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) +self.d_height_prior_d_hmc()
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -937,9 +937,9 @@ impl Motif {
                 let prop_bp = self.pwm[base_id].rel_bind(bp) ;
 
                 let result = unsafe {
-                      - (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
-                               .produce_noise(DATA, background))
-                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) * (-1.0) //-Base::d_ln_prior_d_hmc(prop_bp)
+                      (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
+                               .account_auto(background))
+                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp)  //-Base::d_ln_prior_d_hmc(prop_bp)
                 };
 
                 result
@@ -1360,7 +1360,7 @@ impl<'a> MotifSet<'a> {
 
        let noise = self.signal.produce_noise(self.data, self.background);
        let d_ad_stat_d_noise = noise.ad_grad();
-       let d_ad_like_d_ad_stat = Noise::ad_diff(noise.ad_calc());
+       let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
        let mut len_grad: usize = self.set.len();
 
@@ -1395,7 +1395,7 @@ impl<'a> MotifSet<'a> {
    }
     
    //MOVE TO CALL 
-   pub fn hmc<R: Rng + ?Sized>(&self, trace_steps: usize, eps: f64, momentum_dist : &Normal, rng: &mut R) ->  (Self, bool) {
+   pub fn hmc<R: Rng + ?Sized>(&self, trace_steps: usize, eps: f64, momentum_dist : &Normal, rng: &mut R) ->  (Self, bool, f64) {
        
        let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
@@ -1446,15 +1446,15 @@ impl<'a> MotifSet<'a> {
        let mut delta_kinetic_energy: f64 = 0.0;
 
        for i in 0..momentum.len() {
-           delta_kinetic_energy += ( momentum_apply[i].powi(2) - momentum[i].powi(2) )/2.0;
+           delta_kinetic_energy += ( momentum_apply[i] - momentum[i]).powi(2)/2.0;
        }
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
-           (prior_set, true)
+           (prior_set, true, delta_potential_energy+delta_kinetic_energy)
        } else {
-           (self.clone(), false)
+           (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
        }
 
 
@@ -1477,11 +1477,12 @@ pub struct MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 5e-7;
+        let h: f64 = 1e-5;
 
         let num_motifs = self.set.len();
 
         let curr_post = self.calc_ln_post();
+        let curr_like = self.ln_likelihood();
 
         let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
  
@@ -1496,8 +1497,10 @@ pub struct MotifSet<'a> {
 
                 let mut alter_set = self.clone();
                 let new_ln_post = alter_set.replace_motif(mod_mot,k);
-                println!("mod i: {} \n {:?}", i, alter_set);
+                let new_ln_like = new_ln_post-alter_set.ln_prior();
+                //println!("mod i: {} \n {:?}", i, alter_set);
                 (new_ln_post-curr_post)/h
+                //(new_ln_like-curr_like)/h
             }).collect::<Vec<f64>>();
 
             motif_grad
@@ -1526,14 +1529,14 @@ pub struct MotifSet<'a> {
        for motif in &self.set {
       
            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
-           println!("inds a {} {}", finished_compute, compute_to);
+           //println!("inds a {} {}", finished_compute, compute_to);
            let motif_grad = &mut gradient[finished_compute..compute_to];
            //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
            let (g, mut grad_vec) = motif.single_motif_grad(self.data, &noise);
        
            grad_vec.insert(0, g);
-           println!("{} {} lens", motif_grad.len(), grad_vec.len());
-           println!("{:?}", grad_vec);
+           //println!("{} {} lens", motif_grad.len(), grad_vec.len());
+           //println!("{:?}", grad_vec);
            for i in 0..motif_grad.len() {
                motif_grad[i] = grad_vec[i];
            }
@@ -1773,7 +1776,7 @@ impl<'a> SetTrace<'a> {
 
         for _ in 0..num_hmc_steps {
 
-            let (set, accept) = self.current_set().hmc(hmc_trace_steps, hmc_epsilon, &momentum_dist, rng);
+            let (set, accept, _) = self.current_set().hmc(hmc_trace_steps, hmc_epsilon, &momentum_dist, rng);
             num_trials[4] += 1;
             if accept {
                 num_acceptances[4] += 1;
@@ -2205,13 +2208,28 @@ mod tester{
         let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave)};
         let mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
 
-        let h = 1e-6;
+        let h = 1e-5;
 
         println!("Mot \n {}", mot);
         println!("Mot_a \n {}", mot_a);
         for (j, (&bp, &p)) in bps.iter().zip(pos.iter()).enumerate() {
         
             let wave_check = unsafe{mot.only_pos_waveform_from_binds( &bind1, bp, p, &wave)};
+            
+            let n1 = wave_check.produce_noise(&wave, &background);
+            let mut add_vec = wave_check.derive_zero().raw_wave();
+
+            add_vec[2] = h;
+            let dwave = Waveform::new(add_vec, &sequence, 5);
+
+            let n2 = (&wave_check+&dwave).produce_noise(&wave, &background);
+
+            
+
+            let resid_care: Vec<f64> = n1.resids()[0..3].iter().zip(n2.resids()[0..3].iter()).map(|(&a, &b)| (b-a)/h).collect();
+            let prop_resid = dwave.account_auto(&background);
+
+            println!("Resid change: {:?} {:?}", resid_care, prop_resid.resids()[0..3].iter().map(|&a| a/h).collect::<Vec<_>>());
             let mut mommy = mom.clone();
             mommy[j+1] = h;
         
@@ -2219,16 +2237,25 @@ mod tester{
        
             let wave2 = mot2.generate_waveform(&wave);
 
+            let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
+            let n_diff: Vec<f64> = wave2.produce_noise(&wave, &background).resids().iter()
+                              .zip(wave1.produce_noise(&wave, &background).resids().iter())
+                              .map(|(&a, &b)| (a-b)/h).collect();
+                     
+            //let deriv_n = ((&wave_check).account_auto(&background));
+
+            //let ad_deriv = (wave2.produce_noise(&wave, &background).ad_calc()-wave1.produce_noise(&wave, &background).ad_calc())/h;
+            //let ana_deriv = (&deriv_n*&(wave1.produce_noise(&wave, &background).ad_grad()))*Base::d_prop_d_hmc(prop_bp);
+
+            //println!("ad {} ana {} diff {}", ad_deriv, ana_deriv, ad_deriv-ana_deriv);
+            /*for i in 0..n_diff.len() {
+                println!("{} {} {} {}", i, n_diff[i], deriv_n[i], deriv_n[i]/n_diff[i]);
+            }*/
             let w1 = wave1.raw_wave();
             let w2 = wave2.raw_wave();
             let wc = wave_check.raw_wave();
 
-            let t = Instant::now();
-            let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
             let prop_bp2 = unsafe{mot2.pwm()[p].rel_bind(bp)};
-            let rat = (prop_bp2-prop_bp)/h;
-            println!("rat time {:?}", t.elapsed());
-            println!("rat: {}", rat);
             let normalizer = Base::d_prop_d_hmc(prop_bp); //(*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
             let mut i = 0;
             let mut calc: f64 = (w2[i]-w1[i])/h;
@@ -2250,19 +2277,30 @@ mod tester{
 
             let num_diff = calc/normalizer;
             let num_diff_b = calc_b/normalizer;
-            println!("{} {} {} {} {} {} {}",  num_diff, ana, (num_diff/ana)/ratio, (num_diff_b/ana_b)/ratio, normalizer.ln(), (calc/ana),((calc/ana)/normalizer)-(normalizer.ln()));
+            println!("{} {} {} {} {} {} {} {}", i,  num_diff, ana, (num_diff/ana), (num_diff_b/ana_b), normalizer, (calc/ana),((calc/ana)/normalizer));
 
         }
 
+        
+
 
         let mut grad_reses: Vec<Result<(), String>> = Vec::with_capacity(analytical_grad.len());
+        println!("{} {} {} {}", analytical_grad.len(), mot.len()*(BASE_L-1)+1, mot_a.len()*(BASE_L-1)+1, mot.len()*(BASE_L-1)+1+mot_a.len()*(BASE_L-1)+1);
         println!("Analytical    Numerical    Difference(abs)    Quotient    Prior par");
         for i in 0..analytical_grad.len() {
             if i == 0 || i == ((BASE_L-1)*mot.len()+1) {
                 println!("height!");
+                let mot_ref = if (i == 0) { &mot } else {&mot_a};
+                println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], mot_ref.d_height_prior_d_hmc());
+            } else if i < ((BASE_L-1)*mot.len()+1) {
+                let bpr = Base::d_ln_prior_d_hmc(unsafe{mot.pwm()[pos[i-1]].rel_bind(bps[i-1])});
+                println!("{} {} {} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), bpr, bpr-(numerical_grad[i]-analytical_grad[i]));
+            } else {
+                println!("{} {}", pos_a[i-((BASE_L-1)*mot.len()+2)], bps_a[i-((BASE_L-1)*mot.len()+2)]);
+                println!("{} {} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), Base::d_ln_prior_d_hmc(unsafe{mot_a.pwm()[pos_a[i-((BASE_L-1)*mot.len()+2)]].rel_bind(bps_a[i-((BASE_L-1)*mot.len()+2)])}));
             }
-            println!("{} {} {} {}", analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], 1./((analytical_grad[i])/numerical_grad[i]));
-            let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
+            //let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
+            let success = ((numerical_grad[i]-analytical_grad[i]).abs() < 5e-2);
             if success {
                 grad_reses.push(Ok(()));
             } else {

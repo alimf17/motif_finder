@@ -179,7 +179,7 @@ impl ContinuousLnCDF<f64, f64> for FastT {
 impl Continuous<f64, f64> for FastT {
 
     fn pdf(&self, x: f64) -> f64{
-        if x.is_infinite() {
+        /*if x.is_infinite() {
             0.0
         } else { //We don't implement the code to give up and use a normal distribution because we only access FastT when we know we aren't giving up 
             let d = x / self.scale;
@@ -188,7 +188,9 @@ impl Continuous<f64, f64> for FastT {
                 * (1.0 + d * d / self.freedom).powf(-0.5 * (self.freedom + 1.0))
                 / (self.freedom * std::f64::consts::PI).sqrt()
                 / self.scale
-        }
+
+        }*/
+        self.ln_pdf(x).exp()
 
     }
     fn ln_pdf(&self, x: f64) -> f64 {
@@ -196,11 +198,16 @@ impl Continuous<f64, f64> for FastT {
             f64::NEG_INFINITY
         } else {
             let d = x / self.scale;
-            ln_gamma((self.freedom + 1.0) / 2.0)
+           /* ln_gamma((self.freedom + 1.0) / 2.0)
                 - 0.5 * ((self.freedom + 1.0) * (1.0 + d * d / self.freedom).ln())
                 - ln_gamma(self.freedom / 2.0)
                 - 0.5 * (self.freedom * std::f64::consts::PI).ln()
-                - self.scale.ln()
+                - self.scale.ln()*/
+
+            (ln_gamma((self.freedom + 1.0) / 2.0) - 
+            (ln_gamma(self.freedom / 2.0) +self.scale.ln()+self.freedom.ln()/2.+std::f64::consts::PI.ln()/2.
+             +((self.freedom + 1.0)/2.0) * (d.powi(2)/self.freedom).ln_1p())
+            )
         }
     }
 
@@ -292,7 +299,7 @@ impl FastT {
         let mut sum: f64 = 0.5+g*x;
         let mut term: f64 = 1.;
         let x2 = x.powi(2);
-        while n < 50. {
+        while n < 100. {
             //println!("n {} sum {}", n, sum);
             term *= -x2*(self.freedom-1.+2.*n)/(self.freedom*2.*n);
             sum += g*x*term/(2.*n+1.);
@@ -337,7 +344,7 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     //println!("time ass: {:?}", t.elapsed());
     //let t = Instant::now();
     //while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
-    while n < 50. { //This 40 was not theoretically derived, but numerically experimented for
+    while n < 100. { //This 40 was not theoretically derived, but numerically experimented for
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
         w = c / (a + n);

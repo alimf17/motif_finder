@@ -273,14 +273,25 @@ impl<'a> Waveform<'a> {
 
     pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
         
-
-
         let residual = data-self;
 
+        residual.produce_resid_noise(background)
+
+    }
+   
+    pub fn account_auto<'b>(&self, background: &'b Background) -> Noise<'b> {
+
+        (self*(-1.)).produce_resid_noise(background)
+
+    }
+
+    pub fn produce_resid_noise<'b>(&self, background: &'b Background) -> Noise<'b> {
+       
+        let residual = self;
 
         let mut end_dats = residual.start_dats()[1..residual.start_dats.len()].to_vec();
 
-        let resid = residual.wave;
+        let resid = &residual.wave;
         
         end_dats.push(resid.len());
 
@@ -705,8 +716,10 @@ impl<'a> Noise<'a> {
         let mut derivative: Vec<f64> = vec![0.0; self.resids.len()];
 
         for i in 0..self.resids.len() {
+            let pdf = self.background.pdf(self.resids[i]);
             let (cdf, sf) = self.background.cd_and_sf(self.resids[i]);
-            derivative[i] = ((self.background.pdf(self.resids[i]))/(sf*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
+            //derivative[i] = ((self.background.pdf(self.resids[i]))/(sf*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
+            derivative[i] = -((2.*ranks[i]+1.)*pdf)/(n*cdf)+((2.*n-(2.*ranks[i]+1.))*pdf)/(n*sf);
         }
 
 
@@ -790,7 +803,8 @@ impl<'a> Noise<'a> {
     fn deriv_weight_fn(a: f64) -> f64 {
         const A0: f64 = 2.64;
         const k: f64 = 84.44556;
-        -(k/A0)*(a/A0).powf(k-1.)/Self::weight_fn(a).powi(2)
+        let aa = a/A0;
+        -(k/A0)*((k-1.)*aa.ln()-2.*(aa.powf(k)).ln_1p()).exp()
     }
 
     pub fn ad_like(A: f64) -> f64 {
@@ -815,6 +829,14 @@ impl<'a> Noise<'a> {
 
     pub fn ad_deriv(a: f64) -> f64 {
         let w = Self::weight_fn(a);
+        let dl = Self::deriv_low_val(a);
+        let hl = Self::deriv_high_val(a);
+        let dw = Self::deriv_weight_fn(a);
+        let lv = Self::low_val(a);
+        let hv = Self::high_val(a);
+
+
+        //println!("a: {}, w: {}, dl: {}, hl: {}, dw: {}, lv: {}, hv: {}", a, w, dl, hl, dw, lv, hv);
         w*Self::deriv_low_val(a)+(1.-w)*Self::deriv_high_val(a)
             +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
        
@@ -843,8 +865,9 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
         let mut sum = 0.0;
 
         for i in 0..self.resids.len() {
-            sum+= self.resids[i]*rhs[i];
+            sum += self.resids[i]*rhs[i];
         }
+
         sum
     }
 }
@@ -1179,6 +1202,9 @@ mod tests{
 
         println!("{:?}", n1.ad_grad());
 
+        let mut rng = rand::thread_rng();
+        let n1v: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>()*2.0-1.).collect();
+        let n1 = Noise::new(n1v, &background);
         //let h = 0.0000001;
         let noise_ad = n1.ad_calc();
         println!("diff {} deriv {} diffmderiv {}", Noise::ad_diff(noise_ad), Noise::ad_deriv(noise_ad), Noise::ad_diff(noise_ad)-Noise::ad_deriv(noise_ad));
@@ -1186,17 +1212,28 @@ mod tests{
         let mut rng = rand::thread_rng();
         let ads: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>()).collect();
         let mut noise_arr = n1.resids();
-        for i in 0..noise_length {
+        let mut noise_diffs: Vec<(f64, f64, f64)> = vec![(0.,0.,0.);noise_arr.len()];
+        for i in 0..(noise_arr.len()) {
             let mut noisy = noise_arr.clone();
-            let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*std::mem::transmute::<u64,f64>(0x3df0000000000000) };//*(1./2048.)};
+            let bits: u64 = 0x3e80000000000000;
+            //let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*std::mem::transmute::<u64,f64>(0x3f10000000000000) };//*(1./2048.)};
+            let h = unsafe{ std::mem::transmute::<u64,f64>(bits) };//*(1./2048.)};
             noisy[i] += h;
-            println!("{:?} {} post h and h", noisy, h);
+            println!("{} vs {}. {} post h and h", noise_arr[i], noisy[i], h);
             let n1_plus_h = Noise::new(noisy, &background);
             let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
-            println!("{} {} {} {} ad_grad", n1.ad_grad()[i], diff, (n1.ad_grad()[i]-diff)/diff, h);
-            assert!(((n1.ad_grad()[i]-diff)/diff).abs() < 1e-4);//Remember, I'm only calculating an approximation. It's going to be a bit off. And this does get better as I 
+            println!("{} {} {} {} {} {} {} {} ad_grad", noise_ad, n1_plus_h.resids[i], noise_arr[i], n1.ad_grad()[i], diff, (n1.ad_grad()[i]-diff), (n1.ad_grad()[i]-diff)/diff, h);
+            noise_diffs[i] = (noise_arr[i],n1.ad_grad()[i]-diff, ((n1.ad_grad()[i]-diff)/diff));//Remember, I'm only calculating an approximation. It's going to be a bit off. And this does get better as I 
                                                                 //reduce h, up to a point (whereupon I'm almost certain I'm running into numerical issues)
         }
+
+
+        let faulty_inds: Vec<(usize, (f64, f64, f64))> = noise_diffs.iter().enumerate().filter(|(_, &(a,b,c))| b.abs() > 1e-5).map(|(a, &b)| (a, b)).collect();
+
+        if faulty_inds.len() > 0 {
+            panic!("mismatches: {:?}", faulty_inds);
+        }
+        
 
 
         //Calculated these with the ln of the numerical derivative of the fast implementation
@@ -1215,10 +1252,10 @@ mod tests{
            //We're fighting to make sure this approximation is roughly
            //compaitble with another approximation with propogated errors
            //This will not be an exact science
+            println!("Noi {} {} {} {}",Noise::ad_like(pairs.0), pairs.1, Noise::ad_like(pairs.0)-pairs.1, (Noise::ad_like(pairs.0)-pairs.1)/pairs.1);
             assert!(((Noise::ad_like(pairs.0)-pairs.1)/pairs.1).abs() < 5e-2); 
 
-        }
-
+        } 
 
     }
 
