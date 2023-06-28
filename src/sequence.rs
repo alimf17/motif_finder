@@ -296,7 +296,7 @@ impl Sequence {
     //Safety: This has no way to know whether you have the right kmer length.
     //        Ensure you match the correct kmer length to this u64 or it will
     //        silently give you an incorrect result.
-    unsafe fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
+    pub unsafe fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
 
         let mut V: Vec<usize> = vec![0; len];
 
@@ -323,12 +323,6 @@ impl Sequence {
         let all_bases: Vec<_> = all_coded.iter().map(|a| Self::code_to_bases(*a)).flatten().collect();
 
         
-        //let mut all_bases = vec![];
-
-        //for a in all_coded {
-        //    all_bases.append(&mut Self::code_to_bases(*a));
-        //}
-
 
         let new_s = start_id % BP_PER_U8;
 
@@ -458,7 +452,8 @@ mod tests {
     use rand::Rng;
     use rand::distributions::{Distribution, Uniform};
 
-    use crate::Base;
+    use crate::base::*;
+   
 
 
     #[test]
@@ -544,6 +539,37 @@ mod tests {
 
         let duration = start.elapsed();
         println!("Done search {} bp {:?}", bp, duration);
+
+        let thresh: usize = 3;
+
+        for b_l in MIN_BASE..=MAX_BASE {
+
+            let mot = sequence.return_bases(0, 0, b_l);
+            let mot_u64 = Sequence::kmer_to_u64(&mot);
+            let legal_mot_ids = sequence.all_kmers_within_hamming(&mot, thresh);
+
+            let mut all_within_hamming = true;
+            let mut all_exist_in_seq = true;
+            for &valid in &legal_mot_ids {
+                let val_u64 = sequence.idth_unique_kmer(b_l,valid);
+                all_within_hamming &= Sequence::u64_kmers_within_hamming(mot_u64, val_u64, thresh);
+                all_exist_in_seq &= sequence.kmer_in_seq(&(unsafe{Sequence::u64_to_kmer(val_u64, b_l)}));
+            }
+
+            println!("For kmer size {}, all generated results are within hamming distance ({}) and exist in seq ({})", b_l, all_within_hamming, all_exist_in_seq);
+
+            assert!(all_within_hamming && all_exist_in_seq, "Generated kmer results have an invalidity");
+       
+            let examine = sequence.unique_kmers(b_l);
+            let mut count_close = 0;
+            for poss in examine {
+                if Sequence::u64_kmers_within_hamming(mot_u64, poss, thresh) { count_close += 1; }
+            }
+
+            assert!(legal_mot_ids.len() == count_close, "Missing possible mots");
+
+        }
+
     }
 
 

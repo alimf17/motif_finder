@@ -68,7 +68,7 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 //These numbers were empirically determined, not theoretically. 
 const REFLECTOR: f64 = 15.0;
 static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
-static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-19.0));
+static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-9.0));
 
 static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
@@ -181,7 +181,7 @@ impl Base {
         }
 
 
-        Base::new(base2)
+        Base{ props: base2 }
     }
 
     pub fn best_base(&self) -> usize {
@@ -239,7 +239,7 @@ impl Base {
             } else if addend[ind] != 0.0 {
                 let mut dg =  Self::prop_to_hmc(self.props[i]);
                 dg += addend[ind];
-                dg = Self::hmc_to_prop(dg); 
+                dg = Self::hmc_to_prop(dg);
                 new_props[i] = dg;
                 ind += 1;
             } else {
@@ -255,12 +255,15 @@ impl Base {
     }
 
     fn prop_to_hmc(p: f64) -> f64 {
+        
         let r = (p-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
         r.ln()-(-r).ln_1p()
+
     }
 
     fn hmc_to_prop(m: f64) -> f64 {
-        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)*m.exp()/(1.0+m.exp()))
+        //This particular order of operations ensures that we map infinities correctly
+        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(1.0+(-m).exp()))
     }
 
     fn d_prop_d_hmc(p: f64) -> f64 {
@@ -432,22 +435,17 @@ impl Motif {
 
     pub fn scramble_by_id_to_valid(&self, id: usize, opposite: bool, seq: &Sequence) -> Motif {
 
-        let mut new_mot: Motif;
-        if opposite {
-            new_mot = self.make_opposite();
-        } else {
-            new_mot = self.clone();
-        }
+        let mut new_mot: Motif = if opposite {self.make_opposite()} else {self.clone()};
         let new_best: u64 = seq.idth_unique_kmer(self.len(), id);
         let old_best: u64 = Sequence::kmer_to_u64(&self.best_motif());
 
         for i in 0..self.len() {
 
-            let old_base: usize = (old_best & (U64_BITMASK << (BITS_PER_BP*i))) as usize;
-            let new_base: usize = (new_best & (U64_BITMASK << (BITS_PER_BP*i))) as usize;
+            let old_base: usize = ((old_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i)) as usize;
+            let new_base: usize = ((new_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i)) as usize;
 
             if new_base != old_base {
-                new_mot.pwm[i].make_best(new_base);
+                new_mot.pwm[i] = new_mot.pwm[i].make_best(new_base);
             }
 
         }
@@ -846,6 +844,7 @@ impl Motif {
         let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
 
         let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
+        println!("bind {}", bind);
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..lens[i] {
                 if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
@@ -1064,6 +1063,18 @@ impl<'a> MotifSet<'a> {
         let _ = mot_set.ln_posterior();
 
         mot_set
+    }
+
+    fn recalc_signal(&self) -> Waveform {
+
+        let mut signal = self.signal.derive_zero();
+
+        for mot in &self.set {
+            signal += &mot.generate_waveform(self.data);
+        }
+
+        signal
+
     }
 
     fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
@@ -1330,12 +1341,12 @@ impl<'a> MotifSet<'a> {
            }).collect();
 
            //We want to pick these based on their relative ln posteriors
-           //But these are going to be small. We normalize based on the first
-           //ln likelihood because it's convenient
+           //But these are going to be small. We normalize based on the max
+           //ln likelihood because it prevents errors from infinities
            
            let mut selection_probs: Vec<f64> = vec![0.0; likes_and_mots.len()];
 
-           let normalize_ln_like: f64 = likes_and_mots[0].0;
+           let normalize_ln_like: f64 = likes_and_mots.iter().map(|(a, _)| a).fold(-f64::INFINITY, |a, &b| a.max(b)) ;
 
            let mut sum_probs: f64 = 0.0;
 
@@ -1347,6 +1358,7 @@ impl<'a> MotifSet<'a> {
                sum_probs+=selection_probs[i];
            }
 
+           println!("sels {:?} \n likes_and_mots {:?}", selection_probs, likes_and_mots);
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(&mut rng)].1.clone();
        }
@@ -1410,30 +1422,33 @@ impl<'a> MotifSet<'a> {
 
        for _ in 0..trace_steps {
        
+           println!("Old momentum: {:?}", momentum_apply);
            let mut new_set = self.clone();
            new_set.ln_post = None;
        
-           let mut modded_momentum = momentum_apply.clone();
        
-           for i in 0..modded_momentum.len(){
+           for i in 0..momentum_apply.len(){
                //We actually jump to the final state without calculating p_1/2
                //Notice that there's a factor of epsilon missing, here: that's intentional
                //We multiply it in in the add_momentum step
-               modded_momentum[i] = modded_momentum[i]-(eps*gradient_old[i])/2.0;
+               println!("i: {}, premom: {}, should change by {}", i, momentum_apply[i], (eps*gradient_old[i])/2.0);
+               momentum_apply[i] -= (eps*gradient_old[i])/2.0;
+               println!("postmom: {}", momentum_apply[i]);
            }
+           println!("mod momentum: {:?}", momentum_apply);
 
            let mut start = 0;
            let mut next_start = 0;
            for k in 0..self.set.len() {
                next_start += self.set[k].len()*(BASE_L-1)+1;
-               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(eps, &modded_momentum[start..next_start])};
+               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(eps, &momentum_apply[start..next_start])};
                start = next_start;
            }
 
            let gradient_new = new_set.gradient();
 
            for i in 0..momentum_apply.len() {
-               momentum_apply[i] -= (eps*(gradient_old[i]+gradient_new[i])/2.0);
+               momentum_apply[i] -= (eps*(gradient_new[i])/2.0);
            }
 
            //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
@@ -1446,7 +1461,7 @@ impl<'a> MotifSet<'a> {
        let mut delta_kinetic_energy: f64 = 0.0;
 
        for i in 0..momentum.len() {
-           delta_kinetic_energy += ( momentum_apply[i] - momentum[i]).powi(2)/2.0;
+           delta_kinetic_energy += (momentum_apply[i].powi(2) - momentum[i].powi(2))/2.0;
        }
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
@@ -2324,6 +2339,150 @@ mod tester{
             panic!();
         }
 
+        let mom_dist = Normal::new(0.0, 10.0).unwrap();
+        let mut rng = rand::thread_rng();
+        let eps = 1e-6;
+        let (new_set, acc, dham) = motif_set.hmc(10, eps, &mom_dist, &mut rng);
+
+        println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
+        println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", eps, dham, acc, motif_set,new_set);
+
+    }
+    #[test]
+    fn leap_test() {
+
+
+        let mut rng = fastrand::Rng::new();
+
+        let block_n: usize = 200;
+        let u8_per_block: usize = 435;
+        let bp_per_block: usize = u8_per_block*4;
+        let bp: usize = block_n*bp_per_block;
+        let u8_count: usize = u8_per_block*block_n;
+
+        println!("begin grad set gen");
+        let start_gen = Instant::now();
+        //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+        let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
+        let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let wave: Waveform = Waveform::create_zero(&sequence, 5);
+        let duration = start_gen.elapsed();
+        println!("grad gen {} bp {:?}", bp, duration);
+
+        let corrs: Vec<f64> = vec![0.9, -0.1];
+        let background = Background::new(0.25, 2.64, &corrs);
+        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, 350);
+
+        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq()));
+     
+        let mot = motif_set.get_nth_motif(0);
+        let mot1 = motif_set.get_nth_motif(1);
+        let mot_kmer = mot.best_motif();
+        let mot1_kmer = mot1.best_motif();
+        let id: usize = 4;
+        let mot_scram = mot.scramble_by_id_to_valid(id, true, &sequence);
+        let scram_kmer = unsafe{ Sequence::u64_to_kmer(sequence.idth_unique_kmer(mot.len(),id), mot.len())};
+       
+        println!("old {} \n new {}", mot, mot_scram);
+
+        let mut all_base_correct = true;
+        let mut all_scramble_correct = true;
+        for base in 0..mot.len() {
+            all_base_correct &= (unsafe{mot_scram.pwm[base].rel_bind(scram_kmer[base])} == 1.0);
+            let best_old = mot_kmer[base];
+            let best_new = scram_kmer[base];
+            for bp in 0..BASE_L {
+
+                if bp == best_old {
+                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)});
+                } else if bp == best_new {
+                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)});
+                } else {
+                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)});
+                }
+                    
+            }
+
+        }
+
+        assert!(mot_scram.peak_height() == -mot.peak_height(), "peak height doesn't flip when it should");
+        assert!(all_base_correct, "Not all the new swapped bases are what they should be");
+        assert!(all_scramble_correct, "Not all of the swaps preserve values unless they're being swapped and also swap correctly.");
+
+        let mot_scram = mot.scramble_by_id_to_valid(id, false, &sequence);
+        assert!(mot_scram.peak_height() == mot.peak_height(), "peak height isn't preserved when it should be");
+
+        let leaped = motif_set.base_leap();
+
+        let leap = leaped.get_nth_motif(0);
+        let leap1 = leaped.get_nth_motif(1);
+
+        assert!((mot.peak_height() == leap.peak_height()) || (mot.peak_height() == -leap.peak_height()), "zeroth motif height is wrong");
+        assert!((mot1.peak_height() == leap1.peak_height()) || (mot1.peak_height() == -leap1.peak_height()), "first motif height is wrong");
+
+        let leap_kmer = leap.best_motif();
+        let leap1_kmer = leap1.best_motif();
+
+
+        let mut all_scramble_correct = true;
+        for base in 0..mot.len() {
+            let best_old = mot_kmer[base];
+            let best_new = leap_kmer[base];
+            for bp in 0..BASE_L {
+                if bp == best_old {
+                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)});
+                } else if bp == best_new {
+                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)});
+                } else {
+                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)});
+                }
+                    
+            }
+
+        }
+
+        assert!(all_scramble_correct, "zeroth motif not correctly leaped");
+
+        let mut all_scramble_correct = true;
+        for base in 0..mot1.len() {
+            let best_old = mot1_kmer[base];
+            let best_new = leap1_kmer[base];
+            for bp in 0..BASE_L {
+                if bp == best_old {
+                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_new)});
+                } else if bp == best_new {
+                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_old)});
+                } else {
+                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(bp)});
+                }
+                    
+            }
+
+        }
+
+        assert!(all_scramble_correct, "first motif not correctly leaped");
+
+        let mut alt_leaped = leaped.clone();
+        alt_leaped.ln_post = None;
+        let ln_post = alt_leaped.ln_posterior();
+
+        println!("diff ln_post {}", ln_post-leaped.ln_post.unwrap());
+      
+        assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
+
+        let recalced_signal = leaped.recalc_signal();
+
+        let sig_diff = &leaped.signal-&recalced_signal;
+
+        let any_diffs: Vec<f64> = sig_diff.raw_wave().iter().filter(|a| a.abs() > 64.0*std::f64::EPSILON).map(|&a| a).collect();
+
+        println!("any diff {:?}", any_diffs);
+        
+        assert!(any_diffs.len() == 0, "waves not lining up"); 
     }
 
     #[test]
