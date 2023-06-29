@@ -582,12 +582,12 @@ impl Motif {
         let block_starts = seq.block_u8_starts(); //stored index space
 
 
-        let mut bind_scores: Vec<f64> = vec![0.0; 4*coded_sequence.len()];
-        let mut rev_comp: Vec<bool> = vec![false; 4*coded_sequence.len()];
+        let mut bind_scores: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+        let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
         let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
 
-        let seq_frame = 1+(self.len()/4);
+        let seq_frame = 1+(self.len()/BP_PER_U8);
 
 
         let mut ind = 0;
@@ -600,7 +600,7 @@ impl Motif {
         for i in 0..(block_starts.len()) {
 
 
-            for jd in 0..(block_lens[i]/4) {
+            for jd in 0..(block_lens[i]/BP_PER_U8) {
 
                 store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
                 for k in 0..4 {
@@ -612,7 +612,7 @@ impl Motif {
 
             for j in 0..((block_lens[i])-self.len()) {
 
-                ind = 4*block_starts[i]+(j as usize);
+                ind = BP_PER_U8*block_starts[i]+(j as usize);
 
                
                 //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
@@ -684,7 +684,7 @@ impl Motif {
         let (bind_score_floats, _) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..(lens[i]-(self.len()-1)/2) {
+            for j in 0..(lens[i]-self.len()) {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
@@ -720,7 +720,7 @@ impl Motif {
         let (bind_score_floats, _) = self.return_bind_score(DATA.seq());
 
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..lens[i] {
+            for j in 0..(lens[i]-self.len()) {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                     //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
@@ -748,11 +748,14 @@ impl Motif {
 
         let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
 
+        let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
+
         let checked = self.base_check( DATA.seq(), &bind_score_revs, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..lens[i] {
+            for j in 0..(lens[i]-self.len()) {
                 if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
-                    actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
+                    //println!("safe binding at {}", starts[i]*BP_PER_U8+j);
+                    actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/bind);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                                                                                          //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
                                                                                          //has zeros where we can be going over the motif length. Because THRESH forbids trying
@@ -779,7 +782,7 @@ impl Motif {
 
 
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..(lens[i]-(self.len()-1)/2) {
+            for j in 0..(lens[i]-self.len()) {
                 if binds.0[starts[i]*BP_PER_U8+j] > THRESH {
                     actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
@@ -810,8 +813,9 @@ impl Motif {
 
         let lens = DATA.seq().block_lens();
 
+
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..lens[i] {
+            for j in 0..(lens[i]-self.len()) {
                 if  (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
                     //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
                     actual_kernel = &base_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
@@ -841,13 +845,13 @@ impl Motif {
 
         let lens = DATA.seq().block_lens();
 
-        let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
-
         let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
-        println!("bind {}", bind);
+        
+        let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
-            for j in 0..lens[i] {
+            for j in 0..(lens[i]-self.len()) {
                 if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
+                    //println!("unsafe binding at {}", starts[i]*BP_PER_U8+j);
                     actual_kernel = &self.kernel*((binds.0[starts[i]*BP_PER_U8+j])/bind);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                                                                                          //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
@@ -2768,6 +2772,8 @@ mod tester{
 
         let start = Instant::now();
 
+        //        let (bind_score_floats, bind_score_revs) = self.return_bind_score(DATA.seq());
+
         let binds = motif.return_bind_score(&sequence);
 
         let duration = start.elapsed();
@@ -2796,6 +2802,9 @@ mod tester{
         //TESTING generate_waveform() 
 
 
+        let pwm_bp: usize = 3;
+        let pwm_pos: usize = 6;
+        let prop_bp = unsafe{motif.pwm[pwm_pos].rel_bind(pwm_bp)};
         let wave_main = motif.generate_waveform(&wave);
         let start0 = Instant::now();
         let wave_noh = motif.no_height_waveform(&wave);
@@ -2838,7 +2847,10 @@ mod tester{
         let unsafe_raw_filter = unsafe_filter.raw_wave();
 
         assert!(unsafe_raw_filter.len() == raw_filter.len());
-        assert!((unsafe_raw_filter.iter().zip(&raw_filter).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
+        let wave_s = unsafe_raw_filter.iter().zip(&raw_filter).map(|(a, &b)| (a-b).powf(2.0)).collect::<Vec<f64>>();
+        println!("Wave_s {:?}", wave_s.iter().enumerate().filter(|(_,&a)| a > 0.).map(|(a, _)| a).collect::<Vec<_>>());
+
+        assert!(wave_s.iter().sum::<f64>().powf(0.5) < 1e-6);
 
         assert!(unsafe_sho.len() == wave_sho.len());
         assert!((unsafe_sho.iter().zip(&wave_sho).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
@@ -2868,7 +2880,7 @@ mod tester{
                     assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
                     assert!((wave_sho[start_dats[i]+j]-score/motif.peak_height()).abs() < 1e-6);
 
-                    assert!((raw_filter[start_dats[i]+j]-filt_score).abs() < 1e-6);
+                    assert!((raw_filter[start_dats[i]+j]-filt_score/prop_bp).abs() < 1e-6);
 
                 } else {
                     assert!(wave_gen[start_dats[i]+j].abs() < 1e-6);
