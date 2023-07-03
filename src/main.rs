@@ -103,17 +103,18 @@ fn main() {
     //Initialize trace
     let mut current_trace: SetTrace = SetTrace::new_empty(capacity, &data, &background);
 
+    let mut rng = rand::thread_rng();
+    
     let check: Option<&str> = match args.get(9) { Some(x) => Some(x.as_str()), None => None};
     match check {
 
         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length),
         Some("json") => current_trace.push_last_state_from_json(args.get(10).expect("Must inlcude a string indicating a Json output file").as_str()),
-        _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, fragment_length)),
+        _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, fragment_length, &mut rng)),
     };
 
     //run MCMC and make sure that I'm saving and clearing periodically
     
-    let mut rng = rand::thread_rng();
 
     let mut acceptances: [usize;5]= [0;5];
     let mut trials: [usize;5] = [0;5];
