@@ -177,7 +177,7 @@ impl Sequence {
     }
     
     //NOTE: Pretty much any time anybody can access this array without automatically using the 
-    //      the correct len should be immediately considered unsafe, especially because it 
+    //      the correct len should be immediately considered incorrect, especially because it 
     //      it will NOT fail: it will just give the wrong answer SILENTLY.
     pub fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
@@ -293,10 +293,12 @@ impl Sequence {
     }
 
 
-    //Safety: This has no way to know whether you have the right kmer length.
+    //Precision: This has no way to know whether you have the right kmer length.
     //        Ensure you match the correct kmer length to this u64 or it will
-    //        silently give you an incorrect result.
-    pub unsafe fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
+    //        silently give you an incorrect result: if len is too long, then
+    //        it will append your 0th base (A in DNA), which may not exist in
+    //        in your sequence. If it's too short, it will truncate the kmer
+    pub fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
 
         let mut V: Vec<usize> = vec![0; len];
 
@@ -346,6 +348,9 @@ impl Sequence {
         let mut midcheck: isize = (upbound+lowbound)/2;
         
 
+        //SAFETY: The initial definitions of lowbound, upbound, and midcheck,
+        //        combined with how they're revised, ensures that all pointer
+        //        dereferences are always in bound of the relevant kmer_dict array
         unsafe {
 
 
@@ -437,8 +442,7 @@ impl Sequence {
 
         let mot_id: usize = rng.gen_range(0..(self.kmer_nums[&len]));
 
-        unsafe {Self::u64_to_kmer(self.kmer_dict[&len][mot_id], len)}
-
+        Self::u64_to_kmer(self.kmer_dict[&len][mot_id], len)
     }
 
 }
@@ -497,13 +501,13 @@ mod tests {
         println!("sup2 {:?}", atemers);
         assert!(atemers[0] == 43690u64);
 
-        assert!(atemers[0] == unsafe{Sequence::kmer_to_u64(&Sequence::u64_to_kmer(atemers[0], 8))});
+        assert!(atemers[0] == Sequence::kmer_to_u64(&Sequence::u64_to_kmer(atemers[0], 8)));
 
 
 
         println!("{} {} kmer test", press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]), press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
 
-        println!(" {:?}", unsafe{press2.unique_kmers(10).iter().map(|&a| Sequence::u64_to_kmer(a, 10)).collect::<Vec<_>>() });
+        println!(" {:?}", press2.unique_kmers(10).iter().map(|&a| Sequence::u64_to_kmer(a, 10)).collect::<Vec<_>>() );
         println!(" {:?}", press2.unique_kmers(10));
         assert!(press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]));
         assert!(!press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
@@ -553,7 +557,7 @@ mod tests {
             for &valid in &legal_mot_ids {
                 let val_u64 = sequence.idth_unique_kmer(b_l,valid);
                 all_within_hamming &= Sequence::u64_kmers_within_hamming(mot_u64, val_u64, thresh);
-                all_exist_in_seq &= sequence.kmer_in_seq(&(unsafe{Sequence::u64_to_kmer(val_u64, b_l)}));
+                all_exist_in_seq &= sequence.kmer_in_seq(&(Sequence::u64_to_kmer(val_u64, b_l)));
             }
 
             println!("For kmer size {}, all generated results are within hamming distance ({}) and exist in seq ({})", b_l, all_within_hamming, all_exist_in_seq);

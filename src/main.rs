@@ -109,7 +109,7 @@ fn main() {
     match check {
 
         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length),
-        Some("json") => current_trace.push_last_state_from_json(args.get(10).expect("Must inlcude a string indicating a Json output file").as_str()),
+        Some("json") => current_trace.push_last_state_from_json(false, args.get(10).expect("Must inlcude a string indicating a Json output file").as_str()),
         _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, fragment_length, &mut rng)),
     };
 

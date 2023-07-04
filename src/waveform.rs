@@ -42,7 +42,7 @@ use serde::de::{
 };
 //use serde_with::serde_as;
 use serde_big_array::BigArray;
-const WIDE: f64 = 3.0;
+pub const WIDE: f64 = 3.0;
 
 //These are based on using floats with a maximum of 8 binary sigfigs
 //after the abscissa and exponents ranging from -12 to 3, inclusive
@@ -57,6 +57,7 @@ const EXP_OFFSET: u64 = (1023_u64-12) << 52;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Kernel{
 
+    peak_height: f64,
     peak_width: f64,
     kernel: Vec<f64>,
 }
@@ -68,6 +69,7 @@ impl Mul<f64> for &Kernel {
     fn mul(self, rhs: f64) -> Kernel {
 
         Kernel {
+            peak_height: self.peak_height*rhs,
             peak_width: self.peak_width,
             kernel: self.kernel.iter().map(|a| a*rhs).collect(),
         }
@@ -87,6 +89,7 @@ impl Kernel {
         let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*peak_width.powf(2.0))).exp()*peak_height).collect();
 
         Kernel{
+            peak_height: peak_height,
             peak_width: peak_width,
             kernel: range,
         }
@@ -106,7 +109,10 @@ impl Kernel {
     pub fn len(&self) -> usize {
         self.kernel.len()
     }
-    
+   
+    pub fn get_height(&self) -> f64 {
+        self.peak_height
+    }
 
 
 }
@@ -402,7 +408,7 @@ impl<'a, 'b> AddAssign<&'b Waveform<'b>> for Waveform<'a> {
         let n = self.wave.len();
 
 
-        //If we have the same sequence pointer and the same spacer, our lengths are always identical
+        //If we have the same sequence pointer and the same spacer, our lengths are provably always identical
         assume!(unsafe: other_wave.len() == n);
 
         for i in 0..n {
@@ -595,7 +601,7 @@ impl Background {
     }
 
     fn get_near_f64(calc: f64) -> f64 {
-        unsafe{ std::mem::transmute::<u64, f64>(Self::get_near_u64(calc))}
+        f64::from_bits(Self::get_near_u64(calc))
     }
 
 
@@ -1217,7 +1223,7 @@ mod tests{
             let mut noisy = noise_arr.clone();
             let bits: u64 = 0x3e80000000000000;
             //let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*std::mem::transmute::<u64,f64>(0x3f10000000000000) };//*(1./2048.)};
-            let h = unsafe{ std::mem::transmute::<u64,f64>(bits) };//*(1./2048.)};
+            let h = f64::from_bits(bits);//*(1./2048.)};
             noisy[i] += h;
             println!("{} vs {}. {} post h and h", noise_arr[i], noisy[i], h);
             let n1_plus_h = Noise::new(noisy, &background);

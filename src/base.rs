@@ -5,7 +5,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use statrs::Result as otherResult;
-use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background, WIDE};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::ContinuousLnCDF;
 use statrs::function::gamma::*;
@@ -612,8 +612,8 @@ impl Motif {
             for jd in 0..(block_lens[i]/BP_PER_U8) {
 
                 store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
-                for k in 0..4 {
-                    uncoded_seq[4*jd+k] = store[k];
+                for k in 0..BP_PER_U8 {
+                    uncoded_seq[BP_PER_U8*jd+k] = store[k];
                 }
 
             }
@@ -697,10 +697,7 @@ impl Motif {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
-                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
-                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
-                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
-                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
+                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
                     //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/DATA.spacer()]);
                     //count+=1;
@@ -733,10 +730,7 @@ impl Motif {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                     //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
-                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} //Note: this technically means that we round down if the motif length is even
-                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
-                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
-                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
+                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
                 }
             }
         }
@@ -830,10 +824,7 @@ impl Motif {
                 if  (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
                     //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
                     actual_kernel = &base_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
-                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
-                                                                                         //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
-                                                                                         //has zeros where we can be going over the motif length. Because THRESH forbids trying
-                                                                                         //to place peaks under a certain strength, this preserves our safety guarantees
+                    occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
                 }
             }
         }
@@ -856,8 +847,8 @@ impl Motif {
 
         let lens = DATA.seq().block_lens();
 
-        let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
-        
+        let bind = self.pwm()[motif_pos].rel_bind(bp);    
+
         let checked = self.base_check( DATA.seq(), &binds.1, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
@@ -865,7 +856,7 @@ impl Motif {
                 if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
                     //println!("unsafe binding at {}", starts[i]*BP_PER_U8+j);
                     actual_kernel = &self.kernel*((binds.0[starts[i]*BP_PER_U8+j])/bind);
-                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; 
+                    occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
                 }
             }
         }
@@ -1619,24 +1610,57 @@ impl<'a> From<&'a MotifSet<'a>> for MotifSetDef {
 }
 
 impl MotifSetDef {
-
-    //SAFETY: data must be the same dimensions as self.signal, both in absolute length of the signal and the
-    //        values at each position of the point_lens, start_lens, and spacer
-    //        Memory safety may be POSSIBLE with less strict requirements, but it's guarenteed with these
-    //        Which also guarentee the correctness of this code. 
-    pub unsafe fn get_motif_set<'a>(self, data: &'a Waveform, background: &'a Background) -> MotifSet<'a> {
+ 
+    //SOUNDNESS: if data has the same length and spacer as self.signal, the kernels all match what should be defined by width,
+    //            and the kernel heights are all permitted by the bounds of the height prior, then we skip a lot of recalculation
+    //            to generate the correct signal: we assume that the signal given IS correct for the waveform. 
+    //            If recalculate is set to true, then we do not skip. You MUST set recalculate to true if the motif set was not 
+    //            generated by these data. 
+    pub fn get_motif_set<'a>(self, recalculate: bool, data: &'a Waveform, background: &'a Background) -> MotifSet<'a> {
         
-        let set = self.set.clone();
-        let signal = self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq());
+        let mut set = self.set.clone();
 
-        MotifSet {
+        const WIDTH_TO_SD: f64 = 6.0;
+
+        //We fix up any kernels that don't match the width defined in our MotifSet
+        let mut recalculated = recalculate;
+        for mot in set.iter_mut() {
+            let same_sd = (mot.kernel.get_sd() - self.width/WIDTH_TO_SD).abs() < 1e-6;
+            let same_len = (WIDE*mot.kernel.get_sd() - (mot.kernel.len() as f64)).abs() < 1e-6;
+
+            if !(same_sd && same_len) {
+                recalculated = true;
+                mot.kernel = Kernel::new(self.width/WIDTH_TO_SD, mot.kernel.get_height());
+            }
+        }
+
+        //We check to see if we need to recalculate the wave signal.
+        let redo_signal = recalculated || (self.signal.len() != data.read_wave().len()) || (self.signal.spacer() != data.spacer());
+
+        let signal = if !redo_signal { //Notice how we carefully checked to make sure that signal follows our safety guarentees
+            unsafe {self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq())}
+        } else {
+            let mut sig = data.derive_zero();
+            recalculated = true;
+            for mot in set.iter() {
+                sig += &mot.generate_waveform(data);
+            }
+            sig
+        };
+
+        
+        let mut pre_set = MotifSet {
             set: set,
             width: self.width,
             signal: signal,
-            ln_post: Some(self.ln_post),
+            ln_post: None,
             data: data, 
             background: background,
-        }
+        };
+
+        if !recalculated {pre_set.ln_post = Some(self.ln_post);} else { _ = pre_set.ln_posterior();}
+
+        pre_set
 
 
     }
@@ -1688,16 +1712,6 @@ impl<'a> SetTrace<'a> {
     //         It's going to be very slow
     pub fn push_set(&mut self, set: MotifSet<'a>) {
 
-        /*        MotifSet {
-            set: set,
-            width: self.width,
-            signal: signal,
-            ln_post: Some(self.ln_post),
-            data: data,
-            seq: seq,
-            background: background,
-        }
-        */
 
         let mut repoint_set = set.clone();
 
@@ -1721,51 +1735,28 @@ impl<'a> SetTrace<'a> {
 
     }
 
-    pub fn push_set_def(&mut self, set: MotifSetDef) {
 
-        /*        MotifSet {
-            set: set,
-            width: self.width,
-            signal: signal,
-            ln_post: Some(self.ln_post),
-            data: data,
-            seq: seq,
-            background: background,
-        }
-        */
-
-        let mut repoint_set = unsafe{set.get_motif_set(&self.data, &self.background)};
-
-        repoint_set.signal = self.data.derive_zero();
-        for i in 0..repoint_set.set.len() {
-            repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data);
-        }
-        repoint_set.ln_post = None;
-        repoint_set.ln_posterior();
-
-        self.trace.push(repoint_set);
-
-    }
-
-    pub fn push_last_state_from_json(&mut self, json_file: &str) {
+    pub fn push_last_state_from_json(&mut self, always_recalculate: bool, json_file: &str) {
 
         let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
 
         let prior_state: MotifSetDef = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
 
-        self.push_set_def(prior_state);
+        self.push_set_def(always_recalculate, prior_state);
 
     }
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
-    unsafe fn push_set_def_trust_like(&mut self, set: MotifSetDef) {
-        self.trace.push(set.get_motif_set(&self.data, &self.background));
+    pub fn push_set_def(&mut self, always_recalculate: bool, set: MotifSetDef) {
+        self.trace.push(set.get_motif_set(always_recalculate, &self.data, &self.background));
     }
 
-    unsafe fn push_set_def_trust_like_many(&mut self, sets: Vec<MotifSetDef>) {
+    //SPEED: You REALLY don't want to have to be in a situation where always_recalculate should be set to true, 
+    //       or the signals can't be reconciled with the data. It will take FOREVER
+    pub fn push_set_def_many(&mut self, always_recalculate: bool, sets: Vec<MotifSetDef>) {
         for set in sets {
-            self.trace.push(set.get_motif_set(&self.data, &self.background));
+            self.trace.push(set.get_motif_set(always_recalculate, &self.data, &self.background));
         }
     }
 
@@ -1973,7 +1964,7 @@ impl SetTraceDef {
 
     //Panics: all MotifSetDefs in the trace must be of the same dimension and spacing as the data.
     //        We also check to make sure that the first set's posterior density is accurate
-    pub fn get_set_trace<'a>(self, data: &'a Waveform, background: &'a Background) -> SetTrace<'a> {
+    pub fn get_set_trace<'a>(self, always_recalculate: bool, data: &'a Waveform, background: &'a Background) -> SetTrace<'a> {
     
         for tr in &(self.trace) {
             let a_signal = &tr.signal;
@@ -1983,7 +1974,7 @@ impl SetTraceDef {
             }
         }
 
-        let trace = unsafe{ self.trace.into_iter().map(|a| a.get_motif_set(data, background)).collect::<Vec<_>>()};
+        let trace = unsafe{ self.trace.into_iter().map(|a| a.get_motif_set(always_recalculate, data, background)).collect::<Vec<_>>()};
 
         let mut compare = trace[0].clone();
         compare.ln_post = None;
@@ -1991,7 +1982,7 @@ impl SetTraceDef {
 
         //All operations should be the same, so we check float equality.
 
-        assert!(Some(check_ln_post) == trace[0].ln_post, "ln posterior of trace doesn't match with data");
+        assert!((check_ln_post - trace[0].ln_post.unwrap()).abs() < 1e-7, "ln posterior of trace doesn't match with data");
 
         SetTrace {
             trace: trace,
