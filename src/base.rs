@@ -1974,8 +1974,7 @@ impl SetTraceDef {
             }
         }
 
-        let trace = unsafe{ self.trace.into_iter().map(|a| a.get_motif_set(always_recalculate, data, background)).collect::<Vec<_>>()};
-
+        let trace = self.trace.into_iter().map(|a| a.get_motif_set(always_recalculate, data, background)).collect::<Vec<_>>();
         let mut compare = trace[0].clone();
         compare.ln_post = None;
         let check_ln_post = compare.ln_posterior();
