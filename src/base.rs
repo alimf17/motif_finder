@@ -1649,6 +1649,16 @@ impl<'a> AnyMotifSet<'a> {
             AnyMotifSet::Active(ready) => ready.clone(),
         }
     }
+
+    fn give_stored(&self) -> StrippedMotifSet {
+
+        match self {
+            AnyMotifSet::Passive(set) => set.clone(),
+            AnyMotifSet::Active(ready) => StrippedMotifSet::from(ready),
+        }
+
+    }
+
     fn activate(&mut self, data: &'a Waveform, background: &'a Background){
         *self = AnyMotifSet::Active(self.give_activated(data, background));                                
     }
@@ -1779,7 +1789,7 @@ impl MotifSetDef {
 //SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
 //AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
 pub struct SetTrace<'a> {
-    trace: Vec<MotifSet<'a>>,
+    trace: Vec<AnyMotifSet<'a>>,
     capacity: usize,
     data: &'a Waveform<'a>, 
     background: &'a Background,
@@ -1799,7 +1809,7 @@ impl<'a> SetTrace<'a> {
 
 
         SetTrace{
-            trace: Vec::<MotifSet<'a>>::with_capacity(capacity),
+            trace: Vec::<AnyMotifSet<'a>>::with_capacity(capacity),
             capacity: capacity, 
             data: data, 
             background: background,
@@ -1834,7 +1844,7 @@ impl<'a> SetTrace<'a> {
             repoint_set.ln_posterior();
         }
 
-        self.trace.push(repoint_set);
+        self.trace.push(AnyMotifSet::Active(repoint_set));
 
     }
 
@@ -1852,14 +1862,14 @@ impl<'a> SetTrace<'a> {
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
     pub fn push_set_def<R: Rng + ?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, validate_randomizer: &mut Option<&mut R>, set: MotifSetDef) {
-        self.trace.push(set.get_motif_set(always_recalculate, validate_motif, validate_randomizer,&self.data, &self.background));
+        self.trace.push(AnyMotifSet::Active(set.get_motif_set(always_recalculate, validate_motif, validate_randomizer,&self.data, &self.background)));
     }
 
     //SPEED: You REALLY don't want to have to be in a situation where always_recalculate should be set to true, 
     //       or the signals can't be reconciled with the data. It will take FOREVER
-    pub fn push_set_def_many<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>, sets: Vec<MotifSetDef>) {
+    pub fn push_set_def_many<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>, sets: Vec<AnyMotifSet>) {
         for set in sets {
-            self.trace.push(set.get_motif_set(always_recalculate, validate_motif, validate_randomizer, &self.data, &self.background));
+            self.trace.push(set);
         }
     }
 
@@ -1908,17 +1918,21 @@ impl<'a> SetTrace<'a> {
     }
 
     pub fn current_set<'b>(&self) -> MotifSet<'a> {
-        self.trace[self.trace.len()-1].clone()
+        self.trace[self.trace.len()-1].give_activated(self.data, self.background)
     }
 
     pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
 
-        let init_set: MotifSetDef = MotifSetDef::from(&(self.trace[0]));
-
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
-
-        fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap());
-
+        
+        match self.trace[0] {
+        
+            AnyMotifSet::Active(set) => {
+                let init_set: MotifSetDef = MotifSetDef::from(&set);
+                fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap());
+            },
+            AnyMotifSet::Passive(set) => {fs::write(savestate_file.as_str(), serde_json::to_string(&set).unwrap());},
+        };
     }
        
     pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
@@ -1926,7 +1940,7 @@ impl<'a> SetTrace<'a> {
         let len_trace = self.trace.len();
 
         //We want to keep the last element in the SetTrace, so that the markov chain can proceed
-        let trace = self.trace.drain(0..(len_trace-1)).map(|a| MotifSetDef::from(&a)).collect();
+        let trace = self.trace.drain(0..(len_trace-1)).map(|a| a.give_stored()).collect();
 
 
         let history = SetTraceDef {
@@ -2034,7 +2048,7 @@ impl<'a> SetTrace<'a> {
 
         let _ = full_set.ln_posterior();
 
-        self.trace.push(full_set);
+        self.trace.push(AnyMotifSet::Active(full_set));
 
 
     }
@@ -2044,7 +2058,7 @@ impl<'a> SetTrace<'a> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SetTraceDef {
 
-    trace: Vec<MotifSetDef>,
+    trace: Vec<StrippedMotifSet>,
     capacity: usize,
 
 }
@@ -2056,25 +2070,15 @@ impl SetTraceDef {
 
     //Panics: all MotifSetDefs in the trace must be of the same dimension and spacing as the data.
     //        We also check to make sure that the first set's posterior density is accurate
-    pub fn get_set_trace<'a, R: Rng + ?Sized>(self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>, data: &'a Waveform, background: &'a Background) -> SetTrace<'a> {
+    pub fn get_set_trace<'a, R: Rng + ?Sized>(self, data: &'a Waveform, background: &'a Background) -> SetTrace<'a> {
     
-        for tr in &(self.trace) {
-            let a_signal = &tr.signal;
+        //We only validate the ln likelihood for the active motif
+        let mut trace = self.trace.into_iter().map(|a| AnyMotifSet::Passive(a)).collect::<Vec<_>>();
 
-            if (a_signal.len() != data.read_wave().len()) || (a_signal.spacer() != data.spacer()) {
-                panic!("This trace cannot be interpreted as coming from the proposed data");
-            }
+
+        if let Some(last_state) = trace.last_mut() {
+            last_state.activate(data, background)
         }
-
-        //When simply grabbing a set trace, we do not allow validation. We are assuming that this is something we're using for a post mortem analysis
-        let trace = self.trace.into_iter().map(|a| a.get_motif_set(always_recalculate, validate_motif, validate_randomizer, data, background)).collect::<Vec<_>>();
-        let mut compare = trace[0].clone();
-        compare.ln_post = None;
-        let check_ln_post = compare.ln_posterior();
-
-        //All operations should be the same, so we check float equality.
-
-        assert!((check_ln_post - trace[0].ln_post.unwrap()).abs() < 1e-7, "ln posterior of trace doesn't match with data");
 
         SetTrace {
             trace: trace,
