@@ -1727,7 +1727,7 @@ impl MotifSetDef {
                 scrambled_motifs = true;
                 _ = mot.scramble_to_close_random_valid(data.seq(), randomizer);
             }
-
+ 
         }
 
         //We check to see if we need to recalculate the wave signal.
