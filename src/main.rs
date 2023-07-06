@@ -42,9 +42,16 @@ use serde::de::{
 const NULL_CHAR: Option<char> = None;
  
 const MOMENTUM_SD: f64 = 1.0;
+static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
+
 const NUM_CHECKPOINT_FILES: usize = 25;
-const NUM_RJ_STEPS: usize = 5;
+
+const NUM_RJ_STEPS: usize = 1;
+const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
+const NUM_BASE_LEAP_STEPS: usize = 1;
+const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
 const NUM_HMC_STEPS: usize = 50;
+const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 2; 
 const HMC_EPSILON: f64 = 1.0/16.0; 
@@ -101,7 +108,7 @@ fn main() {
     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
     //Initialize trace
-    let mut current_trace: SetTrace = SetTrace::new_empty(capacity, &data, &background);
+    let mut current_trace: SetTrace = SetTrace::new_empty(capacity,data_string.clone(), &data, &background);
 
     let mut rng = rand::thread_rng();
     
@@ -125,19 +132,19 @@ fn main() {
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
-    let mut acceptances: [usize;5]= [0;5];
-    let mut trials: [usize;5] = [0;5];
+    let mut acceptances: [usize;6]= [0;6];
+    let mut trials: [usize;6] = [0;6];
+    let mut rates: [f64; 6] = [0.;6];
 
     for step in 0..num_advances {
  
-        let (this_acceptance, this_trials) = current_trace.advance(&mut rng, MOMENTUM_SD, HMC_TRACE_STEPS, HMC_EPSILON, NUM_RJ_STEPS, NUM_HMC_STEPS);
+        let (selected_move, accepted) = current_trace.advance(&mut rng);
 
-        for (total_acc, curr_acc) in acceptances.iter_mut().zip(this_acceptance.iter()) {*total_acc += *curr_acc;}
-        for (total_try, curr_try) in trials.iter_mut().zip(this_trials.iter()) {*total_try += *curr_try;}
- 
-        let rates: Vec<f64> = acceptances.iter().zip(trials.iter()).map(|(&a, &b)| (a as f64)/(b as f64)).collect();
+        trials[selected_move] += 1;
+        if accepted {acceptances[selected_move] += 1;}
+        rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
 
-        println!("Step {}. Acceptance rates for {:#?} and HMC respectively are: {:#?}", step, RJ_MOVE_NAMES, rates);
+        println!("Step {}. Acceptance rates for {:#?}, base leaping, and HMC, respectively are: {:#?}", step, RJ_MOVE_NAMES, rates);
 
         if step % save_step == 0 {
             current_trace.save_and_drop_history(output_dir, run_name, step*save_step);
@@ -148,8 +155,7 @@ fn main() {
 
     println!("Finished run");
 
-    
-
+  
 
 
 }

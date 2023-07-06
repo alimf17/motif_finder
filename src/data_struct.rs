@@ -31,7 +31,7 @@ use log::warn;
 
 use regex::Regex;
 
-const DATA_SUFFIX: &str = "_data.json";
+const DATA_SUFFIX: &str = "data.json";
 
 #[derive(Serialize, Deserialize)]
 pub struct All_Data {
@@ -61,7 +61,7 @@ impl All_Data {
                                  fragment_length: usize, spacing: usize, null_char: &Option<char>) -> (Self, String) {
 
 
-        let file_out = format!("{}/{}_{}_{}{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
+        let file_out = format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
 
         let check_initialization = fs::read_to_string(file_out.as_str());
 

@@ -8,6 +8,7 @@ use statrs::Result as otherResult;
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background, WIDE};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::ContinuousLnCDF;
+use crate::{NUM_RJ_STEPS, NUM_BASE_LEAP_STEPS, NUM_HMC_STEPS, MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
 use statrs::function::gamma::*;
 use statrs::{consts, StatsError};
 use std::f64;
@@ -1450,22 +1451,21 @@ impl<'a> MotifSet<'a> {
    }
     
    //MOVE TO CALL 
-   pub fn hmc<R: Rng + ?Sized>(&self, trace_steps: usize, eps: f64, momentum_dist : &Normal, rng: &mut R) ->  (Self, bool, f64) {
+   pub fn hmc<R: Rng + ?Sized>(&self, rng: &mut R) ->  (Self, bool, f64) {
        
        let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
-       let momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
+       let momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.sample(rng)).collect();
 
-       let mut final_trace: Vec<Self> = Vec::with_capacity(trace_steps);
+       let mut final_trace: Vec<Self> = Vec::with_capacity(HMC_TRACE_STEPS);
 
        let mut prior_set = self.clone();
        let mut gradient_old = prior_set.gradient();
        let mut momentum_apply = momentum.clone();
 
 
-       for _ in 0..trace_steps {
+       for _ in 0..HMC_TRACE_STEPS {
        
-           println!("Old momentum: {:?}", momentum_apply);
            let mut new_set = self.clone();
            new_set.ln_post = None;
        
@@ -1474,24 +1474,21 @@ impl<'a> MotifSet<'a> {
                //We actually jump to the final state without calculating p_1/2
                //Notice that there's a factor of epsilon missing, here: that's intentional
                //We multiply it in in the add_momentum step
-               println!("i: {}, premom: {}, should change by {}", i, momentum_apply[i], (eps*gradient_old[i])/2.0);
-               momentum_apply[i] -= (eps*gradient_old[i])/2.0;
-               println!("postmom: {}", momentum_apply[i]);
+               momentum_apply[i] -= (HMC_EPSILON*gradient_old[i])/2.0;
            }
-           println!("mod momentum: {:?}", momentum_apply);
 
            let mut start = 0;
            let mut next_start = 0;
            for k in 0..self.set.len() {
                next_start += self.set[k].len()*(BASE_L-1)+1;
-               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(eps, &momentum_apply[start..next_start])};
+               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start])};
                start = next_start;
            }
 
            let gradient_new = new_set.gradient();
 
            for i in 0..momentum_apply.len() {
-               momentum_apply[i] -= (eps*(gradient_new[i])/2.0);
+               momentum_apply[i] -= (HMC_EPSILON*(gradient_new[i])/2.0);
            }
 
            //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
@@ -1666,7 +1663,7 @@ impl<'a> AnyMotifSet<'a> {
     fn store(&mut self) {
 
         if let AnyMotifSet::Active(set) = self {
-            *self = AnyMotifSet::Passive(StrippedMotifSet::from(&set.clone()));
+            *self = AnyMotifSet::Passive(StrippedMotifSet::from(&*set));
         }
                                          
 
@@ -1791,6 +1788,7 @@ impl MotifSetDef {
 pub struct SetTrace<'a> {
     trace: Vec<AnyMotifSet<'a>>,
     capacity: usize,
+    AllDataFile: String,
     data: &'a Waveform<'a>, 
     background: &'a Background,
 }
@@ -1805,18 +1803,54 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_empty(capacity: usize, data: &'a Waveform<'a>, background: &'a Background) -> SetTrace<'a> {
+    pub fn new_empty(capacity: usize, AllDataFile: String, data: &'a Waveform<'a>, background: &'a Background) -> SetTrace<'a> {
 
 
         SetTrace{
             trace: Vec::<AnyMotifSet<'a>>::with_capacity(capacity),
             capacity: capacity, 
+            AllDataFile: AllDataFile,
             data: data, 
             background: background,
         }
 
     }
 
+    //Panics: if self.trace is empty
+    //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
+    //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
+    pub fn advance<R: Rng + ?Sized>(&mut self, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
+        
+
+        let setty = self.current_set();
+
+        let select_move: usize = rng.gen_range(0..MAX_IND_HMC);
+
+
+        let (new_set, retval): (MotifSet, (usize,bool)) = match select_move {
+
+            0..=MAX_IND_RJ => {
+                let (set, move_type, accept) = setty.run_rj_move(rng);
+                (set, (move_type, accept))
+            },
+            MAX_IND_RJ..=MAX_IND_LEAP => {
+                let set = setty.base_leap(rng);
+                (set, (5, true))
+            },
+            MAX_IND_LEAP..=MAX_IND_HMC => {
+                let (set, accept, _) = setty.hmc(rng);
+                (set, (6, accept))
+            },
+            _ => unreachable!(),
+        };
+       
+        self.quiet_last_set();
+
+        self.trace.push(AnyMotifSet::Active(new_set));
+
+        retval
+
+    }
 
     //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
     //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
@@ -1867,68 +1901,33 @@ impl<'a> SetTrace<'a> {
 
     //SPEED: You REALLY don't want to have to be in a situation where always_recalculate should be set to true, 
     //       or the signals can't be reconciled with the data. It will take FOREVER
-    pub fn push_set_def_many<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>, sets: Vec<AnyMotifSet>) {
+    pub fn push_set_def_many<R: Rng + ?Sized>(&mut self, sets: Vec<AnyMotifSet<'a>>) {
         for set in sets {
             self.trace.push(set);
         }
     }
 
-    //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
-    //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
-    //Base leaps run once: after the RJ steps but before the HMC steps: this is basically designed so that each set of steps goes from
-    //most drastic to least drastic changes
-    pub fn advance<R: Rng + ?Sized>(&mut self, rng: &mut R, momentum_sd: f64, hmc_trace_steps: usize, hmc_epsilon: f64, num_rj_steps: usize, num_hmc_steps: usize) -> ([usize; 5],[usize; 5]) { //1 for each of the RJ moves, plus one for hmc
-        
-        let momentum_dist = Normal::new(0.0, momentum_sd).unwrap();
 
-        let mut num_trials: [usize;5] = [0; 5];
-        let mut num_acceptances: [usize; 5] = [0; 5];
-
-        for _ in 0..num_rj_steps {
-
-            let setty = self.current_set();
-            let (mut set, move_type, accept) = setty.run_rj_move(rng);
-            num_trials[move_type] += 1;
-            if accept{
-                num_acceptances[move_type] += 1;
-            }
-
-
-            self.trace.push(set);
-        }
-
-
-        let set = self.current_set().base_leap(rng);
-
-        self.trace.push(set);
-
-        for _ in 0..num_hmc_steps {
-
-            let (set, accept, _) = self.current_set().hmc(hmc_trace_steps, hmc_epsilon, &momentum_dist, rng);
-            num_trials[4] += 1;
-            if accept {
-                num_acceptances[4] += 1;
-            }
-            self.trace.push(set);
-        }
-
-
-        (num_acceptances, num_trials)
-
+    pub fn current_set(&self) -> MotifSet<'a> {
+        self.trace[self.trace.len()-1].give_activated(self.data, self.background)
     }
 
-    pub fn current_set<'b>(&self) -> MotifSet<'a> {
-        self.trace[self.trace.len()-1].give_activated(self.data, self.background)
+    pub fn quiet_last_set(&mut self) {
+        
+        if let Some(set_mut_ref) = self.trace.last_mut() {
+            set_mut_ref.store();
+        }
+
     }
 
     pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
         
-        match self.trace[0] {
+        match &self.trace[0] {
         
             AnyMotifSet::Active(set) => {
-                let init_set: MotifSetDef = MotifSetDef::from(&set);
+                let init_set: MotifSetDef = MotifSetDef::from(set);
                 fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap());
             },
             AnyMotifSet::Passive(set) => {fs::write(savestate_file.as_str(), serde_json::to_string(&set).unwrap());},
@@ -1944,6 +1943,7 @@ impl<'a> SetTrace<'a> {
 
 
         let history = SetTraceDef {
+            AllDataFile: self.AllDataFile.clone(),
             trace: trace, 
             capacity: self.capacity,
         };
@@ -2059,6 +2059,7 @@ impl<'a> SetTrace<'a> {
 pub struct SetTraceDef {
 
     trace: Vec<StrippedMotifSet>,
+    AllDataFile: String,
     capacity: usize,
 
 }
@@ -2081,6 +2082,7 @@ impl SetTraceDef {
         }
 
         SetTrace {
+            AllDataFile: self.AllDataFile.clone(),
             trace: trace,
             capacity: self.capacity,
             data: data,
@@ -2440,7 +2442,7 @@ mod tester{
         let mom_dist = Normal::new(0.0, 10.0).unwrap();
         let mut rng = rand::thread_rng();
         let eps = 1e-6;
-        let (new_set, acc, dham) = motif_set.hmc(10, eps, &mom_dist, &mut rng);
+        let (new_set, acc, dham) = motif_set.hmc(&mut rng);
 
         println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
         println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", eps, dham, acc, motif_set,new_set);
