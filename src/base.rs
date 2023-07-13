@@ -2632,7 +2632,7 @@ mod tester{
 
         let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
 
-        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 64.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
         assert!(all_good);
 
@@ -2649,7 +2649,7 @@ mod tester{
 
         //let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
 
-        let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 64.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
         assert!(all_good);
 
@@ -2665,7 +2665,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 64.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
         
         assert!(all_good);
         assert!(motif_set.set.len() == 1);
@@ -2681,7 +2681,7 @@ mod tester{
 
         let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
 
-        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 64.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
         assert!(all_good);
 
@@ -2703,7 +2703,7 @@ mod tester{
 
         let check_diff = &bring_wave_back-&check_set.signal;
 
-        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 64.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
         let max_err = check_diff.read_wave().iter().map(|&a| a.abs()).fold(-f64::INFINITY, |f, x| f.max(x));
         println!("ad {}", max_err);

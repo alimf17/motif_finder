@@ -299,7 +299,7 @@ impl FastT {
         let mut sum: f64 = 0.5+g*x;
         let mut term: f64 = 1.;
         let x2 = x.powi(2);
-        while n < 100. {
+        while n < 50. {
             //println!("n {} sum {}", n, sum);
             term *= -x2*(self.freedom-1.+2.*n)/(self.freedom*2.*n);
             sum += g*x*term/(2.*n+1.);
@@ -344,7 +344,7 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     //println!("time ass: {:?}", t.elapsed());
     //let t = Instant::now();
     //while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
-    while n < 100. { //This 40 was not theoretically derived, but numerically experimented for
+    while n < 50. { //This 50 was not theoretically derived, but numerically experimented for. Using a hard number lets the compiler unroll the loop
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
         w = c / (a + n);
