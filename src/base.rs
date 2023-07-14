@@ -1398,9 +1398,14 @@ impl<'a> MotifSet<'a> {
                //This subtraction might seem technically unnecessary, but
                //but computers are not infinitely precise. We want to 
                //ensure that we minimize numerical issues
-               selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp();
+               selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp().abs();
                sum_probs+=selection_probs[i];
            }
+
+           if selection_probs.len() == 0 {
+               panic!("No states being selected from!");
+           }
+           
 
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(rng)].1.clone();
@@ -1831,11 +1836,11 @@ impl<'a> SetTrace<'a> {
             },
             MAX_IND_RJ..=MAX_IND_LEAP => {
                 let set = setty.base_leap(rng);
-                (set, (5, true))
+                (set, (4, true))
             },
             MAX_IND_LEAP..=MAX_IND_HMC => {
                 let (set, accept, _) = setty.hmc(rng);
-                (set, (6, accept))
+                (set, (5, accept))
             },
             _ => unreachable!(),
         };
@@ -1946,7 +1951,8 @@ impl<'a> SetTrace<'a> {
 
         let trace_file: String = format!("{}/{}_trace_from_step_{}.json",output_dir,run_name,zeroth_step);
 
-        fs::write(trace_file.as_str(), serde_json::to_string(&trace_file).unwrap());
+        fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap());
+
 
         self.save_initial_state(output_dir, run_name);
     }

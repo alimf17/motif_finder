@@ -53,7 +53,7 @@ const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
 const NUM_HMC_STEPS: usize = 50;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
-const HMC_TRACE_STEPS: usize = 2; 
+const HMC_TRACE_STEPS: usize = 5; 
 const HMC_EPSILON: f64 = 1.0/16.0; 
 
 //This only matters when taking in a meme file
@@ -104,7 +104,7 @@ fn main() {
 
     let background = total_data.background();
 
-    let save_step = (num_advances/NUM_CHECKPOINT_FILES);
+    let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
     //Initialize trace
@@ -144,8 +144,9 @@ fn main() {
         if accepted {acceptances[selected_move] += 1;}
         rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
 
-        println!("Step {}. Acceptance rates for {:#?}, base leaping, and HMC, respectively are: {:#?}", step, RJ_MOVE_NAMES, rates);
-
+        if step % 10 == 0 {
+            println!("Step {}. Acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}", step, RJ_MOVE_NAMES, rates);
+        }
         if step % save_step == 0 {
             current_trace.save_and_drop_history(output_dir, run_name, step*save_step);
         }
