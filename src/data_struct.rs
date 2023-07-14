@@ -728,10 +728,6 @@ impl All_Data {
             }
 
             let (pre_sd, pre_df) = Self::estimate_t_dist(&noises);
-            let mut fil = File::create(format!("acorrs{}.txt", a).as_str()).unwrap();
-            for &n in noises.iter() {
-                fil.write(&format!("{}\n",n).into_bytes());
-            }
             let lnlike = Self::lnlike(&noises, pre_sd, pre_df);
 
             let new_bic = Self::bic(lnlike, data_len, num_coeffs);
