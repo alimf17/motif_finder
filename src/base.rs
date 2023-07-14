@@ -1402,7 +1402,6 @@ impl<'a> MotifSet<'a> {
                sum_probs+=selection_probs[i];
            }
 
-           println!("sels {:?} \n likes_and_mots {:?}", selection_probs, likes_and_mots);
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(rng)].1.clone();
        }
@@ -1432,13 +1431,10 @@ impl<'a> MotifSet<'a> {
            
            let motif = &self.set[i];
            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
-           println!("inds a {} {}", finished_compute, compute_to);
            let motif_grad = &mut gradient[finished_compute..compute_to];
            //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
            let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
        
-           println!("{} {} lens", motif_grad.len(), grad_vec.len());
-           println!("{:?}", grad_vec);
            for i in 0..motif_grad.len() {
                motif_grad[i] = grad_vec[i];
            }

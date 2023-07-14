@@ -119,7 +119,7 @@ impl All_Data {
         let check_initialization = fs::read_to_string(file_out.as_str());
 
         match check_initialization {
-            Ok(try_json) => return serde_json::from_str(try_json.as_str()).expect("Provided data file not in proper format for inference!"),
+            Ok(try_json) => return (serde_json::from_str(try_json.as_str()).expect("Provided data file not in proper format for inference!"), file_out),
             Err(error) => (), //We just want the full preprocessing to try to continue if we get an error from read_to_string
         };
 
@@ -129,6 +129,7 @@ impl All_Data {
 
         let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular);
  
+
         let (seq, data) = Self::synchronize_sequence_and_data(pre_sequence, pre_data, sequence_len, spacing); 
 
         let full_data: All_Data = All_Data {seq: seq, data: data, background: background};
@@ -260,7 +261,6 @@ impl All_Data {
        
         if data_as_vec.last().unwrap() == &"" {
             _ = data_as_vec.pop();
-            println!("popped");
         }
 
         //let mut locs: Vec<usize> = Vec::with_capacity(data_as_vec.len());
@@ -299,7 +299,6 @@ impl All_Data {
         let start_loc: usize = raw_locs_data[0].0;
         let last_loc: usize = raw_locs_data.last().unwrap().0;
 
-        println!("{}", raw_locs_data.len());
 
         if last_loc > sequence_len {
             panic!("This data has sequence locations too large to correspond to your sequence!");
@@ -462,7 +461,6 @@ impl All_Data {
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
-        println!("peak {peak_thresh}");
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
@@ -472,7 +470,6 @@ impl All_Data {
 
             let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
    
-            println!("{:?}", &block[0..2]);
 
             let mut next_ar_ind = 0_usize;
             let mut curr_data_start = 0_usize;
@@ -499,7 +496,6 @@ impl All_Data {
                 } else {
                     check_ind += 1;
                 }
-                println!("{} {} ch" , check_ind, block.len());
             }
         }
 
@@ -513,7 +509,6 @@ impl All_Data {
 
         if !cut { //This code is only run if the genome is circular and has no missing data
 
-            println!("no cut");
             let starts_data = (data_blocks[0][0].0 < ar_blocks[0][0].0);
             let ends_data = ((*(*data_blocks.last().unwrap()).last().unwrap()).0 > 
                              (*(*ar_blocks.last().unwrap()).last().unwrap()).0);
@@ -609,7 +604,6 @@ impl All_Data {
         }
 
 
-        println!("Past this");
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
         ar_blocks.retain(|a| a.len() > data_zone);
@@ -620,16 +614,13 @@ impl All_Data {
 
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
-        println!("Pre yw");
 
         let background_dist = Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone);
 
-        println!("post yw");
 
         let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
                                                                      .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
 
-        println!("trim");
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
         (trimmed_data_blocks, background_dist)
 
@@ -655,15 +646,17 @@ impl All_Data {
 
             let mut bp_ind = pre_data[i][0].0;
             let bp_prior = bp_ind;
-            let min_target_bp = (*(pre_data[i].last().unwrap())).0;
+            let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
 
-            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+1+(min_target_bp-bp_prior)/BP_PER_U8};
+            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
 
             let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
             let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
+
+
             
-            while no_null_base && (bp_ind <= target_bp){ 
-                match pre_sequence[(bp_ind & sequence_len)] { //I don't need to explicitly check for circularity: process_data handled this for me already
+            while no_null_base && (bp_ind < target_bp){ 
+                match pre_sequence[(bp_ind % sequence_len)] { //I don't need to explicitly check for circularity: process_data handled this for me already
                     Some(bp) => bases_batch.push(bp),
                     None => no_null_base = false,
                 };
@@ -677,8 +670,11 @@ impl All_Data {
                 //This gives the 1-indexed position of the null base in vim
                 warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
             }
-           
+         
 
+
+
+            i += 1;
         }
 
         let seq = Sequence::new(sequence_blocks);
@@ -716,12 +712,9 @@ impl All_Data {
  
         let models: Vec<([f64; 3], Vec<f64>)> = (0..max_order).into_iter().map(|a| {
             let num_coeffs = a+1;
-            println!("coeffs {} {}", num_coeffs, max_order);
             let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks, num_coeffs);
 
-            println!("compute auto {:?}", correlations);
             let new_coeffs = Self::compute_ar_coeffs(&correlations);
-            println!("compute ar {:?}", new_coeffs);
 
             let mut noises: Vec<f64> = Vec::with_capacity(data_len);
             
@@ -734,25 +727,19 @@ impl All_Data {
                 };
             }
 
-            println!("vlocks {}", num_coeffs);
             let (pre_sd, pre_df) = Self::estimate_t_dist(&noises);
             let mut fil = File::create(format!("acorrs{}.txt", a).as_str()).unwrap();
             for &n in noises.iter() {
                 fil.write(&format!("{}\n",n).into_bytes());
             }
-            println!("compute t {}", num_coeffs);
             let lnlike = Self::lnlike(&noises, pre_sd, pre_df);
 
-            println!("compute lnl {}", num_coeffs);
             let new_bic = Self::bic(lnlike, data_len, num_coeffs);
-            println!("compute bic {}", num_coeffs);
             ([pre_sd, pre_df, new_bic], new_coeffs)
         }).collect();
 
-        println!("post model");
         let ([sd, df, bic], coeffs) = models.iter().min_by(|([_, _, a], _),([_, _, b], _)| a.total_cmp(b)).unwrap(); 
         
-        println!("min {} {} {:?}", sd, df, coeffs);
 
 
         //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
@@ -768,7 +755,6 @@ impl All_Data {
         let min_data_len = data.iter().map(|a| a.len()).min().expect("Why are you trying to get autocorrelations from no data?");
 
         if num_coeffs >= min_data_len {
-            eprintln!("You're asking for more autocorrelation coefficients than this data can yield. Forcing smaller number of coefficients.");
             num_coeffs = min_data_len-1;
         }
 
@@ -833,7 +819,6 @@ impl All_Data {
         
         let corr_vec = correlations.clone()[1..].to_vec();
 
-        println!("corr vec {:?}", corr_vec);
         let mut y_vec = vec![0.0_f64; corr_vec.len()];
 
         let mut ar_vec = vec![0.0_f64; corr_vec.len()];
@@ -849,7 +834,6 @@ impl All_Data {
             y_vec[i]/=divisor;
         }
 
-        println!("y_vec {:?}", y_vec);
         //Backward substitution to solve for the actual ar_vec
         for looping in 0..ar_vec.len(){
             let i = ar_vec.len()-1-looping;
@@ -862,7 +846,6 @@ impl All_Data {
             ar_vec[i]/=divisor;
         }
 
-        println!("ar_vec {:?}", ar_vec);
 
         ar_vec
 
@@ -897,7 +880,6 @@ impl All_Data {
 
         let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64);
 
-        println!("sa");
         let mut error = true;
         
         let init_dfs = vec![2.1, 3.0, 25.0]; //df really close to 2, df sanely close to 2, and df above our "give up to normal" point
@@ -906,100 +888,17 @@ impl All_Data {
 
         let cost = Fit_T_Dist { decorrelated_data };
 
-        println!("AS");
         let solver = NelderMead::new(init_simplex).with_sd_tolerance(1e-6).unwrap();
 
         let executor = Executor::new(cost, solver);
 
-        println!("DF");
         let res = executor.run().unwrap();
-        println!("{}", res);
 
         let best_vec = res.state().get_best_param().unwrap();
 
         let sd_guess = best_vec[0];
         let df_guess = best_vec[1];
 
-        /*
-        let mut eps = 1e-5;
-
-        let mut df_guess = 23.178296770f64;
-        let mut sd_guess = 0.557912854;//(total_sample_variance*(df_guess-2.0)/df_guess).sqrt();
-        //let mut s_guess = (total_sample_variance);
-
-        let beta = 0.9;
-        let h = 1e-6;
-        while error {
-
-            let mut dist = f64::INFINITY;
-
-            let mut momentum = [0.0f64, 0.0_f64];
-            //df_guess = 10.0f64;
-            //sd_guess = (total_sample_variance*(df_guess-2.0)/df_guess).sqrt();
-
-            //let mut d_sd = (Self::lnlike(decorrelated_data, sd_guess+h, df_guess)-Self::lnlike(decorrelated_data, sd_guess, df_guess))/h;
-            //let mut d_df = (Self::lnlike(decorrelated_data, sd_guess, df_guess+h)-Self::lnlike(decorrelated_data, sd_guess, df_guess))/h;
-
-            //sd_guess += eps*d_sd;
-            //df_guess += eps*d_df;
-            error = false;
-            let mut count  = 0_usize;
-            while !error && dist.abs() > eps {
-
-
-                println!("dist abs {} {} {} {}", dist.abs(), df_guess, sd_guess, count);
-                /*let old_df_guess = df_guess;
-                let old_s_guess = s_guess;
-                //let old_sd_guess = sd_guess;
-
-                s_guess = 
-                    ((decorrelated_data.iter().map(|&a| (s_guess+a.powi(2)).ln()).sum::<f64>()/(decorrelated_data.len() as f64)).exp()/
-                    (digamma((df_guess+1.0)/2.0)-digamma(df_guess/2.)).exp());
-                df_guess = -1.0+(decorrelated_data.len() as f64)/decorrelated_data.iter().map(|&a| 1.0/(1.0+s_guess/a.powi(2))).sum::<f64>();
-                dist = (df_guess-old_df_guess).abs() + (s_guess-old_s_guess).abs();
-                count += 1;*/
-
-                //let (d_sd, d_df) = Self::gradient_t_like(decorrelated_data, sd_guess, df_guess);
-
-                let d_sd = (Self::lnlike(decorrelated_data, sd_guess+h, df_guess)-Self::lnlike(decorrelated_data, sd_guess, df_guess))/h;
-                let d_df = (Self::lnlike(decorrelated_data, sd_guess, df_guess+h)-Self::lnlike(decorrelated_data, sd_guess, df_guess))/h;
-
-                //let mass = (sd_guess.powi(2)+df_guess.powi(2)).sqrt();
-
-                momentum[0] = beta*momentum[0]-(1.-beta)*d_sd;
-                momentum[1] = beta*momentum[1]-(1.-beta)*d_df;
-
-                let inc = if momentum[0] > 1000. { 0.1} else {1.};
-
-                sd_guess -= eps*momentum[0]*inc;
-                df_guess -= eps*momentum[1]*inc;
-
-                //reflective boundary conditions
-                if df_guess <= 2.0 { df_guess = 2.0+(2.0-df_guess);}
-
-                if sd_guess <= 0.0 { sd_guess = sd_guess.abs();}
-                if sd_guess >= total_sample_variance.sqrt() {
-                    let num_loops = (sd_guess/total_sample_variance.sqrt()).floor();
-                    let ult_reflect = (num_loops as usize) % 2 == 1;
-                    sd_guess = if ult_reflect { total_sample_variance.sqrt()-(sd_guess-num_loops*total_sample_variance.sqrt())} else {sd_guess-num_loops*total_sample_variance.sqrt()};
-                }
-
-                dist = ((d_sd).powi(2)+(d_df).powi(2)).sqrt();
-
-                count += 1;
-                println!("dd {} {} {} {} {} {} {}",d_sd,  momentum[0], d_df,momentum[1], dist, eps, count); 
-                //println!("Current guesses: {} {} {} {}", df_guess, sd_guess, dist, eps);
-
-                if df_guess < 2.0 || sd_guess < 0. {
-                    error = true;
-                    eps /= 2.;
-                }
-            }
-        }
-
-        */
-        //let sd_guess = s_guess/df_guess;
-        println!("model {} {}", sd_guess, df_guess);
         (sd_guess, df_guess)
 
     }
@@ -1018,7 +917,6 @@ impl All_Data {
         }
 
 
-        println!("dd {} {}", d_sd, d_df);
         (d_sd, d_df)
 
     }
@@ -1123,11 +1021,20 @@ impl All_Data {
 mod tests{
 
     use super::*;
+    use serde::ser::Error as SerdeError;
+    use serde::{ser::*, Serialize,Serializer, Deserialize};
+    use serde::de::{
+        self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+        VariantAccess, Visitor,
+    };
+
 
     #[test]
     fn see_data() {
 
 
+        /*
+        let a = All_Data::process_fasta("/Users/afarhat/Downloads/sequence.fasta", None);
 
         //There's a vector that we define below, but it takes up most of the page, since it was copy pasted
         //It was generated in R using a unity scale parameter and 2.5 degrees of freedom, with AR coefficients of 
@@ -1145,7 +1052,10 @@ mod tests{
 
         println!("{:#?}", &blocks[0][0..20]);
         println!("{:?}", back);
+*/
+        let a = All_Data::create_inference_data("/Users/afarhat/Downloads/sequence.fasta", "/Users/afarhat/Downloads/GSE26054_RAW/GSM639826_ArgR_Arg_ln_ratio_1.pair", "/Users/afarhat/Downloads/", true,
+                                 498, 25, &None);
 
-
+        println!("{:?} {:?}", serde_json::to_string(&a.0), a.1);
     }
 }

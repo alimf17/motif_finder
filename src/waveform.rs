@@ -144,7 +144,8 @@ impl<'a> Waveform<'a> {
 
 
         let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
-        
+       
+        println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
         if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
             panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
         }
@@ -207,7 +208,6 @@ impl<'a> Waveform<'a> {
 
         let tot_L: usize = point_lens.iter().sum();
 
-        println!("TOT {}", tot_L);
         Waveform {
             wave: vec![0.0; tot_L],
             spacer: spacer,
@@ -566,7 +566,6 @@ impl Background {
         let roots = aberth_vec(&poly, EPSILON).unwrap();
 
         for root in roots {
-            println!("root {}. Abs {}.", root, root.abs());
             if root.abs() <= 1.0+EPSILON { //Technically, the +EPSILON means that we might rule out some stationary models
                 panic!("AR model is not stationary!")
             }
@@ -916,7 +915,6 @@ pub fn aberth_vec(polynomial: &Vec<f64>, epsilon: f64) -> Result<Vec<Complex<f64
         converged = false;
       }
     }
-    println!("");
     if converged {
       return Ok(new_zs);
     }
