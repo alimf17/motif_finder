@@ -80,17 +80,18 @@ impl Mul<f64> for &Kernel {
 
 impl Kernel {
     
-    pub fn new(peak_width: f64, peak_height: f64) -> Kernel {
+    pub fn new(peak_width: f64, spacer: usize, peak_height: f64) -> Kernel {
 
-        let span = (peak_width*WIDE) as isize;
+        let data_width = peak_width/(spacer as f64);
+        let span = (data_width*WIDE) as isize;
 
         let domain: Vec<isize> = (-span..(span+1)).collect();
 
-        let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*peak_width.powf(2.0))).exp()*peak_height).collect();
+        let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*data_width.powf(2.0))).exp()*peak_height).collect();
 
         Kernel{
             peak_height: peak_height,
-            peak_width: peak_width,
+            peak_width: data_width,
             kernel: range,
         }
 
@@ -1071,22 +1072,23 @@ mod tests{
 
         let sd = 5;
         let height = 2.0;
-        let k = Kernel::new(sd as f64, height);
+        let spacer = 5;
+        let k = Kernel::new(sd as f64, spacer, height);
 
         let kern = k.get_curve();
         let kernb = &k*4.0;
 
 
-        assert!(kern.len() == 6*sd+1);
+        assert!(kern.len() == 6*(((sd as f64)/(spacer as f64)) as usize)+1);
 
         assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
 
-        assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
+        assert!((k.get_sd()-(sd as f64)/(spacer as f64)).abs() < 1e-6);
     }
 
     #[test]
     fn real_wave_check(){
-        let k = Kernel::new(5.0, 2.0);
+        let k = Kernel::new(5.0, 5, 2.0);
         let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
 

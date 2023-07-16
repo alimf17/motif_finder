@@ -1,3 +1,4 @@
 /target
+core*
 *.swp
 *.out

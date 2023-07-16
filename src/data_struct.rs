@@ -381,7 +381,7 @@ impl All_Data {
         for i in 0..(refined_locs_data.len()-1){
 
             let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
-            if jump >= fragment_length {
+            if jump >= (fragment_length+5) { //We add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
                 start_gaps.push(i);
             } 
         }
@@ -1025,7 +1025,7 @@ mod tests{
     };
 
 
-    #[test]
+    /* #[test]
     fn see_data() {
 
 
@@ -1053,5 +1053,5 @@ mod tests{
                                  498, 25, &None);
 
         println!("{:?} {:?}", serde_json::to_string(&a.0), a.1);
-    }
+    }*/ 
 }

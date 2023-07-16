@@ -48,9 +48,9 @@ const NUM_CHECKPOINT_FILES: usize = 25;
 
 const NUM_RJ_STEPS: usize = 1;
 const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
-const NUM_BASE_LEAP_STEPS: usize = 1;
+const NUM_BASE_LEAP_STEPS: usize = 50;
 const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
-const NUM_HMC_STEPS: usize = 50;
+const NUM_HMC_STEPS: usize = 1;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 5; 
@@ -148,7 +148,7 @@ fn main() {
             println!("Step {}. Acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}", step, RJ_MOVE_NAMES, rates);
         }
         if step % save_step == 0 {
-            current_trace.save_and_drop_history(output_dir, run_name, step*save_step);
+            current_trace.save_and_drop_history(output_dir, run_name, step);
         }
 
     }
