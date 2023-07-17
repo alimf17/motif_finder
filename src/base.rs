@@ -1050,6 +1050,11 @@ impl fmt::Debug for Motif {
 
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
+//
+//SAFETY: any method which adds a Motif to the set directly, without checking
+//        that the kernel length is less than the length of data in all sequence
+//        blocks, is IMMEDIATELY unsafe. I do not include such methods here, 
+//        but if YOU do, you MUST enforce this invariant.
 pub struct MotifSet<'a> {
 
     set: Vec<Motif>, 
@@ -1734,7 +1739,7 @@ impl MotifSetDef {
         let mut scrambled_motifs = false;
         for mot in set.iter_mut() {
             let same_sd = (mot.kernel.get_sd() - self.width/WIDTH_TO_SD).abs() < 1e-6;
-            let same_len = (WIDE*mot.kernel.get_sd() - (mot.kernel.len() as f64)).abs() < 1e-6;
+            let same_len = (WIDE*mot.kernel.get_sd()/data.spacer() - (mot.kernel.len() as f64)).abs() < 1e-6;
 
             if !(same_sd && same_len) {
                 changed_kernels = true;

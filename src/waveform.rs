@@ -233,8 +233,9 @@ impl<'a> Waveform<'a> {
 
     }
 
-    //block must be less than the number of blocks
-    //center must be less than the number of bps in the blockth block
+    //SAFETY: block must be less than the number of blocks
+    //        center must be less than the number of bps in the blockth block
+    //        the length of peak MUST be strictly less than the length of the smallest data block
     pub unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
 
@@ -1094,11 +1095,6 @@ mod tests{
 
         unsafe{
 
-        signal.place_peak(&k, 2, 20);
-
-        //Waves are in the correct spot
-        assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
-
         signal.place_peak(&k, 1, 20);
 
         //Waves are in the correct spot
@@ -1109,6 +1105,22 @@ mod tests{
         //Waves are not contagious
         assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
 
+        //point_lens: Vec<usize>,
+        //start_dats: Vec<usize>,
+        //
+
+        signal.place_peak(&k, 1, 67);
+
+        //Waves are not contagious
+        assert!(signal.raw_wave()[(signal.start_dats[2])..(signal.start_dats[2]+signal.point_lens[2])].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+
+        signal.place_peak(&k, 2, 20);
+
+        //Waves are in the correct spot
+        assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
+
+        //This is a check just for miri
+        signal.place_peak(&k, 2, 70)
         }
 
         let base_w = &signal*0.4;
