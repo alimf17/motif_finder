@@ -1404,23 +1404,23 @@ impl<'a> MotifSet<'a> {
                //but computers are not infinitely precise. We want to 
                //ensure that we minimize numerical issues
 
-               println!("like {} {}", i, likes_and_mots[i].0);
+               /*println!("like {} {}", i, likes_and_mots[i].0);
                if likes_and_mots[i].0.is_nan() {
                    for mot in likes_and_mots[i].1.set.iter() {
                        println!("{}", mot);
                    }
 
                    println!("{:?}", likes_and_mots[i].1);
-               }
+               }*/
                selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp().abs();
                sum_probs+=selection_probs[i];
            }
 
-           if selection_probs.len() == 0 {
+           /*if selection_probs.len() == 0 {
                panic!("No states being selected from!");
-           }
+           }*/
 
-           println!("{:?}", selection_probs);
+           //println!("{:?}", selection_probs);
 
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(rng)].1.clone();
@@ -1917,7 +1917,7 @@ impl<'a> SetTrace<'a> {
 
     //SPEED: You REALLY don't want to have to be in a situation where always_recalculate should be set to true, 
     //       or the signals can't be reconciled with the data. It will take FOREVER
-    pub fn push_set_def_many<R: Rng + ?Sized>(&mut self, sets: Vec<AnyMotifSet<'a>>) {
+    fn push_set_def_many<R: Rng + ?Sized>(&mut self, sets: Vec<AnyMotifSet<'a>>) {
         for set in sets {
             self.trace.push(set);
         }

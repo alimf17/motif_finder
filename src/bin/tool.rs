@@ -1,14 +1,51 @@
 #[allow(unused_parens)]
-mod base;
+/*mod base;
 mod sequence;
 mod waveform;
 mod data_struct;
-mod modified_t;
+mod modified_t;*/
+/*use super::base;
+use super::sequence;
+use super::waveform;
+use super::data_struct;
+use super::modified_t;*/
+/*
+ error[E0425]: cannot find value `NULL_CHAR` in this scope
+   --> src/bin/tool.rs:107:163
+    |
+107 |     let (total_data,data_string): (All_Data, String) = All_Data::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
+    |                                                                                                                                                                   ^^^^^^^^^ not found in this scope
 
-use crate::base::*;
-use crate::sequence::Sequence;
-use crate::waveform::*;
-use crate::data_struct::*;
+error[E0425]: cannot find value `NUM_CHECKPOINT_FILES` in this scope
+   --> src/bin/tool.rs:113:37
+    |
+113 |     let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
+    |                                     ^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `NUM_RJ_STEPS` in this scope
+   --> src/bin/tool.rs:114:38
+    |
+114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
+    |                                      ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `NUM_HMC_STEPS` in this scope
+   --> src/bin/tool.rs:114:51
+    |
+114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
+    |                                                   ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `MAX_E_VAL` in this scope
+   --> src/bin/tool.rs:124:149
+    |
+124 |         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length, &mut rng),
+ */
+
+
+use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
+use motif_finder::base::*;
+use motif_finder::sequence::Sequence;
+use motif_finder::waveform::*;
+use motif_finder::data_struct::*;
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, StudentsT};
 use statrs::statistics::{Min, Max};
 use statrs::function::gamma;
@@ -37,7 +74,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-
+/*
 
 const NULL_CHAR: Option<char> = None;
  
@@ -48,9 +85,9 @@ const NUM_CHECKPOINT_FILES: usize = 25;
 
 const NUM_RJ_STEPS: usize = 1;
 const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
-const NUM_BASE_LEAP_STEPS: usize = 50;
+const NUM_BASE_LEAP_STEPS: usize = 1;
 const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
-const NUM_HMC_STEPS: usize = 1;
+const NUM_HMC_STEPS: usize = 50;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 5; 
@@ -58,7 +95,7 @@ const HMC_EPSILON: f64 = 1.0/16.0;
 
 //This only matters when taking in a meme file
 const MAX_E_VAL: f64 = 0.01;
-
+*/
 fn main() {
 
     //Must have the following arguments:
@@ -145,7 +182,7 @@ fn main() {
         rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
 
         if step % 10 == 0 {
-            println!("Step {}. Acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}", step, RJ_MOVE_NAMES, rates);
+            println!("Step {}. Trials/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}", step, RJ_MOVE_NAMES, trials, rates);
         }
         if step % save_step == 0 {
             current_trace.save_and_drop_history(output_dir, run_name, step);

@@ -146,7 +146,7 @@ impl<'a> Waveform<'a> {
 
         let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
        
-        println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
+        //println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
         if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
             panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
         }
@@ -699,14 +699,12 @@ impl<'a> Noise<'a> {
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let n = forward.len();
-
         let mut Ad = -(n as f64);
         for i in 0..n {
 
             let cdf = self.background.ln_cdf(forward[i]);
             let rev_sf = self.background.ln_sf(forward[n-1-i]);
             Ad -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
-
         }
 
         Ad
@@ -818,6 +816,11 @@ impl<'a> Noise<'a> {
 
         const A0: f64 = 2.64;
         const k: f64 = 84.44556;
+
+        //This has to exist because of numerical issues causing NANs otherwise
+        //This is basically caused by cdf implementations that return 0.0.
+        //My FastT implementation can't, but the statrs normal DOES. 
+        if A == f64::INFINITY { return -f64::INFINITY;} 
 
         let lo = Self::low_val(A);
         let hi = Self::high_val(A);
