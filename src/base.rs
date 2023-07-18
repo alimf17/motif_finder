@@ -9,10 +9,12 @@ use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background, WIDE};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::ContinuousLnCDF;
 use crate::{NUM_RJ_STEPS, NUM_BASE_LEAP_STEPS, NUM_HMC_STEPS, MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
+use crate::data_struct::All_Data;
 use statrs::function::gamma::*;
 use statrs::{consts, StatsError};
 use std::f64;
 use std::fmt;
+use std::error::Error;
 use std::collections::{VecDeque, HashMap};
 use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
@@ -291,8 +293,11 @@ impl Base {
         *self.props.get_unchecked(bp)
     }
 
-
-
+    pub fn to_unit_sum(&self) -> [f64; BASE_L] {
+        let summed = self.props.iter().sum::<f64>();
+        let ret: [f64; BASE_L] = self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
+        ret
+    }
 }
 
 
@@ -977,10 +982,58 @@ impl Motif {
 
     }
 
+/*        peak_height: f64,
+    kernel: Kernel,
+    pwm: Vec<Base>,
+*/
 
+/*
+    fn col_unit_sum_pwm(&self) -> Vec<[f64; BASE_L]> {
+        self.pwm.iter().map(|a| a.to_unit_sum()).collect::<Vec<_>>()
+    }
+*/
 
+    pub fn distance_function(&self, other_mot: &Motif) -> (f64, isize, bool) {
+        let rev = other_mot.rev_complement();
+        let best_forward = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&other_mot.pwm, a), a, false))
+                                                                   .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();
+        let best_reverse = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&rev, a), a, true))
+                                                                   .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();
 
+        let best = if best_reverse.0 < best_forward.0 { best_reverse } else {best_forward};
 
+        best
+
+    }
+
+    fn little_distance(&self, other_mot: &Vec<Base>, alignment: isize) -> f64 {
+
+        let (mod_len_a, mod_len_b) = if alignment < 0 {(0_usize, (-alignment) as usize)} else {(alignment as usize, 0_usize)};
+
+        let total_len = (self.len()+mod_len_a).max(other_mot.len()+mod_len_b);
+
+        let (pwm_1, pwm_2) = (&self.pwm, other_mot);
+
+        let mut distance: f64 = 0.0;
+
+        for ind in 0..total_len {
+
+            let b1 = if ind < mod_len_a {None} else {Some(&pwm_1[ind-mod_len_a])};
+            let b2 = if ind < mod_len_b {None} else {Some(&pwm_2[ind-mod_len_b])};
+
+            distance += match b1 {
+                Some(b) => b.dist(b2),
+                None => match b2{
+                    Some(bb) => bb.dist(None),
+                    None => { warn!("PWM alignment in distance is causing a complete miss!"); 0.0},
+                },
+            };
+
+        }
+
+        distance
+
+    }
 
     
 }
@@ -1647,6 +1700,14 @@ impl StrippedMotifSet {
         revived
     }
     
+    pub fn motif_num_prior(&self) -> f64 {
+        -((self.set.len()-1) as f64)*NECESSARY_MOTIF_IMPROVEMENT
+    }
+
+    pub fn ln_prior(&self, seq: &Sequence) -> f64 {
+        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
+    }
+
 }
 
 enum AnyMotifSet<'a> {
@@ -1842,6 +1903,8 @@ impl<'a> SetTrace<'a> {
 
         let select_move: usize = rng.gen_range(0..MAX_IND_HMC);
 
+        const range_rj: usize = MAX_IND_RJ+1;
+        const range_leap: usize = MAX_IND_LEAP+1;
 
         let (new_set, retval): (MotifSet, (usize,bool)) = match select_move {
 
@@ -1849,11 +1912,11 @@ impl<'a> SetTrace<'a> {
                 let (set, move_type, accept) = setty.run_rj_move(rng);
                 (set, (move_type, accept))
             },
-            MAX_IND_RJ..=MAX_IND_LEAP => {
+            range_rj..=MAX_IND_LEAP => {
                 let set = setty.base_leap(rng);
                 (set, (4, true))
             },
-            MAX_IND_LEAP..=MAX_IND_HMC => {
+            range_leap..=MAX_IND_HMC => {
                 let (set, accept, _) = setty.hmc(rng);
                 (set, (5, accept))
             },
@@ -2106,6 +2169,20 @@ impl SetTraceDef {
             background: background,
         }
 
+
+    }
+
+    pub fn ln_posterior_trace(&self) -> Vec<f64> {
+        self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
+    }
+
+    pub fn ln_likelihood_trace(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+        
+        let check_data = fs::read_to_string(self.AllDataFile.as_str())?;
+
+        let full_data: All_Data = serde_json::from_str(check_data.as_str())?;
+
+        Ok(self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>())
 
     }
 

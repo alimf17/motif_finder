@@ -174,6 +174,10 @@ impl All_Data {
     pub fn background(&self) -> &Background {
         &self.background
     }
+
+    pub fn seq(&self) -> &Sequence {
+        &self.seq
+    }
  
 
     //SAFETY: I'm spending a lot of effort to validate your FASTA file
