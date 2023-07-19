@@ -1,4 +1,11 @@
 use log::warn;
+use ndarray::prelude::*;
+use rayon::prelude::*;
+
+pub fn main() {
+}
+
+
 
 pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
 
@@ -32,6 +39,12 @@ pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
 pub fn tail_slice<T>(slicer: &[T], last_n: usize) -> &[T] {
     let first = if last_n > slicer.len() {0} else {slicer.len()-last_n};
     &slicer[first..slicer.len()]
+}
+
+pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
+
+
+
 }
 
 #[cfg(test)]

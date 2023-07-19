@@ -25,6 +25,7 @@ regex = "1.8.3"
 nalgebra = "0.32.2"
 argmin = "0.8.1"
 argmin-math = "0.3.0"
+kmedoids = "0.4.3"
 
 [dev-dependencies]
 criterion = "0.3"
