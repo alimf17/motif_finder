@@ -437,6 +437,7 @@ dependencies = [
  "kmedoids",
  "log",
  "nalgebra 0.32.2",
+ "ndarray",
  "num-complex",
  "num-traits",
  "once_cell",

@@ -1,8 +1,24 @@
 use log::warn;
+use kmedoids;
 use ndarray::prelude::*;
 use rayon::prelude::*;
+use rand::*;
+ 
+use motif_finder::base::*;
 
 pub fn main() {
+
+    let mut rng = rand::thread_rng();
+    let all_trace: SetTraceDef = todo!();
+    let motif_collection: Vec<Motif> = todo!();
+    let num_sort_mots: usize = 100;
+    let tf_num: usize = 7;
+    let mut meds = kmedoids::random_initialization(num_sort_mots, tf_num, &mut rng);
+
+    //let dist_array = establish_dist_array(&motif_collection);
+    //let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
+    //
+    //
 }
 
 
@@ -36,6 +52,7 @@ pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
 
 }
 
+//Panics: if slicer is empty
 pub fn tail_slice<T>(slicer: &[T], last_n: usize) -> &[T] {
     let first = if last_n > slicer.len() {0} else {slicer.len()-last_n};
     &slicer[first..slicer.len()]
@@ -43,7 +60,15 @@ pub fn tail_slice<T>(slicer: &[T], last_n: usize) -> &[T] {
 
 pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 
+    let mut dist_array = Array2::<f64>::zeros([motif_list.len(), motif_list.len()]);
 
+    for i in 0..(motif_list.len()-1) {
+        for j in (i+1)..(motif_list.len()) {
+            dist_array[[i,j]] = motif_list[i].distance_function(&motif_list[j]).0;
+            dist_array[[j,i]] = dist_array[[i,j]];
+        }
+    }
+    dist_array
 
 }
 

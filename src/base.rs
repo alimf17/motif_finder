@@ -2213,6 +2213,19 @@ impl SetTraceDef {
        }).collect::<Vec<f64>>()
 
     }
+ 
+    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
+
+        self.trace.iter().map(|mot_set| {
+
+           mot_set.set.iter().map(|mot| (mot.clone(),mot.distance_function(&reference_motif)))
+                             .min_by(|a,b| a.1.0.partial_cmp(&b.1.0).expect("No NANs should be present in distances"))
+                             .expect("Motif sets all need at least one motif")
+
+
+       }).filter(|(a, (b, c, d))| *b < cutoff).collect::<Vec<_>>()
+
+    }
 
 }
 
