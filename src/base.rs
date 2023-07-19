@@ -1,5 +1,6 @@
 //pub mod bases {
 use rand::Rng;
+use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
@@ -2183,6 +2184,33 @@ impl SetTraceDef {
         let full_data: All_Data = serde_json::from_str(check_data.as_str())?;
 
         Ok(self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>())
+
+    }
+
+    pub fn motif_num_trace(&self) -> Vec<f64> {
+        self.trace.iter().map(|a| a.set.len() as f64).collect::<Vec<_>>()
+    }
+
+
+    //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
+    pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {
+ 
+        let set_picks: Vec<&StrippedMotifSet> = self.trace.iter().choose_multiple(rng, num_motifs);
+
+        let pwms: Vec<Motif> = set_picks.iter().map(|a| a.set.choose(rng).expect("No motif set should be empty").clone()).collect();
+
+        pwms
+    }
+
+    pub fn trace_min_dist(&self, reference_motif: &Motif) -> Vec<f64> {
+
+       self.trace.iter().map(|mot_set| {
+
+           mot_set.set.iter().map(|mot| mot.distance_function(&reference_motif).0)
+                             .min_by(|a,b| a.partial_cmp(b).expect("No NANs should be present in distances"))
+                             .expect("Motif sets all need at least one motif")
+
+       }).collect::<Vec<f64>>()
 
     }
 
