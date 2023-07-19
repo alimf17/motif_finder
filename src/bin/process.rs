@@ -12,7 +12,7 @@ pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
     let chain_sums: Vec<f64> = chain_pars.iter().map(|a| tail_slice(a, real_length).iter().sum::<f64>()).collect();
 
     let chain_means: Vec<f64> = chain_sums.iter().map(|a| (*a)/(real_length as f64)).collect();
-   
+  
     let big_mean = chain_means.iter().sum::<f64>()/((chain_pars.len()) as f64);
 
     let chain_vars: Vec<f64> = chain_pars.iter().zip(chain_means.iter()).map(|(chain, mean)| {
@@ -42,10 +42,12 @@ mod tests {
     fn rhat_test() {
         
         let chain_pars = vec![vec![1.0_f64, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
-        let rhat = rhat(&chain_pars, 3);
-        println!("{:?} {}", tail_slice(&chain_pars[0], 3), rhat);
+        let r_hat = rhat(&chain_pars, 3);
+        println!("{:?} {}", tail_slice(&chain_pars[0], 3), r_hat);
+        assert!((r_hat-(31.0_f64/6.0).sqrt()).abs() < 1e-6);
 
-        assert!((rhat-(31.0_f64/6.0).sqrt()).abs() < 1e-6);
+        let r2_hat = rhat(&chain_pars, 2);
+        assert!((r2_hat-(19.0/2.0_f64).sqrt()).abs() < 1e-6);
 
     }
 
