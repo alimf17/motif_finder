@@ -112,12 +112,13 @@ pub fn main() {
     //TODO: generate motif_num_traces plot here
     println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
 
-    let total_sets = min_len*SetTraceCollections.len()
-    let tf_num = (motif_num_traces.into_iter().map(|a| a.tail(min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
+    let total_sets = min_len*SetTraceCollections.len();
+    let tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
 
     let num_sort_mots: usize = cluster_per_chain*SetTraceCollections.len();
     
     let mut clustering_motifs: Vec<Motif> = Vec::with_capacity(num_sort_mots);
+
 
 
     for trace in SetTraceCollections.iter() {
@@ -127,15 +128,15 @@ pub fn main() {
     let mut meds = kmedoids::random_initialization(num_sort_mots, tf_num, &mut rng);
     
     
-    let dist_array = establish_dist_array(&motif_collection);
+    let dist_array = establish_dist_array(&clustering_motifs);
     let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
 
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
-        let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| a.extract_best_motif_per_set(&medoid, min_len, 1.5)).flatten().collect::<Vec<_>>(), 0.95);
-        println!("Lower {} CI bound: \n {:?}", cis[[0,..,..]]);
-        println!("Posterior mean: \n {:?}", cis[[1,..,..]]);
-        println!("Upper {} CI bound: \n {:?}", cis[[2,..,..]]);
+        let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.5)).flatten().collect::<Vec<_>>(), 0.95);
+        println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
+        println!("Posterior mean: \n {:?}", cis[1]);
+        println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);
     }
 
     //TODO: generate lnlikelihood and lnposterior traces here
