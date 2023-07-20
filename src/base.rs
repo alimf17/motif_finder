@@ -2179,6 +2179,10 @@ impl SetTraceDef {
 
     }
 
+    pub fn len(&self) -> usize {
+        self.trace.len()
+    }
+
     pub fn ln_posterior_trace(&self) -> Vec<f64> {
         self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
     }
@@ -2220,9 +2224,9 @@ impl SetTraceDef {
 
     }
  
-    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
+    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, tail_start: usize, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
 
-        self.trace.iter().map(|mot_set| {
+        self.trace[(self.len()-tail_start)..self.len()].iter().map(|mot_set| {
 
            mot_set.set.iter().map(|mot| (mot.clone(),mot.distance_function(&reference_motif)))
                              .min_by(|a,b| a.1.0.partial_cmp(&b.1.0).expect("No NANs should be present in distances"))
