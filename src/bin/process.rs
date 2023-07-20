@@ -3,6 +3,7 @@ use kmedoids;
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use rand::*;
+use statrs::statistics::Statistics;
  
 use motif_finder::base::*;
 
@@ -69,6 +70,93 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
         }
     }
     dist_array
+
+}
+
+//We want to eat best_motifs so that we can save on memory
+//You'll notice that this entire function is designed to drop memory I don't
+//need anymore as much as humanly possible.
+pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, credible: f64) -> [Array2<f64>; 3] {
+
+    if credible <= 0.0 {
+        panic!("Can't make credible intervals of literally at most zero length!");
+    } else if credible >= 1.0 {
+        warn!("Will make credible intervals out of literally all of the data!");
+    }
+
+    let num_samples = best_motifs.len();
+    let credible = credible.min(1.0);
+    let num_interval = ((num_samples as f64)*credible).floor() as usize;
+    let mut min_offset: isize = isize::MAX;
+    let mut max_offset_plus_len: isize = isize::MIN;
+
+    let pwms_offsets = best_motifs.into_iter()
+                                  .map(|(a, (_, b, c))| {
+                                      min_offset = min_offset.min(b);
+                                      max_offset_plus_len = max_offset_plus_len.max(b+(a.len() as isize));
+                                      (if c {a.rev_complement()} else {a.pwm()}, b)
+                                  }).collect::<Vec<(Vec<Base>, isize)>>();
+
+    let neutral: f64 = 1.0/(BASE_L as f64);
+
+    let num_bases = (max_offset_plus_len-min_offset) as usize;
+
+
+    let mut samples = Array3::<f64>::zeros([num_samples, num_bases, BASE_L]);
+
+    for (k, (pwm, offset)) in pwms_offsets.into_iter().enumerate() {
+        
+        for j in 0..num_bases { 
+
+            let mut slice = samples.slice_mut(s![k,j,..]);  //I went with this because it's the fastest possible assignment.
+                                                            //It will slow down calculations of credible intervals and means, 
+                                                            //But I do that once, not 10s of thousands of times. I did not 
+                                                            //benchmark this, though
+
+            let ind = (j as isize)-(offset-min_offset);
+
+
+            if ind < 0 || ind >= (pwm.len() as isize) {
+                slice = aview_mut1(&mut [neutral; BASE_L]);
+            } else {
+                let ind = ind as usize;
+                slice = aview_mut1(&mut pwm[ind].as_probabilities());
+            }
+        }
+
+    }
+    
+    let mut means = Array2::<f64>::zeros([num_bases, BASE_L]);
+    let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
+    let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
+
+    for j in 0..num_bases {
+        for i in 0..BASE_L {
+
+            let mut data = samples.slice(s![..,j, i]).clone().to_vec();
+            data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let mut min_range_start: usize = 0;
+            let mut min_range: f64 = f64::INFINITY;
+
+            for d in 0..(data.len()-num_interval) {
+
+                let range = data[d+num_interval]-data[d];
+                if range < min_range {
+                    min_range_start = d;
+                    min_range = range;
+                }
+
+            }
+
+            lower_ci[[j,i]] = data[min_range_start];
+            upper_ci[[j,i]] = data[min_range_start+num_interval];
+            means[[j, i]] = data.mean(); //This consumes the data clone
+        }
+    }
+
+
+    [lower_ci, means, upper_ci]
 
 }
 

@@ -182,17 +182,21 @@ impl Base {
 
     pub fn dist(&self, base: Option<&Base>) -> f64 {
 
-        let magnitude: f64 = self.props.iter().sum();
-        let as_probs: [f64; BASE_L] = self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().expect("I'm never worried about error here because all Base are guarenteed to be length BASE_L");
+        let as_probs: [f64; BASE_L] = self.as_probabilities();
         match(base) {
 
             None => as_probs.iter().map(|a| (a-1.0/(BASE_L as f64)).powi(2)).sum::<f64>().sqrt(),
             Some(other) => {
-                let magnitude: f64 = other.show().iter().sum();
-                as_probs.iter().zip(other.show().iter()).map(|(a, &b)| (a-(b/magnitude)).powi(2)).sum::<f64>().sqrt()
+                let other_probs = other.as_probabilities();
+                as_probs.iter().zip(other_probs).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt()
             }
         }
 
+    }
+
+    pub fn as_probabilities(&self) -> [f64; BASE_L] {
+        let magnitude: f64 = self.props.iter().sum();
+        self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().expect("I'm never worried about error here because all Base are guarenteed to be length BASE_L")
     }
     
     fn max( arr: &[f64]) -> f64 {
@@ -520,6 +524,10 @@ impl Motif {
 
     pub fn pwm(&self) -> Vec<Base> {
         self.pwm.clone()
+    }
+
+    pub fn pwm_ref(&self) -> &Vec<Base> {
+        &self.pwm
     }
 
     pub fn best_motif(&self) -> Vec<usize> {
