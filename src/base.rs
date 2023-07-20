@@ -2033,10 +2033,9 @@ impl<'a> SetTrace<'a> {
         let history = SetTraceDef {
             AllDataFile: self.AllDataFile.clone(),
             trace: trace, 
-            capacity: self.capacity,
         };
 
-        let trace_file: String = format!("{}/{}_trace_from_step_{}.json",output_dir,run_name,zeroth_step);
+        let trace_file: String = format!("{}/{}_trace_from_step_{:0<7}.json",output_dir,run_name,zeroth_step);
 
         fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap());
 
@@ -2149,7 +2148,6 @@ pub struct SetTraceDef {
 
     trace: Vec<StrippedMotifSet>,
     AllDataFile: String,
-    capacity: usize,
 
 }
 
@@ -2172,8 +2170,8 @@ impl SetTraceDef {
 
         SetTrace {
             AllDataFile: self.AllDataFile.clone(),
+            capacity: trace.len(),
             trace: trace,
-            capacity: self.capacity,
             data: data,
             background: background,
         }
@@ -2233,6 +2231,10 @@ impl SetTraceDef {
 
        }).filter(|(a, (b, c, d))| *b < cutoff).collect::<Vec<_>>()
 
+    }
+
+    pub fn append(&mut self, mut attachment: SetTraceDef) {
+        self.trace.append(&mut attachment.trace);
     }
 
 }

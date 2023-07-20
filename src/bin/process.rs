@@ -4,10 +4,92 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 use rand::*;
 use statrs::statistics::Statistics;
- 
+use std::{path, fs}; 
 use motif_finder::base::*;
+use regex::Regex;
+
+const UPPER_LETTERS: [char; 26] = [
+    'A', 'B', 'C', 'D', 'E',
+    'F', 'G', 'H', 'I', 'J', 
+    'K', 'L', 'M', 'N', 'O',
+    'P', 'Q', 'R', 'S', 'T',
+    'U', 'V', 'W', 'X', 'Y', 'Z'];
 
 pub fn main() {
+
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 4 {
+        panic!("Not enough arguments!");
+    }
+
+    let out_dir: String = args[0].to_string();
+    let base_file: &str = &args[1];
+    let mut num_chains: usize = args[2].parse().expect("The number of chains you have should be numeric!");
+    let mut max_chain: usize = args[2].parse().expect("The number of strung together inferences you have per chain should be numeric!");
+    let burn_in: Option<usize> = args.get(3).map(|a| a.parse::<usize>().ok()).flatten();
+
+    let mut min_chain: usize = burn_in.unwrap_or(0);
+
+    if max_chain < min_chain {
+        warn!("Your upper bound id for beads in a single chain to consider for inference exceeds the minimum. We swap their roles, but make sure you didn't mess up.");
+        let temp = min_chain;
+        min_chain = max_chain;
+        max_chain = temp;
+    }
+
+    if num_chains > 26 {
+        warn!("Can only sustain up to 26 independent chains. Only considering the first 26.");
+        num_chains = 26;
+    }
+
+    let mut SetTraceCollections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
+    for chain in 0..num_chains {
+        let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
+        let regex = Regex::new(&(base_str.clone()+"_{min_chain}_trace_from_step_\\d{{7}}.json")).unwrap();
+        let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
+        
+        let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+
+        chain_files.sort();
+
+        let mut iter_files = chain_files.iter();
+
+        SetTraceCollections[chain] = serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
+                                                                          .expect("File must exist or wouldn't appear"))
+                                                                          .expect("All read in files must be correct json!");
+
+        for file_name in iter_files {
+            let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+            SetTraceCollections[chain].append(interim);
+        }
+
+
+        if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
+
+            let regex = Regex::new(&(base_str.clone()+"_{bead}_trace_from_step_\\d{{7}}.json")).unwrap();
+            let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
+
+            let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+
+            chain_files.sort();
+
+            let mut iter_files = chain_files.iter();
+
+            for file_name in iter_files {
+                let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+                SetTraceCollections[chain].append(interim);
+            }
+
+
+
+
+        }}
+    }
+
+
+
+
 
     let mut rng = rand::thread_rng();
     let all_trace: SetTraceDef = todo!();
@@ -16,11 +98,16 @@ pub fn main() {
     let tf_num: usize = 7;
     let mut meds = kmedoids::random_initialization(num_sort_mots, tf_num, &mut rng);
 
-    //let dist_array = establish_dist_array(&motif_collection);
-    //let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
-    //
-    //
+    /*
+    
+    let dist_array = establish_dist_array(&motif_collection);
+    let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
+
+
+
+     */
 }
+
 
 
 
