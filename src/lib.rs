@@ -18,7 +18,7 @@ pub const NUM_RJ_STEPS: usize = 1;
 const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
 pub const NUM_BASE_LEAP_STEPS: usize = 1;
 const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
-pub const NUM_HMC_STEPS: usize = 50;
+pub const NUM_HMC_STEPS: usize = 1;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 5;
