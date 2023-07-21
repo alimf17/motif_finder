@@ -441,6 +441,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "once_cell",
+ "poloto",
  "rand",
  "rayon",
  "regex",
@@ -622,6 +623,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f6d39893cca0701371e3c27294f09797214b86f1fb951b89ade8ec04e2abab"
 dependencies = [
  "plotters-backend",
+]
+
+[[package]]
+name = "poloto"
+version = "2.20.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30da0d50b2b62b0181928725d93a7f794f916b52029b1a810a0a08c6c2ac2c4a"
+dependencies = [
+ "tagger",
 ]
 
 [[package]]
@@ -954,6 +964,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tagger"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c933e626196d509b053f49573e35ad237c0ff6a36c23c1aa61ffeab49251d24f"
 
 [[package]]
 name = "take_mut"

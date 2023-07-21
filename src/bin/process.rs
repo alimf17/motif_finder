@@ -7,6 +7,9 @@ use statrs::statistics::Statistics;
 use std::{path, fs}; 
 use motif_finder::base::*;
 use regex::Regex;
+use poloto;
+use std::fs::File;
+
 
 const UPPER_LETTERS: [char; 26] = [
     'A', 'B', 'C', 'D', 'E',
@@ -43,6 +46,8 @@ pub fn main() {
         num_chains = 26;
     }
 
+
+    //This is the code that actually sets up our independent chain reading
     let mut SetTraceCollections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
@@ -87,10 +92,34 @@ pub fn main() {
         }}
     }
 
+    //SetTraceCollections is now the chains we want
+
+    let mut plot_post = poloto::plot("{base_file} Ln Posterior", "Step", "Ln Posterior");
+    let mut plot_post_file = fs::File::open(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in SetTraceCollections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_post.line("Chain {letter}", trace.ln_posterior_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
+
+    let mut plot_tf_num = poloto::plot("{base_file} Number of Motifs", "Step", "Motifs");
+    let mut plot_tf_num_file = fs::File::open(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in SetTraceCollections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_tf_num.line("Chain {letter}", trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
+    
+    let mut plot_like = poloto::plot("{base_file} Ln Likelihood", "Step", "Ln Likelihood");
+    let mut plot_like_file = fs::File::open(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in SetTraceCollections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_like.line("Chain {letter}", trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
 
 
-
-
+    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
+    
     let mut rng = rand::thread_rng();
     
     let ref_per_chain: usize = 5;
