@@ -1809,12 +1809,12 @@ impl MotifSetDef {
         let mut changed_kernels = false;
         let mut scrambled_motifs = false;
         for mot in set.iter_mut() {
-            let same_sd = (mot.kernel.get_sd() - self.width/WIDTH_TO_SD).abs() < 1e-6;
-            let same_len = (WIDE*mot.kernel.get_sd()/(data.spacer() as f64) - (mot.kernel.len() as f64)).abs() < 1e-6;
+            let same_sd = (mot.kernel.get_sd() - self.width).abs() < 1e-6;
+            let same_len = (WIDE*mot.kernel.get_sd() - (mot.kernel.len() as f64)).abs() < 1e-6;
 
             if !(same_sd && same_len) {
                 changed_kernels = true;
-                mot.kernel = Kernel::new(self.width/WIDTH_TO_SD, data.spacer(), mot.kernel.get_height());
+                mot.kernel = Kernel::new(self.width, data.spacer(), mot.kernel.get_height());
             }
 
             if validate_motifs && mot.pwm_prior(data.seq()) == f64::NEG_INFINITY {
