@@ -22,15 +22,15 @@ pub fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 4 {
+    if args.len() < 5 {
         panic!("Not enough arguments!");
     }
 
-    let out_dir: String = args[0].to_string();
-    let base_file: &str = &args[1];
-    let mut num_chains: usize = args[2].parse().expect("The number of chains you have should be numeric!");
-    let mut max_chain: usize = args[2].parse().expect("The number of strung together inferences you have per chain should be numeric!");
-    let burn_in: Option<usize> = args.get(3).map(|a| a.parse::<usize>().ok()).flatten();
+    let out_dir: String = args[1].to_string();
+    let base_file: &str = &args[2];
+    let mut num_chains: usize = args[3].parse().expect("The number of chains you have should be numeric!");
+    let mut max_chain: usize = args[4].parse().expect("The number of strung together inferences you have per chain should be numeric!");
+    let burn_in: Option<usize> = args.get(5).map(|a| a.parse::<usize>().ok()).flatten();
 
     let mut min_chain: usize = burn_in.unwrap_or(0);
 
@@ -51,7 +51,7 @@ pub fn main() {
     let mut SetTraceCollections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
-        let regex = Regex::new(&(base_str.clone()+"_{min_chain}_trace_from_step_\\d{{7}}.json")).unwrap();
+        let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.json")).unwrap();
         let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
         
         let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -60,9 +60,10 @@ pub fn main() {
 
         let mut iter_files = chain_files.iter();
 
-        SetTraceCollections[chain] = serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
+
+        SetTraceCollections.push(serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
                                                                           .expect("File must exist or wouldn't appear"))
-                                                                          .expect("All read in files must be correct json!");
+                                                                          .expect("All read in files must be correct json!"));
 
         for file_name in iter_files {
             let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
@@ -72,7 +73,7 @@ pub fn main() {
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
-            let regex = Regex::new(&(base_str.clone()+"_{bead}_trace_from_step_\\d{{7}}.json")).unwrap();
+            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}d{{7}}.json", bead, '\\').as_str())).unwrap();
             let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
             let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -94,24 +95,25 @@ pub fn main() {
 
     //SetTraceCollections is now the chains we want
 
-    let mut plot_post = poloto::plot("{base_file} Ln Posterior", "Step", "Ln Posterior");
-    let mut plot_post_file = fs::File::open(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
+    println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
+    let mut plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_post.line("Chain {letter}", trace.ln_posterior_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
-    let mut plot_tf_num = poloto::plot("{base_file} Number of Motifs", "Step", "Motifs");
-    let mut plot_tf_num_file = fs::File::open(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    let mut plot_tf_num = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Motifs");
+    let mut plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_tf_num.line("Chain {letter}", trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
     
-    let mut plot_like = poloto::plot("{base_file} Ln Likelihood", "Step", "Ln Likelihood");
-    let mut plot_like_file = fs::File::open(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    let mut plot_like = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Likelihood");
+    let mut plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_like.line("Chain {letter}", trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
@@ -160,8 +162,10 @@ pub fn main() {
     let dist_array = establish_dist_array(&clustering_motifs);
     let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
 
+    println!("min {}", min_len);
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
+        println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
         let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.5)).flatten().collect::<Vec<_>>(), 0.95);
         println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
         println!("Posterior mean: \n {:?}", cis[1]);
@@ -260,7 +264,7 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
         
         for j in 0..num_bases { 
 
-            let mut slice = samples.slice_mut(s![k,j,..]);  //I went with this because it's the fastest possible assignment.
+            //let mut slice = samples.slice_mut(s![k,j,..]);  //I went with this because it's the fastest possible assignment.
                                                             //It will slow down calculations of credible intervals and means, 
                                                             //But I do that once, not 10s of thousands of times. I did not 
                                                             //benchmark this, though
@@ -269,10 +273,11 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
 
 
             if ind < 0 || ind >= (pwm.len() as isize) {
-                slice = aview_mut1(&mut [neutral; BASE_L]);
+                for i in 0..BASE_L {samples[[k,j,i]] = neutral;}
             } else {
                 let ind = ind as usize;
-                slice = aview_mut1(&mut pwm[ind].as_probabilities());
+                let probs = pwm[ind].as_probabilities();
+                for i in 0..BASE_L {samples[[k,j,i]] = probs[i];}
             }
         }
 

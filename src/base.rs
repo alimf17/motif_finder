@@ -1027,8 +1027,8 @@ impl Motif {
 
         for ind in 0..total_len {
 
-            let b1 = if ind < mod_len_a {None} else {Some(&pwm_1[ind-mod_len_a])};
-            let b2 = if ind < mod_len_b {None} else {Some(&pwm_2[ind-mod_len_b])};
+            let b1 = if (ind < mod_len_a || ind >= (pwm_1.len()+mod_len_a)) {None} else {Some(&pwm_1[ind-mod_len_a])};
+            let b2 = if (ind < mod_len_b || ind >= (pwm_2.len()+mod_len_b)) {None} else {Some(&pwm_2[ind-mod_len_b])};
 
             distance += match b1 {
                 Some(b) => b.dist(b2),
@@ -1039,6 +1039,7 @@ impl Motif {
             };
 
         }
+
 
         distance
 
@@ -2035,7 +2036,7 @@ impl<'a> SetTrace<'a> {
             trace: trace, 
         };
 
-        let trace_file: String = format!("{}/{}_trace_from_step_{:0<7}.json",output_dir,run_name,zeroth_step);
+        let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.json",output_dir,run_name,zeroth_step);
 
         fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap());
 
