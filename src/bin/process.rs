@@ -100,23 +100,23 @@ pub fn main() {
     let mut plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_post.line("Chain {letter}", trace.ln_posterior_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+        plot_post.line(format!("Chain {}", letter), trace.ln_posterior_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
-    let mut plot_tf_num = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Motifs");
+    let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
     let mut plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_tf_num.line("Chain {letter}", trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+        plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
     
-    let mut plot_like = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Likelihood");
+    let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
     let mut plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_like.line("Chain {letter}", trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
 
 
@@ -166,7 +166,13 @@ pub fn main() {
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
         println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
-        let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.5)).flatten().collect::<Vec<_>>(), 0.95);
+        let mut num_good_motifs: usize = 0; 
+        let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| {
+            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 0.5);
+            num_good_motifs+= set_extracts.len();
+            set_extracts
+        }).flatten().collect::<Vec<_>>(), 0.95);
+        println!("Number motifs near medoid: {}", num_good_motifs);
         println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
         println!("Posterior mean: \n {:?}", cis[1]);
         println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);

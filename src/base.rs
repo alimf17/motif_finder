@@ -68,7 +68,8 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 
 //When converting between gradient compatible and incompatible representations
 //We sometimes end up with numerical errors that basically make infinities where there shouldn't be
-//CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off bases that could get too weak for proper conversion
+//CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off boundary values in HMC
+//before they can get infinite and thus unfixable.  
 //These numbers were empirically determined, not theoretically. 
 const REFLECTOR: f64 = 15.0;
 static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
@@ -234,6 +235,7 @@ impl Base {
             } else if addend[ind] != 0.0 {
                 let mut dg =  Self::prop_to_hmc(self.props[i]);
                 dg += addend[ind];
+                dg = reflect(dg);
                 dg = Self::hmc_to_prop(dg);
                 new_props[i] = dg;
                 ind += 1;
@@ -303,8 +305,18 @@ impl Base {
         let ret: [f64; BASE_L] = self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
         ret
     }
+
+
 }
 
+fn reflect(a: f64) -> f64 {
+    if a.abs() < REFLECTOR {
+        return a;
+    }
+    let reflect_cond = ((a.abs()+REFLECTOR)/(2.0*REFLECTOR)).floor();
+    let a_sign = (-1.0_f64).powi((reflect_cond as i32) & 0x01_i32);
+    -reflect_cond*2.0*REFLECTOR*a_sign*a.signum()+a_sign*a
+}
 
 
 
@@ -504,6 +516,7 @@ impl Motif {
         if momentum[0] != 0.0 {
             let mut h = -((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
             h += (eps*momentum[0]);
+            h = reflect(h);
             h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h).exp())));
             new_mot.peak_height = self.peak_height.signum()*h;
 
@@ -1550,9 +1563,6 @@ impl<'a> MotifSet<'a> {
        
        
            for i in 0..momentum_apply.len(){
-               //We actually jump to the final state without calculating p_1/2
-               //Notice that there's a factor of epsilon missing, here: that's intentional
-               //We multiply it in in the add_momentum step
                momentum_apply[i] -= (HMC_EPSILON*gradient_old[i])/2.0;
            }
 
@@ -1911,7 +1921,7 @@ impl<'a> SetTrace<'a> {
 
         let setty = self.current_set();
 
-        let select_move: usize = rng.gen_range(0..MAX_IND_HMC);
+        let select_move: usize = rng.gen_range(0..=MAX_IND_HMC);
 
         const range_rj: usize = MAX_IND_RJ+1;
         const range_leap: usize = MAX_IND_LEAP+1;
