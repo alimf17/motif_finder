@@ -312,6 +312,8 @@ impl Base {
 fn reflect(a: f64) -> f64 {
     if a.abs() < REFLECTOR {
         return a;
+    } else if a.is_infinite() {
+        return a.signum()*REFLECTOR;
     }
     let reflect_cond = ((a.abs()+REFLECTOR)/(2.0*REFLECTOR)).floor();
     let a_sign = (-1.0_f64).powi((reflect_cond as i32) & 0x01_i32);
@@ -1451,8 +1453,8 @@ impl<'a> MotifSet<'a> {
 
            let mut base_set = current_set.clone();
            base_set.remove_motif_void(id);
-           //This was numerically derived, and not a hard rule. I wanted less than 50 kmers per leap
-           let threshold = if current_mot.len() < 12 {1} else { (current_mot.len())/2-4}; 
+           //This was numerically derived, and not a hard rule. I wanted less than 150 kmers per leap
+           let threshold = if current_mot.len() < 12 {2} else { (current_mot.len()+1)/2-4}; 
 
            let kmer_ids = self.data.seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold);
 
