@@ -1205,6 +1205,7 @@ impl<'a> MotifSet<'a> {
     fn recalc_signal(&mut self) {
         self.signal = self.data.derive_zero();
         for mot in self.set.iter() {
+            let w = mot.generate_waveform(self.data);
             self.signal += &(mot.generate_waveform(self.data));
         }
     }
@@ -1521,7 +1522,6 @@ impl<'a> MotifSet<'a> {
        let noise = self.signal.produce_noise(self.data, self.background);
        let d_ad_stat_d_noise = noise.ad_grad();
        let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
-
        let mut len_grad: usize = self.set.len();
 
        for i in 0..self.set.len() {
@@ -1554,6 +1554,7 @@ impl<'a> MotifSet<'a> {
    //MOVE TO CALL 
    pub fn hmc<R: Rng + ?Sized>(&self, rng: &mut R) ->  (Self, bool, f64) {
        
+       
        let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
        let momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.sample(rng)).collect();
@@ -1561,9 +1562,9 @@ impl<'a> MotifSet<'a> {
        let mut final_trace: Vec<Self> = Vec::with_capacity(HMC_TRACE_STEPS);
 
        let mut prior_set = self.clone();
+      
        let mut gradient_old = prior_set.gradient();
        let mut momentum_apply = momentum.clone();
-
 
        for _ in 0..HMC_TRACE_STEPS {
        
@@ -1578,6 +1579,7 @@ impl<'a> MotifSet<'a> {
                //we ADD the gradient of the ln_posterior
                momentum_apply[i] += (HMC_EPSILON*gradient_old[i])/2.0;
            }
+
 
            let mut start = 0;
            let mut next_start = 0;

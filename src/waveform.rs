@@ -671,7 +671,7 @@ impl<'a> Noise<'a> {
         let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
 
         //This sorts the elements, but recalls their original positions
-        rx.par_sort_unstable_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap());
+        rx.par_sort_unstable_by(|(i,a), (j,b)| a.partial_cmp(b).expect(format!("No NaNs allowed! {} {} {} {}", i,a, j, b).as_str()));
        
     
         
@@ -706,7 +706,6 @@ impl<'a> Noise<'a> {
             let rev_sf = self.background.ln_sf(forward[n-1-i]);
             Ad -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
         }
-
         Ad
     }
 
@@ -723,8 +722,13 @@ impl<'a> Noise<'a> {
         for i in 0..self.resids.len() {
             let pdf = self.background.pdf(self.resids[i]);
             let (cdf, sf) = self.background.cd_and_sf(self.resids[i]);
-            //derivative[i] = ((self.background.pdf(self.resids[i]))/(sf*n))*(2.*(n)-(((2.*ranks[i]+1.))/cdf));
-            derivative[i] = -((2.*ranks[i]+1.)*pdf)/(n*cdf)+((2.*n-(2.*ranks[i]+1.))*pdf)/(n*sf);
+            let mut poc = pdf/cdf;
+            if !poc.is_finite() {poc = 0.;} //We assume that pdf outpaces cdf to 0 mathematically, but some cdf implementations are lazier sooner
+            let mut pos = pdf/sf;
+            if !pos.is_finite() {pos = 0.;} //We assume that pdf outpaces sf to 0 mathematically, but some sf implementations are lazier sooner
+
+            //derivative[i] = -((2.*ranks[i]+1.)*pdf)/(n*cdf)+((2.*n-(2.*ranks[i]+1.))*pdf)/(n*sf);
+            derivative[i] = -((2.*ranks[i]+1.)*poc)/(n)+((2.*n-(2.*ranks[i]+1.))*pos)/(n);
         }
 
 
@@ -838,6 +842,11 @@ impl<'a> Noise<'a> {
     }
 
     pub fn ad_deriv(a: f64) -> f64 {
+        
+        if a.is_infinite() {
+            return 0.0;
+        }
+
         let w = Self::weight_fn(a);
         let dl = Self::deriv_low_val(a);
         let hl = Self::deriv_high_val(a);
