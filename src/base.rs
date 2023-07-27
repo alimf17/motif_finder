@@ -1190,16 +1190,23 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
 
-    fn recalc_signal(&self) -> Waveform {
+    fn recalced_signal(&self) -> Waveform {
 
-        let mut signal = self.signal.derive_zero();
+        let mut signal = self.data.derive_zero();
 
-        for mot in &self.set {
-            signal += &mot.generate_waveform(self.data);
+        for mot in self.set.iter() {
+            signal += &(mot.generate_waveform(self.data));
         }
 
         signal
 
+    }
+
+    fn recalc_signal(&mut self) {
+        self.signal = self.data.derive_zero();
+        for mot in self.set.iter() {
+            self.signal += &(mot.generate_waveform(self.data));
+        }
     }
 
     fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
@@ -1565,7 +1572,11 @@ impl<'a> MotifSet<'a> {
        
        
            for i in 0..momentum_apply.len(){
-               momentum_apply[i] -= (HMC_EPSILON*gradient_old[i])/2.0;
+               //We calculate the gradient of the ln posterior with gradient
+               //BUT, our potential energy is -ln_posterior. 
+               //Because we subtract the gradient of the potential energy
+               //we ADD the gradient of the ln_posterior
+               momentum_apply[i] += (HMC_EPSILON*gradient_old[i])/2.0;
            }
 
            let mut start = 0;
@@ -1576,10 +1587,12 @@ impl<'a> MotifSet<'a> {
                start = next_start;
            }
 
+           new_set.recalc_signal();
+
            let gradient_new = new_set.gradient();
 
            for i in 0..momentum_apply.len() {
-               momentum_apply[i] -= (HMC_EPSILON*(gradient_new[i])/2.0);
+               momentum_apply[i] += (HMC_EPSILON*(gradient_new[i])/2.0);
            }
 
            //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
@@ -2440,7 +2453,7 @@ mod tester{
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 200;
-        let u8_per_block: usize = 435;
+        let u8_per_block: usize = 100;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -2606,6 +2619,12 @@ mod tester{
         let eps = 1e-6;
         let (new_set, acc, dham) = motif_set.hmc(&mut rng);
 
+        let should_wave = new_set.recalced_signal();
+
+        let diff_wave_check = (&should_wave-&new_set.signal).raw_wave().iter().map(|&a| a.powi(2)).sum::<f64>().sqrt();
+        println!("diff_wave_check {}", diff_wave_check);
+        assert!(diff_wave_check < 1e-6, "diff wave fail");
+
         println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
         println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", eps, dham, acc, motif_set,new_set);
 
@@ -2737,7 +2756,7 @@ mod tester{
       
         assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
 
-        let recalced_signal = leaped.recalc_signal();
+        let recalced_signal = leaped.recalced_signal();
 
         let sig_diff = &leaped.signal-&recalced_signal;
 
