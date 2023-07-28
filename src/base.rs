@@ -62,6 +62,8 @@ const PROB_POS_PEAK: f64 = 0.9;
 
 pub const THRESH: f64 = 1e-3; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
+const SPREAD_HMC_CONV: f64 = 6.0;
+
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
@@ -74,6 +76,9 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 const REFLECTOR: f64 = 15.0;
 static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
 static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-9.0));
+
+static PROP_POS_REFLECTOR: Lazy<f64> = Lazy::new(|| Base::hmc_to_prop(REFLECTOR)); 
+static PROP_NEG_REFLECTOR: Lazy<f64> = Lazy::new(|| Base::hmc_to_prop(-REFLECTOR)); 
 
 static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
@@ -121,7 +126,9 @@ impl Base {
             if i == max_ind {
                 props[i] = 1.0;
             } else {
-                props[i] = (props[i]/max)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF 
+                props[i] = (props[i]/max)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR)+*PROP_NEG_REFLECTOR; //The prior is a bit broader than what we actually allow
+                                                                                                         //This is for numerical reasons
+                                                                                                
             }
         }
 
@@ -147,7 +154,7 @@ impl Base {
             if i == max_ind {
                 att[i] = 1.0;
             } else {
-                att[i] =  (att[i])*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)+*PROP_CUTOFF;
+                att[i] =  (att[i])*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR)+*PROP_NEG_REFLECTOR;;
             }
         }
 
@@ -254,25 +261,20 @@ impl Base {
     fn prop_to_hmc(p: f64) -> f64 {
         
         let r = (p-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
-        r.ln()-(-r).ln_1p()
+        SPREAD_HMC_CONV*(r.ln()-(-r).ln_1p())
 
     }
 
     fn hmc_to_prop(m: f64) -> f64 {
         //This particular order of operations ensures that we map infinities correctly
-        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(1.0+(-m).exp()))
+        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(1.0+(-m/SPREAD_HMC_CONV).exp()))
     }
 
     fn d_prop_d_hmc(p: f64) -> f64 {
 
-        (p-*PROP_CUTOFF)*(*PROP_UPPER_CUTOFF-p)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
+        (p-*PROP_CUTOFF)*(*PROP_UPPER_CUTOFF-p)/(SPREAD_HMC_CONV*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF))
     }
 
-    fn d_ln_prior_d_hmc(p: f64) -> f64 {
-
-        //0.
-        (*PROP_UPPER_CUTOFF+*PROP_CUTOFF-2.*p)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF)
-    }
 
     pub fn rev(&self) -> Base {
 
@@ -310,6 +312,7 @@ impl Base {
 }
 
 fn reflect(a: f64) -> f64 {
+    
     if a.abs() < REFLECTOR {
         return a;
     } else if a.is_infinite() {
@@ -318,6 +321,7 @@ fn reflect(a: f64) -> f64 {
     let reflect_cond = ((a.abs()+REFLECTOR)/(2.0*REFLECTOR)).floor();
     let a_sign = (-1.0_f64).powi((reflect_cond as i32) & 0x01_i32);
     -reflect_cond*2.0*REFLECTOR*a_sign*a.signum()+a_sign*a
+    
 }
 
 
@@ -515,14 +519,14 @@ impl Motif {
 
         let mut new_mot = self.clone();
         
-        if momentum[0] != 0.0 {
-            let mut h = -((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
+        //if momentum[0] != 0.0 {
+            let mut h = -SPREAD_HMC_CONV*((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
             h += (eps*momentum[0]);
             h = reflect(h);
-            h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h).exp())));
+            h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h/SPREAD_HMC_CONV).exp())));
             new_mot.peak_height = self.peak_height.signum()*h;
 
-        }
+        //}
         new_mot.kernel = &(self.kernel)*(new_mot.peak_height/self.peak_height);
 
         for i in 0..self.len() {
@@ -586,6 +590,22 @@ impl Motif {
             let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
 
             prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln();
+            
+            prior
+
+        } else {-f64::INFINITY}
+    }
+    
+    pub fn pwm_gen_prob(&self, seq: &Sequence) -> f64 {
+
+        if seq.kmer_in_seq(&self.best_motif()) {
+            //We have to normalize by the probability that our kmer is possible
+            //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
+            //number possible kmers = BASE_L^k, but this actually cancels with our integral
+            //over the regions of possible bases, leaving only number unique kmers. 
+            let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
+
+            prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln();
             
             prior
 
@@ -936,7 +956,7 @@ impl Motif {
                                         .account_auto(noise.background)};
         let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * ((&d_noise_d_h * &d_ad_stat_d_noise)) )
                                     * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                                    / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) + self.d_height_prior_d_hmc();
+                                    / (self.peak_height().signum() * SPREAD_HMC_CONV * (MAX_HEIGHT-MIN_HEIGHT)) + self.d_height_prior_d_hmc();
       
 
         let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
@@ -955,7 +975,7 @@ impl Motif {
             d_ad_like_d_grad_form_binds[index] = unsafe {
                    (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                            .account_auto(noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp)  //- Base::d_ln_prior_d_hmc(prop_bp)
+                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) 
             }
            
         }
@@ -980,7 +1000,7 @@ impl Motif {
                                                .account_auto(background);
                 (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise)))
                 * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                / (self.peak_height().signum() * (MAX_HEIGHT-MIN_HEIGHT)) +self.d_height_prior_d_hmc()
+                / (self.peak_height().signum() * SPREAD_HMC_CONV  * (MAX_HEIGHT-MIN_HEIGHT)) +self.d_height_prior_d_hmc()
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -1338,7 +1358,7 @@ impl<'a> MotifSet<'a> {
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let new_mot = Motif::rand_mot(self.width, self.data.seq(), self.data.spacer(), rng); //rand_mot always generates a possible motif
-        let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
+        let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_gen_prob(self.data.seq());
         let ln_post = new_set.add_motif(new_mot);
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
@@ -1353,7 +1373,7 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
-            let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_prior(self.data.seq());
+            let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_gen_prob(self.data.seq());
             let ln_post = new_set.remove_motif(rem_id);
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
@@ -1373,12 +1393,12 @@ impl<'a> MotifSet<'a> {
 
             let mut new_mot = self.set[extend_id].clone();
             new_mot.pwm.push(Base::rand_new(rng));
-            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
-            if ln_gen_prob > -f64::INFINITY { //When we extend a motif, its best base sequence may no longer be in the sequence
+            //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
+            if self.data.seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
                 let ln_post = new_set.replace_motif(new_mot, extend_id);
-                //There are BASE_L ways that we sample BASE_L-1 times from a  U(*PROP_CUTOFF, *PROP_UPPER_CUTOFF) distribution
-                //So, the probability density is (1./(1./(*PROP_UPPER_CUTOFF-*PROP_CUTOFF))^(BASE_L-1))/BASE_L
-                let base_ln_density = ((BASE_L-1) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()-(BASE_L as f64).ln(); 
+                //There are BASE_L ways that we sample BASE_L-1 times from a U(*PROP_POS_REFLECTOR,*PROP_NEG_REFLECTOR) distribution
+                //So, the probability density is (1./(1./(*PROP_POS_REFLECTOR,*PROP_NEG_REFLECTOR))^(BASE_L-1))/BASE_L
+                let base_ln_density = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln(); 
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
             } else {
                 None
@@ -1398,9 +1418,8 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
-            let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq()); //A contracted motif will always exist in the sequence if the longer motif does
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = ((BASE_L-1) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()-(BASE_L as f64).ln(); 
+            let base_ln_density = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln(); 
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -1625,7 +1644,7 @@ impl<'a> MotifSet<'a> {
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {
-        let h: f64 = 1e-5;
+        let h: f64 = 1e-6;
 
         let num_motifs = self.set.len();
 
@@ -2310,7 +2329,7 @@ impl TruncatedLogNormal {
         if x < self.min || x > self.max {
             unreachable!("The height translation from hmc height seems to be going awry");
         } else {
-            self.d_ln_pdf(x)*(x-self.min)*(self.max-x)/(self.max-self.min)
+            self.d_ln_pdf(x)*(x-self.min)*(self.max-x)/(SPREAD_HMC_CONV*(self.max-self.min))
         }
 
     }
@@ -2500,7 +2519,7 @@ mod tester{
         let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave)};
         let mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
 
-        let h = 1e-5;
+        let h = 1e-6;
 
         println!("Mot \n {}", mot);
         println!("Mot_a \n {}", mot_a);
@@ -2553,7 +2572,7 @@ mod tester{
             let mut calc: f64 = (w2[i]-w1[i])/h;
             let mut ana: f64 = wc[i];
             println!("Wave checking {} in pos {}", BPS[bp], p);
-            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}, ratio: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer, Base::d_ln_prior_d_hmc(prop_bp));
+            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer);
             let ratio = ((prop_bp2-prop_bp)/h)/normalizer;
             println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
                                           unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
@@ -2585,11 +2604,10 @@ mod tester{
                 let mot_ref = if (i == 0) { &mot } else {&mot_a};
                 println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], mot_ref.d_height_prior_d_hmc());
             } else if i < ((BASE_L-1)*mot.len()+1) {
-                let bpr = Base::d_ln_prior_d_hmc(unsafe{mot.pwm()[pos[i-1]].rel_bind(bps[i-1])});
-                println!("{} {} {} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), bpr, bpr-(numerical_grad[i]-analytical_grad[i]));
+                println!("{} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
             } else {
                 println!("{} {}", pos_a[i-((BASE_L-1)*mot.len()+2)], bps_a[i-((BASE_L-1)*mot.len()+2)]);
-                println!("{} {} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), Base::d_ln_prior_d_hmc(unsafe{mot_a.pwm()[pos_a[i-((BASE_L-1)*mot.len()+2)]].rel_bind(bps_a[i-((BASE_L-1)*mot.len()+2)])}));
+                println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
             }
             //let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
             let success = ((numerical_grad[i]-analytical_grad[i]).abs() < 5e-2);
@@ -2776,7 +2794,7 @@ mod tester{
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 200;
-        let u8_per_block: usize = 435;
+        let u8_per_block: usize = 200;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -2923,7 +2941,7 @@ mod tester{
 
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
-        let actual_prior = birth_mot.set[l].height_prior()+birth_mot.set[l].pwm_prior(&sequence);
+        let actual_prior = birth_mot.set[l].height_prior()+birth_mot.set[l].pwm_gen_prob(&sequence);
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
        
@@ -2954,7 +2972,7 @@ mod tester{
 
         let should_prior = ln_prop-(death_mot.calc_ln_post());
 
-        let actual_prior = motif_set.set[l].height_prior()+motif_set.set[l].pwm_prior(&sequence);
+        let actual_prior = motif_set.set[l].height_prior()+motif_set.set[l].pwm_gen_prob(&sequence);
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
@@ -2995,7 +3013,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = ((BASE_L-1) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()-(BASE_L as f64).ln();
+        let actual_prior = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln();
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
@@ -3040,7 +3058,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = ((BASE_L-1) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()-(BASE_L as f64).ln();
+        let actual_prior = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln();
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
