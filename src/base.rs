@@ -37,8 +37,19 @@ use serde::de::{
 use serde_json::{Result as JsonResult, Value};
 use core::fmt::{Debug, Formatter};
 
+const SQRT_2: f64 = 1.41421356237;
+const SQRT_3: f64 = 1.73205080757;
+
+
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
+pub const SIMPLEX_VERTICES: [[f64; BASE_L]; (BASE_L-1)] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
+                                                           [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
+                                                           [1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
+pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  0.0            , -0.3, 0.3], 
+                                                         [-3.0*SQRT_2/20.,  SQRT_2*SQRT_3/4., -0.3, 0.3],
+                                                         [-3.0*SQRT_2/20., -SQRT_2*SQRT_3/4., -0.3, 0.3],
+                                                         [-3.0*SQRT_2/10.,  0.0            ,  0.9, 0.1]];
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
 const CLOSE: f64 = 1e-5;
@@ -62,7 +73,7 @@ const PROB_POS_PEAK: f64 = 0.9;
 
 pub const THRESH: f64 = 1e-3; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
-const SPREAD_HMC_CONV: f64 = 6.0;
+const SPREAD_HMC_CONV: f64 = 15.0;
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
@@ -73,7 +84,7 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 //CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off boundary values in HMC
 //before they can get infinite and thus unfixable.  
 //These numbers were empirically determined, not theoretically. 
-const REFLECTOR: f64 = 15.0;
+const REFLECTOR: f64 = 40.0;
 static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
 static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-9.0));
 
@@ -205,6 +216,31 @@ impl Base {
     pub fn as_probabilities(&self) -> [f64; BASE_L] {
         let magnitude: f64 = self.props.iter().sum();
         self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().expect("I'm never worried about error here because all Base are guarenteed to be length BASE_L")
+    }
+
+    pub fn as_simplex(&self) -> [f64; BASE_L-1] {
+        let probs = self.as_probabilities();
+
+        let simplex: [f64; BASE_L-1] = SIMPLEX_VERTICES.iter().map(|a| a.iter().zip(probs.iter()).map(|(&s, &b)| s*b).sum::<f64>())
+                                                       .collect::<Vec<f64>>().try_into().unwrap();
+
+        simplex
+
+    }
+
+    pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
+
+        let mut mod_simplex = simplex_coords.to_vec();
+        mod_simplex.push(1.0);
+
+        let probs: [f64; BASE_L] = INVERT_SIMPLEX.iter().map(|a| a.iter().zip(mod_simplex.iter()).map(|(&b, &c)| b*c).sum::<f64>()).collect::<Vec<_>>().try_into().unwrap();
+
+        let max = probs[Base::argmax(&probs)];
+
+        let b_form: [f64; BASE_L]  = probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
+
+        Base{props : b_form}
+
     }
     
     fn max( arr: &[f64]) -> f64 {
@@ -2467,6 +2503,20 @@ mod tester{
         }
         (bps, pos)
     }
+
+    #[test]
+    fn simplex_test() {
+        let mut rng = rand::thread_rng();
+        let b = Base::rand_new(&mut rng);
+
+        let simplex = b.as_simplex();
+        
+        let mod_b = Base::simplex_to_base(&simplex);
+
+        println!("{:?} {:?} {:?}", b, simplex, mod_b);
+
+    }
+
     #[test]
     fn gradient_test() {
 

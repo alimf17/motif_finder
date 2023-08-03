@@ -136,7 +136,7 @@ pub fn main() {
         ref_pwms.append(&mut (trace.ret_rand_motifs(ref_per_chain, &mut rng)));
     }
 
-    let cluster_per_chain: usize = min_len.min(250);
+    let cluster_per_chain: usize = min_len.min(2000);
 
     let motif_num_traces = SetTraceCollections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
@@ -168,7 +168,7 @@ pub fn main() {
         println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
         let mut num_good_motifs: usize = 0; 
         let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| {
-            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 0.5);
+            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.0);
             num_good_motifs+= set_extracts.len();
             set_extracts
         }).flatten().collect::<Vec<_>>(), 0.95);
