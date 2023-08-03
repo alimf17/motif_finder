@@ -201,13 +201,13 @@ impl Base {
 
     pub fn dist(&self, base: Option<&Base>) -> f64 {
 
-        let as_probs: [f64; BASE_L] = self.as_probabilities();
+        let as_simplex: [f64; BASE_L-1] = self.as_simplex();
         match(base) {
 
-            None => as_probs.iter().map(|a| (a-1.0/(BASE_L as f64)).powi(2)).sum::<f64>().sqrt(),
+            None => as_simplex.iter().map(|a| a.powi(2)).sum::<f64>().sqrt(),
             Some(other) => {
-                let other_probs = other.as_probabilities();
-                as_probs.iter().zip(other_probs).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt()
+                let other_simplex = other.as_simplex();
+                as_simplex.iter().zip(other_simplex).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt()
             }
         }
 
@@ -228,7 +228,10 @@ impl Base {
 
     }
 
-    pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
+    //This should never be publicly exposed, because it assumes an invariant that simplex_coords
+    //will always be inside of the tetrahedron. Failing to uphold this invariant will produce
+    //nonsense
+    fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
 
         let mut mod_simplex = simplex_coords.to_vec();
         mod_simplex.push(1.0);
@@ -2513,7 +2516,7 @@ mod tester{
         
         let mod_b = Base::simplex_to_base(&simplex);
 
-        println!("{:?} {:?} {:?}", b, simplex, mod_b);
+        println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist(None), b.dist(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
     }
 
