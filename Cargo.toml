@@ -28,6 +28,7 @@ argmin = "0.8.1"
 argmin-math = "0.3.0"
 kmedoids = "0.4.3"
 poloto = "2.17.0"
+plotters = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"

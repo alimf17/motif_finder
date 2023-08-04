@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use assume::assume;
 use rayon::prelude::*;
+use plotters::prelude::*;
+
 
 use log::warn;
 
@@ -46,6 +48,15 @@ pub const BASE_L: usize = BPS.len();
 pub const SIMPLEX_VERTICES: [[f64; BASE_L]; (BASE_L-1)] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
                                                            [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
                                                            [1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
+
+pub const SIMPLEX_VERTICES_POINTS :  [[f64; (BASE_L-1)]; BASE_L] = [[2.*SQRT_2/3. , 0.               ,  1.0/3.          ],
+                                                                    [ -SQRT_2/3.  , SQRT_2*SQRT_3/3. , -1.0/3.          ],
+                                                                    [ -SQRT_2/3.  ,-SQRT_2*SQRT_3/3. , -1.0/3.          ],
+                                                                    [0.0          , 0.0              , 1.0              ]];
+
+pub const SIMPLEX_ITERATOR: [&[f64; (BASE_L-1)]; ((BASE_L-1)*(BASE_L-1))] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
+                                                                            &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
+                                                                            &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[3], &SIMPLEX_VERTICES_POINTS[2]];
 pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  0.0            , -0.3, 0.3], 
                                                          [-3.0*SQRT_2/20.,  SQRT_2*SQRT_3/4., -0.3, 0.3],
                                                          [-3.0*SQRT_2/20., -SQRT_2*SQRT_3/4., -0.3, 0.3],
@@ -499,6 +510,41 @@ impl Motif {
 
     }
 
+
+    //Plot motif
+    //
+    pub fn display_tetrahedra(&self, file_name: &str) {
+
+        let num_rows = if (self.len() & 3 == 0) {(self.len()/4)} else{ self.len()/4 +1 } as u32; 
+
+        let plot = BitMapBackend::new(file_name, (1300, num_rows*300)).into_drawing_area();
+
+        plot.fill(&WHITE).unwrap();
+
+        let panels = plot.split_evenly((num_rows as usize, 4));
+
+        for (id, panel) in panels.into_iter().enumerate() {
+
+            if id < self.len(){
+                let mut chart = ChartBuilder::on(&panel).margin(10).caption(format!("Base {}", id).as_str(), ("serif", 20))
+                    .build_cartesian_3d(-1.0..1.0, -1.0..1.0, -0.33333333..1.0).unwrap();
+                chart.configure_axes().draw().unwrap();
+
+
+                //Draws the base tetrahedron
+                chart.draw_series(LineSeries::new(SIMPLEX_ITERATOR.map(|a| {let b = a.clone(); (b[0], b[1], b[2])}), &BLACK)).unwrap();
+
+                //Gets the base position
+                let pos: (f64, f64, f64) = match self.pwm[id].as_simplex() { [a,b,c] => (a,b,c) };
+
+                chart.draw_series([pos].into_iter().map(|p| Circle::new(p, 2, &BLUE))).unwrap();
+            }
+
+
+
+        }
+
+    }
 
     pub fn make_opposite(&self) -> Motif {
 
@@ -2518,6 +2564,10 @@ mod tester{
 
         println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist(None), b.dist(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
+        let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , 20., 5, &mut rng);
+
+        mot.display_tetrahedra("trial_tetra.png");
+        
     }
 
     #[test]
