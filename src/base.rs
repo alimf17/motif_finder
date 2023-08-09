@@ -260,7 +260,35 @@ impl Base {
         Base{props : b_form}
 
     }
-    
+
+    //This result is given in column major order
+    fn d_base_d_simplex(&self) -> [[f64; (BASE_L-1)]; (BASE_L-1)] {
+
+        let prob_base = self.as_probabilities();
+        let best_bp = self.best_base();
+        let mut bp_inds: Vec<usize> = (0..BASE_L).collect();
+        bp_inds.retain(|&b| b != best_bp);
+        let pmax: f64 = prob_base[best_bp];
+        let pmax_sq: f64 = pmax.powi(2);
+        let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
+
+        println!("pro {:?} ps {:?}", prob_base, ps);
+        let mut jacobian = [[0_f64; (BASE_L-1)]; (BASE_L-1)];
+        for k in 0..(BASE_L-1) {
+            let mut pstar = [ps[k]; BASE_L-1];
+            pstar[k] += pmax;
+            
+            for ti in 0..(BASE_L-1) {
+                let m_inv_vec = (0..BASE_L-1).map(|m| COL_PRIMARY_INVERT_SIMPLEX[ti][bp_inds[m]]);
+                println!("{:?} {:?}", pstar, m_inv_vec.clone().collect::<Vec<_>>());
+                jacobian[ti][k] = m_inv_vec.zip(pstar).map(|(a, b)| a*b).sum::<f64>()/pmax_sq;
+            }
+        }
+
+        jacobian
+
+    }
+
     fn max( arr: &[f64]) -> f64 {
         arr.iter().fold(f64::NAN, |x, y| x.max(*y))
     }
@@ -389,7 +417,9 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
     while let Some(push_vec) = end_push {
         (end_start, end_push) = wall_collide(end_start, push_vec);
         count += 1;
+        if count > 10 {println!("cc {} {}", count, push_vec.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());}
     }
+    println!("count: {}", count);
     end_start
 }
 
@@ -1106,7 +1136,7 @@ impl Motif {
         //let grad_raw_ptrs = (0..self.len()).map(|i| d_ad_like_d_grad_form.as_mut_ptr().add(i*(BASE_L-1)+1)).collect::<Vec<_>>();
 
         //(0..self.len()).into_par_iter().map(|i| {
-        d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+        let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
             //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
             let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
             
@@ -1128,18 +1158,14 @@ impl Motif {
 
             let mut like_grad_times_p_matrix = [0.0_f64; BASE_L-1];
 
+            let simplex_grad = self.pwm[i].d_base_d_simplex();
             for k in 0..(BASE_L-1) {
-                let mut pstar = ps.clone();
-                pstar[k] += pmax;
-                like_grad_times_p_matrix[k] = ln_like_grads.iter().zip(pstar).map(|(&a, b)| a*b).sum::<f64>()/pmax_sq;
-            }
 
-            for k in 0..(BASE_L-1) {
-                let m_inv_vec = bp_inds.iter().map(|&m| COL_PRIMARY_INVERT_SIMPLEX[bp_inds[k]][m]);
-                *grad_chunk.get_unchecked_mut(index_into[k]) = m_inv_vec.zip(like_grad_times_p_matrix.iter()).map(|(a, &b)| a*b).sum::<f64>();
+                *grad_chunk.get_unchecked_mut(index_into[k]) = ln_like_grads.iter().zip(simplex_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+                println!("grad {:?} lnn {:?}", grad_chunk, ln_like_grads); 
             }
            
-        });
+        }).collect::<Vec<_>>();
 
 
 
@@ -2601,6 +2627,20 @@ mod tester{
 
         println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist(None), b.dist(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
+        let jacob = b.d_base_d_simplex();
+
+        let b0 = b.add_in_hmc([1e-6, 0.0, 0.0]);
+        let b1 =  b.add_in_hmc([0.0, 1e-6, 0.0]);
+        let b2 =  b.add_in_hmc([0.0, 0.0, 1e-6]);
+
+        println!("{:?} {:?} {} {} {}", b.as_simplex(), b0.as_simplex(), b0.as_simplex()[0]-b.as_simplex()[0],  b0.as_simplex()[1]-b.as_simplex()[1],  b0.as_simplex()[2]-b.as_simplex()[2]);
+        println!("{:?} {:?} {} {} {}", b.as_simplex(), b1.as_simplex(), b1.as_simplex()[0]-b.as_simplex()[0],  b1.as_simplex()[1]-b.as_simplex()[1],  b1.as_simplex()[2]-b.as_simplex()[2]);
+        println!("{:?} {:?} {} {} {}", b.as_simplex(), b2.as_simplex(), b2.as_simplex()[0]-b.as_simplex()[0],  b2.as_simplex()[1]-b.as_simplex()[1],  b2.as_simplex()[2]-b.as_simplex()[2]);
+
+        println!("{:?}", jacob);
+        println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
+        b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
+
     }
 
     #[test]
@@ -2636,14 +2676,18 @@ mod tester{
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq(), wave.spacer(), &mut rng));
      
 
+        println!("CV");
         let analytical_grad = motif_set.gradient();
+        println!("AG");
         let numerical_grad = motif_set.numerical_gradient();
+        println!("NG");
 
         let b: Base = Base::new([0.1, 0.2, 0.3, 0.4]);
 
         let b2 = b.add_in_hmc([0.0; 3]);
 
-        let b3 = b.add_in_hmc([1.0, 0.0, 0.0]);
+        println!("2");
+        let b3 = b.add_in_hmc([0.0001, 0.0, 0.0]);
 
         println!("b {:?} b2 {:?} b3 {:?}", b, b2, b3);
 
