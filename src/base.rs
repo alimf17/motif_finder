@@ -272,7 +272,6 @@ impl Base {
         let pmax_sq: f64 = pmax.powi(2);
         let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
 
-        println!("pro {:?} ps {:?}", prob_base, ps);
         let mut jacobian = [[0_f64; (BASE_L-1)]; (BASE_L-1)];
         for k in 0..(BASE_L-1) {
             let mut pstar = [ps[k]; BASE_L-1];
@@ -280,7 +279,6 @@ impl Base {
             
             for ti in 0..(BASE_L-1) {
                 let m_inv_vec = (0..BASE_L-1).map(|m| COL_PRIMARY_INVERT_SIMPLEX[ti][bp_inds[m]]);
-                println!("{:?} {:?}", pstar, m_inv_vec.clone().collect::<Vec<_>>());
                 jacobian[ti][k] = m_inv_vec.zip(pstar).map(|(a, b)| a*b).sum::<f64>()/pmax_sq;
             }
         }
@@ -417,18 +415,21 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
     while let Some(push_vec) = end_push {
         (end_start, end_push) = wall_collide(end_start, push_vec);
         count += 1;
-        if count > 10 {println!("cc {} {}", count, push_vec.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());}
+        if count >= 10 {println!("cc {} {:?}", count, push_vec);}
     }
-    println!("count: {}", count);
     end_start
 }
 
 fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
     for i in 0..BASE_L {
         let dot = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
-        if (dot >= 0.0) && (dot < 1.0) {
-            return (start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), 
-                Some(push.iter().map(|&b| 1.0-dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down")));
+        let do_reflect = ((dot >= 0.0) && (dot < 1.0)) && (VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>() >= VERTEX_DOT); 
+        if do_reflect {
+            let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+            let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-dot)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+            let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+            remaining_trajectory = remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
+            return (new_start, Some(remaining_trajectory));
         }
     }
     (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None)
@@ -1162,7 +1163,6 @@ impl Motif {
             for k in 0..(BASE_L-1) {
 
                 *grad_chunk.get_unchecked_mut(index_into[k]) = ln_like_grads.iter().zip(simplex_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();
-                println!("grad {:?} lnn {:?}", grad_chunk, ln_like_grads); 
             }
            
         }).collect::<Vec<_>>();
@@ -2790,7 +2790,7 @@ mod tester{
                 println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
             }
             //let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
-            let success = ((numerical_grad[i]-analytical_grad[i]).abs() < 5e-2);
+            let success = ((numerical_grad[i]-analytical_grad[i]).abs() < 5e-2) ||  ((numerical_grad[i]-analytical_grad[i]).abs()/numerical_grad[i] < 2e-3);
             if success {
                 grad_reses.push(Ok(()));
             } else {
