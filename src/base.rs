@@ -43,9 +43,14 @@ const SQRT_3: f64 = 1.73205080757;
 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
+
+pub const VERTICES: [[f64; BASE_L-1]; (BASE_L)] = [[2.*SQRT_2/3., 0., 1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
+
+//This MUST be the transpose of VERTICES
 pub const SIMPLEX_VERTICES: [[f64; BASE_L]; (BASE_L-1)] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
                                                            [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
                                                            [1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
+
 pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  0.0            , -0.3, 0.3], 
                                                          [-3.0*SQRT_2/20.,  SQRT_2*SQRT_3/4., -0.3, 0.3],
                                                          [-3.0*SQRT_2/20., -SQRT_2*SQRT_3/4., -0.3, 0.3],
@@ -57,6 +62,8 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.
                                                                  [ 0.0           , SQRT_2*SQRT_3/4., -SQRT_2*SQRT_3/4.,   0.0          ],
                                                                  [ -0.3          ,  -0.3           ,  -0.3            ,   0.9          ],
                                                                  [  0.3          ,   0.3           ,   0.3            ,   0.1          ]];
+
+pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
 
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
@@ -277,6 +284,7 @@ impl Base {
     
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
 
+        /*
         let best = Self::argmax(&self.props);
 
         let mut new_props = self.props.clone();
@@ -300,8 +308,10 @@ impl Base {
         }
 
         Base {props: new_props}
+        */
 
-
+       let tetra = self.as_simplex();
+       Base::simplex_to_base(&reflect_tetra(tetra, addend))
 
     }
 
@@ -370,6 +380,31 @@ fn reflect(a: f64) -> f64 {
     -reflect_cond*2.0*REFLECTOR*a_sign*a.signum()+a_sign*a
     
 }
+
+//Note that arrays of Copy are themselves Copy
+fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
+    let mut end_start = start;
+    let mut end_push = Some(push);
+    let mut count: usize = 0;
+    while let Some(push_vec) = end_push {
+        (end_start, end_push) = wall_collide(end_start, push_vec);
+        count += 1;
+    }
+    end_start
+}
+
+fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
+    for i in 0..BASE_L {
+        let dot = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
+        if (dot >= 0.0) && (dot < 1.0) {
+            return (start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), 
+                Some(push.iter().map(|&b| 1.0-dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down")));
+        }
+    }
+    (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None)
+}
+
+
 
 
 
