@@ -50,6 +50,14 @@ pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  0.0     
                                                          [-3.0*SQRT_2/20.,  SQRT_2*SQRT_3/4., -0.3, 0.3],
                                                          [-3.0*SQRT_2/20., -SQRT_2*SQRT_3/4., -0.3, 0.3],
                                                          [-3.0*SQRT_2/10.,  0.0            ,  0.9, 0.1]];
+
+
+//Obviously, this should always be the transpose of INVERT_SIMPLEX. I'm just not good enough at compile time code to make it happen automatically
+pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  -3.0*SQRT_2/20., -3.0*SQRT_2/20.  , -3.0*SQRT_2/10.], 
+                                                                 [ 0.0           , SQRT_2*SQRT_3/4., -SQRT_2*SQRT_3/4.,   0.0          ],
+                                                                 [ -0.3          ,  -0.3           ,  -0.3            ,   0.9          ],
+                                                                 [  0.3          ,   0.3           ,   0.3            ,   0.1          ]];
+
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
 const CLOSE: f64 = 1e-5;
@@ -1033,7 +1041,7 @@ impl Motif {
         let n = 1+self.len()*(BASE_L-1);
 
 
-        let d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
+        let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
             if i == 0 {
                 let d_noise_d_h = self.no_height_waveform_from_binds(&binds, DATA)
                                                .account_auto(background);
@@ -1053,12 +1061,52 @@ impl Motif {
                 let result =
                       (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
                                .account_auto(background))
-                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp)
+                      * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                       ;
 
                 result
             }
         }).collect();
+
+        //let grad_raw_ptrs = (0..self.len()).map(|i| d_ad_like_d_grad_form.as_mut_ptr().add(i*(BASE_L-1)+1)).collect::<Vec<_>>();
+
+        //(0..self.len()).into_par_iter().map(|i| {
+        d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+            //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
+            let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
+            
+            //let mut_gradient_ptr = d_ad_like_d_grad_form as *mut f64;  //We need to be EXTREMELY careful. The variable index_into is covering our behinds against UB
+                                                                       //We technically have multiple mutable pointers pointing at the beginning of our vector, but
+                                                                       //it's fine. We only ever read or write to data that this one slice is using.
+                                                                       //SAFETY RELIES ON INDEX_INTO BEING IMPLEMENTED CORRECTLY. IF ANY TWO INDEX_INTO's OVERLAP, 
+                                                                       //IT IS AN IMMEDIATE DATA RACE AND THEREFORE UNDEFINED BEHAVIOR.
+            let best_bp = self.pwm[i].best_base();
+            let mut bp_inds: Vec<usize> = (0..BASE_L).collect();
+            bp_inds.retain(|&b| b != best_bp);
+            
+            let prob_base = self.pwm[i].as_probabilities();
+            let pmax: f64 = prob_base[best_bp];
+            let pmax_sq: f64 = pmax.powi(2);
+            let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
+ 
+            let ln_like_grads: [f64; BASE_L-1] = index_into.iter().map(|&k| *grad_chunk.get_unchecked(k)).collect::<Vec<_>>().try_into().unwrap();
+
+            let mut like_grad_times_p_matrix = [0.0_f64; BASE_L-1];
+
+            for k in 0..(BASE_L-1) {
+                let mut pstar = ps.clone();
+                pstar[k] += pmax;
+                like_grad_times_p_matrix[k] = ln_like_grads.iter().zip(pstar).map(|(&a, b)| a*b).sum::<f64>()/pmax_sq;
+            }
+
+            for k in 0..(BASE_L-1) {
+                let m_inv_vec = bp_inds.iter().map(|&m| COL_PRIMARY_INVERT_SIMPLEX[bp_inds[k]][m]);
+                *grad_chunk.get_unchecked_mut(index_into[k]) = m_inv_vec.zip(like_grad_times_p_matrix.iter()).map(|(a, &b)| a*b).sum::<f64>();
+            }
+           
+        });
+
+
 
             
         d_ad_like_d_grad_form
