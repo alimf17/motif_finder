@@ -323,6 +323,31 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
 
 }
 
+
+//This is ONLY valid if BASE_L = 4 and if the base vertices are as I've set them.
+//I'd set a cfg about it if it would work, but it doesn't so just don't 
+//think you're smarter than me about my own project.
+fn create_tetrahedral_traces(tetra_bases: &Vec<[f64;BASE_L-1]>) -> [Vec<[f64; 2]>; BASE_L] {
+ 
+    [tetra_bases.iter().map(|b| turn_to_no_A(b)).collect(), 
+     tetra_bases.iter().map(|b| turn_to_no_C(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_G(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_T(b)).collect()]
+}
+
+fn turn_to_no_A(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
+    [-tetra_base[0]/3.-2.*SQRT_2*tetra_base[2]/3.-2.*SQRT_2/3., tetra_base[1]]
+}
+fn turn_to_no_C(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
+    [2.*tetra_base[0]/3.+tetra_base[1]/SQRT_3+SQRT_2*tetra_base[2]/3.+SQRT_2/3., +tetra_base[0]/SQRT_3-SQRT_2*tetra_base[2]/SQRT_3-SQRT_2/SQRT_3]
+}
+fn turn_to_no_G(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
+    [2.*tetra_base[0]/3.-tetra_base[1]/SQRT_3+SQRT_2*tetra_base[2]/3.+SQRT_2/3., -tetra_base[0]/SQRT_3+SQRT_2*tetra_base[2]/SQRT_3+SQRT_2/SQRT_3]
+}
+fn turn_to_no_T(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
+    [tetra_base[0], tetra_base[1]]
+}
+
 #[cfg(test)]
 mod tests {
 
