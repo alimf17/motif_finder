@@ -10,6 +10,7 @@ use regex::Regex;
 use poloto;
 use std::fs::File;
 
+use motif_finder::base::{SQRT_2, SQRT_3};
 
 const UPPER_LETTERS: [char; 26] = [
     'A', 'B', 'C', 'D', 'E',
@@ -339,7 +340,7 @@ fn turn_to_no_A(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
     [-tetra_base[0]/3.-2.*SQRT_2*tetra_base[2]/3.-2.*SQRT_2/3., tetra_base[1]]
 }
 fn turn_to_no_C(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
-    [2.*tetra_base[0]/3.+tetra_base[1]/SQRT_3+SQRT_2*tetra_base[2]/3.+SQRT_2/3., +tetra_base[0]/SQRT_3-SQRT_2*tetra_base[2]/SQRT_3-SQRT_2/SQRT_3]
+    [2.*tetra_base[0]/3.+tetra_base[1]/SQRT_3+SQRT_2*tetra_base[2]/3.+SQRT_2/3.,  tetra_base[0]/SQRT_3-SQRT_2*tetra_base[2]/SQRT_3-SQRT_2/SQRT_3]
 }
 fn turn_to_no_G(tetra_base: &[f64;BASE_L-1]) -> [f64;2] {
     [2.*tetra_base[0]/3.-tetra_base[1]/SQRT_3+SQRT_2*tetra_base[2]/3.+SQRT_2/3., -tetra_base[0]/SQRT_3+SQRT_2*tetra_base[2]/SQRT_3+SQRT_2/SQRT_3]

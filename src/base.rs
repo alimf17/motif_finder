@@ -37,8 +37,8 @@ use serde::de::{
 use serde_json::{Result as JsonResult, Value};
 use core::fmt::{Debug, Formatter};
 
-const SQRT_2: f64 = 1.41421356237;
-const SQRT_3: f64 = 1.73205080757;
+pub const SQRT_2: f64 = 1.41421356237;
+pub const SQRT_3: f64 = 1.73205080757;
 
 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
