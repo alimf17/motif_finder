@@ -9,7 +9,8 @@ use motif_finder::base::*;
 use regex::Regex;
 use poloto;
 use std::fs::File;
-
+use plotters::prelude::*;
+use plotters::prelude::full_palette::*;
 
 const UPPER_LETTERS: [char; 26] = [
     'A', 'B', 'C', 'D', 'E',
@@ -17,6 +18,15 @@ const UPPER_LETTERS: [char; 26] = [
     'K', 'L', 'M', 'N', 'O',
     'P', 'Q', 'R', 'S', 'T',
     'U', 'V', 'W', 'X', 'Y', 'Z'];
+
+
+const PALETTE: [&RGBColor; 26] = [
+    &full_palette::RED, &full_palette::BLUE, &full_palette::GREEN, &YELLOW_700,
+    &AMBER, &BLUEGREY, &full_palette::CYAN,  &ORANGE, 
+    &PINK, &TEAL, &LIME, &full_palette::YELLOW, 
+    &DEEPORANGE, &INDIGO, &CYAN_A700, &YELLOW_A700,
+    &BROWN, &BLUEGREY_A700, &LIME_A700, &YELLOW_800, 
+    &RED_A700, &BLUE_A700, &GREEN_A700, &YELLOW_A700, &GREY, &full_palette::BLACK];
 
 pub fn main() {
 
@@ -167,11 +177,14 @@ pub fn main() {
         println!("Medoid {}: \n {:?}", i, medoid);
         println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
         let mut num_good_motifs: usize = 0; 
-        let cis = create_credible_intervals(SetTraceCollections.iter().map(|a| {
+        let mut good_motifs_count: Vec<usize> = vec![0];
+        let trace_scoop = SetTraceCollections.iter().enumerate().map(|(m, a)| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.0);
             num_good_motifs+= set_extracts.len();
+            good_motifs_count.push(num_good_motifs);
             set_extracts
-        }).flatten().collect::<Vec<_>>(), 0.95);
+        }).flatten().collect::<Vec<_>>();
+        let cis = create_credible_intervals(trace_scoop, 0.95, good_motifs_count, format!("{}/{}_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
         println!("Number motifs near medoid: {}", num_good_motifs);
         println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
         println!("Posterior mean: \n {:?}", cis[1]);
@@ -238,7 +251,7 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
 //need anymore as much as humanly possible.
-pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, credible: f64) -> [Array2<f64>; 3] {
+pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, credible: f64, good_motifs_count: Vec<usize>, file_name: &str) -> [Array2<f64>; 3] {
 
     if credible <= 0.0 {
         panic!("Can't make credible intervals of literally at most zero length!");
@@ -292,8 +305,32 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
     let mut means = Array2::<f64>::zeros([num_bases, BASE_L]);
     let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
     let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
+        
+    let num_rows = if (num_bases & 3 == 0) {(num_bases/4)} else{ num_bases/4 +1 } as u32; 
+
+    let plot = BitMapBackend::new(file_name, (1300, num_rows*300)).into_drawing_area();
+
+    plot.fill(&full_palette::WHITE).unwrap();
+
+    let panels = plot.split_evenly((num_rows as usize, 4));
 
     for j in 0..num_bases {
+        
+
+        let mut chart = ChartBuilder::on(&(panels[j])).margin(10).caption(format!("Base {}", j).as_str(), ("serif", 20))
+            .build_cartesian_3d(-1.0..1.0, -1.0..1.0, -0.33333333..1.0).unwrap();
+        chart.configure_axes().draw().unwrap();
+
+
+        //Draws the base tetrahedron
+        chart.draw_series(LineSeries::new(SIMPLEX_ITERATOR.map(|a| {let b = a.clone(); (b[0], b[1], b[2])}), &full_palette::BLACK)).unwrap();
+
+        for m in 0..(good_motifs_count.len()-1){
+            if good_motifs_count[m] < good_motifs_count[m+1] {
+            chart.draw_series(LineSeries::new(((good_motifs_count[m])..(good_motifs_count[m+1])).map(|k| Base::prob_slice_to_simplex(&samples.slice(s![k, j, ..]).to_vec().try_into().unwrap())), PALETTE[m])).unwrap();
+            } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
+        }
+        
         for i in 0..BASE_L {
 
             let mut data = samples.slice(s![..,j, i]).clone().to_vec();

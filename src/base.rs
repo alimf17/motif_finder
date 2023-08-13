@@ -232,11 +232,18 @@ impl Base {
     pub fn as_simplex(&self) -> [f64; BASE_L-1] {
         let probs = self.as_probabilities();
 
-        let simplex: [f64; BASE_L-1] = SIMPLEX_VERTICES.iter().map(|a| a.iter().zip(probs.iter()).map(|(&s, &b)| s*b).sum::<f64>())
+        let simplex: [f64; BASE_L-1] = SIMPLEX_VERTICES.iter().map(|a| {a.iter().zip(probs.iter()).map(|(&s, &b)| s*b).sum::<f64>()})
                                                        .collect::<Vec<f64>>().try_into().unwrap();
 
         simplex
 
+    }
+
+    pub fn prob_slice_to_simplex(probs: &[f64; BASE_L]) -> (f64, f64, f64) {
+        let simplex: [f64; (BASE_L-1)] = SIMPLEX_VERTICES.iter().map(|a| a.iter().zip(probs.iter()).map(|(&s, &b)| s*b).sum::<f64>())
+                                                       .collect::<Vec<f64>>().try_into().unwrap();
+
+        match simplex { [a,b,c] => (a, b, c) }
     }
 
     //This should never be publicly exposed, because it assumes an invariant that simplex_coords
