@@ -12,6 +12,9 @@ use std::fs::File;
 use plotters::prelude::*;
 use plotters::prelude::full_palette::*;
 
+use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+use motif_finder::base::{SQRT_2, SQRT_3};
+
 const UPPER_LETTERS: [char; 26] = [
     'A', 'B', 'C', 'D', 'E',
     'F', 'G', 'H', 'I', 'J', 
@@ -110,7 +113,19 @@ pub fn main() {
     let mut plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in SetTraceCollections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_post.line(format!("Chain {}", letter), trace.ln_posterior_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        let tracey = trace.ln_posterior_trace();
+        let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
+        let mut samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
+        let pow_samples = samples.len().ilog2() + 1;
+        let trace_min = samples.iter().min_by(|a, b| a.total_cmp(b));
+        let res = samples_fft_to_spectrum(
+        &samples[0..16384],
+        samples.len() as u32,
+        FrequencyLimit::All,
+        None,).unwrap();
+        let daaa = res.data().iter().map(|(a, b)| (a.val(), b.val().powi(2)/(4.0*16384.))).collect::<Vec<_>>();
+        //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());
+        plot_post.line(format!("Chain {}", letter), tracey.into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
@@ -179,12 +194,17 @@ pub fn main() {
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let trace_scoop = SetTraceCollections.iter().enumerate().map(|(m, a)| {
-            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 1.0);
+            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 3.0);
             num_good_motifs+= set_extracts.len();
             good_motifs_count.push(num_good_motifs);
             set_extracts
         }).flatten().collect::<Vec<_>>();
-        let cis = create_credible_intervals(trace_scoop, 0.95, good_motifs_count, format!("{}/{}_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
+        let pwm_traces = create_offset_traces(trace_scoop);
+        graph_tetrahedral_traces(&pwm_traces, &good_motifs_count, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
+        println!("tetrad");
+        let cis = create_credible_intervals(&pwm_traces, 0.95, &good_motifs_count);
+
+
         println!("Number motifs near medoid: {}", num_good_motifs);
         println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
         println!("Posterior mean: \n {:?}", cis[1]);
@@ -248,23 +268,13 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 
 }
 
-//We want to eat best_motifs so that we can save on memory
-//You'll notice that this entire function is designed to drop memory I don't
-//need anymore as much as humanly possible.
-pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, credible: f64, good_motifs_count: Vec<usize>, file_name: &str) -> [Array2<f64>; 3] {
 
-    if credible <= 0.0 {
-        panic!("Can't make credible intervals of literally at most zero length!");
-    } else if credible >= 1.0 {
-        warn!("Will make credible intervals out of literally all of the data!");
-    }
+pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Array3<f64> {
 
-    let num_samples = best_motifs.len();
-    let credible = credible.min(1.0);
-    let num_interval = ((num_samples as f64)*credible).floor() as usize;
     let mut min_offset: isize = isize::MAX;
     let mut max_offset_plus_len: isize = isize::MIN;
 
+    let num_samples = best_motifs.len();
     let pwms_offsets = best_motifs.into_iter()
                                   .map(|(a, (_, b, c))| {
                                       min_offset = min_offset.min(b);
@@ -272,43 +282,49 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
                                       (if c {a.rev_complement()} else {a.pwm()}, b)
                                   }).collect::<Vec<(Vec<Base>, isize)>>();
 
-    let neutral: f64 = 1.0/(BASE_L as f64);
+    let neutral: f64 = 0.0;
 
     let num_bases = (max_offset_plus_len-min_offset) as usize;
 
 
-    let mut samples = Array3::<f64>::zeros([num_samples, num_bases, BASE_L]);
+    let mut samples = Array3::<f64>::zeros([num_samples, num_bases, BASE_L-1]);
 
+    println!("arr size {} {} {}", num_samples, num_bases, BASE_L-1);
     for (k, (pwm, offset)) in pwms_offsets.into_iter().enumerate() {
-        
-        for j in 0..num_bases { 
+
+        for j in 0..num_bases {
 
             //let mut slice = samples.slice_mut(s![k,j,..]);  //I went with this because it's the fastest possible assignment.
-                                                            //It will slow down calculations of credible intervals and means, 
-                                                            //But I do that once, not 10s of thousands of times. I did not 
+                                                            //It will slow down calculations of credible intervals and means,
+                                                            //But I do that once, not 10s of thousands of times. I did not
                                                             //benchmark this, though
 
             let ind = (j as isize)-(offset-min_offset);
 
 
             if ind < 0 || ind >= (pwm.len() as isize) {
-                for i in 0..BASE_L {samples[[k,j,i]] = neutral;}
+                for i in 0..(BASE_L-1) {samples[[k,j,i]] = neutral;}
             } else {
                 let ind = ind as usize;
-                let probs = pwm[ind].as_probabilities();
-                for i in 0..BASE_L {samples[[k,j,i]] = probs[i];}
+                let probs = pwm[ind].as_simplex();
+                for i in 0..(BASE_L-1) {samples[[k,j,i]] = probs[i];}
             }
         }
 
     }
-    
-    let mut means = Array2::<f64>::zeros([num_bases, BASE_L]);
-    let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
-    let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L]);
-        
+
+    samples
+
+}
+
+pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, file_name: &str){
+
+    let (num_samples, num_bases, _) = samples.dim();
+    println!("{:?} {} s", good_motifs_count, num_samples); 
+
     let num_rows = if (num_bases & 3 == 0) {(num_bases/4)} else{ num_bases/4 +1 } as u32; 
 
-    let plot = BitMapBackend::new(file_name, (1300, num_rows*300)).into_drawing_area();
+    let plot = BitMapBackend::new(file_name, (2600, num_rows*600)).into_drawing_area();
 
     plot.fill(&full_palette::WHITE).unwrap();
 
@@ -318,20 +334,83 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
         
 
         let mut chart = ChartBuilder::on(&(panels[j])).margin(10).caption(format!("Base {}", j).as_str(), ("serif", 20))
-            .build_cartesian_3d(-1.0..1.0, -1.0..1.0, -0.33333333..1.0).unwrap();
-        chart.configure_axes().draw().unwrap();
+            .build_cartesian_2d(-(4.0*SQRT_2/3.)..(2.0*SQRT_2/3.), -(2.*SQRT_2*SQRT_3/3.)..(2.*SQRT_2*SQRT_3/3.)).unwrap();
+        chart.configure_mesh().draw().unwrap();
 
 
-        //Draws the base tetrahedron
-        chart.draw_series(LineSeries::new(SIMPLEX_ITERATOR.map(|a| {let b = a.clone(); (b[0], b[1], b[2])}), &full_palette::BLACK)).unwrap();
+        //Draws the base tetrahedra
 
+        let base_tetras = create_tetrahedral_traces(&SIMPLEX_ITERATOR.iter().map(|&[a,b,c]| (*a,*b,*c)).collect::<Vec<_>>());
+
+
+        for face in base_tetras.iter() {
+            chart.draw_series(LineSeries::new(face.iter().map(|&a| a), &full_palette::BLACK)).unwrap();
+        }
+
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[0]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::RED).filled(), &|coord, size, style| {
+            EmptyElement::at(coord)
+                + Circle::new((0, 0), size, style)
+                + Text::new(format!("A"), (0, 15), ("sans-serif", 15))
+        })).unwrap();
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[1]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&YELLOW_700).filled(), &|coord, size, style| {
+            EmptyElement::at(coord)
+                + Circle::new((0, 0), size, style)
+                + Text::new(format!("C"), (0, 15), ("sans-serif", 15))
+        })).unwrap();
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[2]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::GREEN).filled(), &|coord, size, style| {
+            EmptyElement::at(coord)
+                + Circle::new((0, 0), size, style)
+                + Text::new(format!("G"), (0, 15), ("sans-serif", 15))
+
+        })).unwrap();
+        chart.draw_series(PointSeries::of_element(create_tetrahedral_traces(&vec![(SIMPLEX_VERTICES_POINTS[3][0], SIMPLEX_VERTICES_POINTS[3][1], SIMPLEX_VERTICES_POINTS[3][2])]).into_iter().take(3).map(|a| a).flatten(), 5, ShapeStyle::from(&full_palette::BLUE).filled(), &|coord, size, style| {
+            EmptyElement::at(coord)
+                + Circle::new((0, 0), size, style)
+                + Text::new("T", (0, 15), ("sans-serif", 15))
+        })).unwrap();
+        
+        
         for m in 0..(good_motifs_count.len()-1){
+                println!("GMC {}", good_motifs_count[m]);
             if good_motifs_count[m] < good_motifs_count[m+1] {
-            chart.draw_series(LineSeries::new(((good_motifs_count[m])..(good_motifs_count[m+1])).map(|k| Base::prob_slice_to_simplex(&samples.slice(s![k, j, ..]).to_vec().try_into().unwrap())), PALETTE[m])).unwrap();
+
+                let slice_bases: Vec<(f64, f64, f64)> = ((good_motifs_count[m])..(good_motifs_count[m+1])).map(|k| (samples[[k,j,0]], samples[[k,j,1]], samples[[k,j,2]]) ).collect::<Vec<_>>();
+
+                let tetra_traces = create_tetrahedral_traces(&slice_bases);
+
+            
+                for little_trace in tetra_traces.iter() {
+                    chart.draw_series(LineSeries::new((little_trace.iter().step_by(100).map(|&a| a)), PALETTE[m])).unwrap();
+                }
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
+
+    }
+}
+
+
+//We want to eat best_motifs so that we can save on memory
+//You'll notice that this entire function is designed to drop memory I don't
+//need anymore as much as humanly possible.
+pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_motifs_count: &Vec<usize>) -> [Array2<f64>; 3] {
+
+    if credible <= 0.0 {
+        panic!("Can't make credible intervals of literally at most zero length!");
+    } else if credible >= 1.0 {
+        warn!("Will make credible intervals out of literally all of the data!");
+    }
+
+    let (num_samples, num_bases, _) = samples.dim();
+    let credible = credible.min(1.0);
+    let num_interval = ((num_samples as f64)*credible).floor() as usize;
+    
+    let mut means = Array2::<f64>::zeros([num_bases, BASE_L-1]);
+    let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
+    let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
         
-        for i in 0..BASE_L {
+        
+    for j in 0..num_bases {
+        for i in 0..(BASE_L-1) {
 
             let mut data = samples.slice(s![..,j, i]).clone().to_vec();
             data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
@@ -358,6 +437,31 @@ pub fn create_credible_intervals(best_motifs: Vec<(Motif, (f64, isize, bool))>, 
 
     [lower_ci, means, upper_ci]
 
+}
+
+
+//This is ONLY valid if BASE_L = 4 and if the base vertices are as I've set them.
+//I'd set a cfg about it if it would work, but it doesn't so just don't 
+//think you're smarter than me about my own project.
+fn create_tetrahedral_traces(tetra_bases: &Vec<(f64, f64, f64)>) -> [Vec<(f64, f64)>; BASE_L] {
+ 
+    [tetra_bases.iter().map(|b| turn_to_no_A(b)).collect(), 
+     tetra_bases.iter().map(|b| turn_to_no_C(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_G(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_T(b)).collect()]
+}
+
+fn turn_to_no_A(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+    (-tetra_base.0/3.-2.*SQRT_2*tetra_base.2/3.-2.*SQRT_2/3., tetra_base.1)
+}
+fn turn_to_no_C(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+    (2.*tetra_base.0/3.+tetra_base.1/SQRT_3+SQRT_2*tetra_base.2/3.+SQRT_2/3.,  tetra_base.0/SQRT_3-SQRT_2*tetra_base.2/SQRT_3-SQRT_2/SQRT_3)
+}
+fn turn_to_no_G(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+    (2.*tetra_base.0/3.-tetra_base.1/SQRT_3+SQRT_2*tetra_base.2/3.+SQRT_2/3., -tetra_base.0/SQRT_3+SQRT_2*tetra_base.2/SQRT_3+SQRT_2/SQRT_3)
+}
+fn turn_to_no_T(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+    (tetra_base.0, tetra_base.1)
 }
 
 #[cfg(test)]
