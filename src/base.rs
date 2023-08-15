@@ -46,6 +46,8 @@ pub const SQRT_3: f64 = 1.73205080757;
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
 
+pub const BASE_PRIOR_DENS: f64 = 1./6.; //Set to 1/Gamma(BASE_L)
+
 pub const VERTICES: [[f64; BASE_L-1]; (BASE_L)] = [[2.*SQRT_2/3., 0., 1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
 
 //This MUST be the transpose of VERTICES
@@ -110,13 +112,6 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 //before they can get infinite and thus unfixable.  
 //These numbers were empirically determined, not theoretically. 
 const REFLECTOR: f64 = 40.0;
-static PROP_CUTOFF: Lazy<f64> = Lazy::new(|| THRESH); 
-static PROP_UPPER_CUTOFF: Lazy<f64> = Lazy::new(|| 1.0-2.0_f64.powf(-9.0));
-
-static PROP_POS_REFLECTOR: Lazy<f64> = Lazy::new(|| Base::hmc_to_prop(REFLECTOR)); 
-static PROP_NEG_REFLECTOR: Lazy<f64> = Lazy::new(|| Base::hmc_to_prop(-REFLECTOR)); 
-
-static BASE_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(1.0).unwrap());
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
@@ -159,13 +154,7 @@ impl Base {
        
 
         for i in 0..props.len() {
-            if i == max_ind {
-                props[i] = 1.0;
-            } else {
-                props[i] = (props[i]/max)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR)+*PROP_NEG_REFLECTOR; //The prior is a bit broader than what we actually allow
-                                                                                                         //This is for numerical reasons
-                                                                                                
-            }
+                props[i] = (props[i]/max);
         }
 
 
@@ -178,20 +167,24 @@ impl Base {
     pub fn rand_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
 
+        let mut samps = vec![0.0_f64; BASE_L+1];
+        samps[BASE_L] = 1.0;
+
         let mut att: [f64; BASE_L] = [0.0; BASE_L];
 
-        for i in 0..att.len() {
-            att[i] = rng.gen();
+        for i in 1..(samps.len()-1) {
+            samps[i] = rng.gen();
         }
 
-        let max_ind = rng.gen_range(0..BASE_L);
-
+        samps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        
+        let mut max_p = 0.0_f64;
         for i in 0..att.len() {
-            if i == max_ind {
-                att[i] = 1.0;
-            } else {
-                att[i] =  (att[i])*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR)+*PROP_NEG_REFLECTOR;;
-            }
+            att[i] = samps[i+1]-samps[i];
+            max_p = max_p.max(att[i]);
+        }
+        for i in 0..att.len() {
+            att[i] /=max_p;
         }
 
         Base { props: att}
@@ -327,52 +320,9 @@ impl Base {
     
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
 
-        /*
-        let best = Self::argmax(&self.props);
-
-        let mut new_props = self.props.clone();
-
-        let mut ind: usize = 0;
-
-        for i in 0..self.props.len() {
-            if i == best {
-                new_props[i] = 1.0;
-            } else if addend[ind] != 0.0 {
-                let mut dg =  Self::prop_to_hmc(self.props[i]);
-                dg += addend[ind];
-                dg = reflect(dg);
-                dg = Self::hmc_to_prop(dg);
-                new_props[i] = dg;
-                ind += 1;
-            } else {
-                ind += 1;
-            }
-
-        }
-
-        Base {props: new_props}
-        */
-
        let tetra = self.as_simplex();
        Base::simplex_to_base(&reflect_tetra(tetra, addend))
 
-    }
-
-    fn prop_to_hmc(p: f64) -> f64 {
-        
-        let r = (p-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
-        SPREAD_HMC_CONV*(r.ln()-(-r).ln_1p())
-
-    }
-
-    fn hmc_to_prop(m: f64) -> f64 {
-        //This particular order of operations ensures that we map infinities correctly
-        *PROP_CUTOFF+((*PROP_UPPER_CUTOFF-*PROP_CUTOFF)/(1.0+(-m/SPREAD_HMC_CONV).exp()))
-    }
-
-    fn d_prop_d_hmc(p: f64) -> f64 {
-
-        (p-*PROP_CUTOFF)*(*PROP_UPPER_CUTOFF-p)/(SPREAD_HMC_CONV*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF))
     }
 
 
@@ -432,7 +382,7 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
     while let Some(push_vec) = end_push {
         (end_start, end_push) = wall_collide(end_start, push_vec);
         count += 1;
-        if count >= 10 {println!("cc {} {:?}", count, push_vec);}
+    {println!("cc {} {:?}", count, push_vec);}
     }
     end_start
 }
@@ -440,8 +390,11 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
 fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
     for i in 0..BASE_L {
         let dot = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
-        let do_reflect = ((dot >= 0.0) && (dot < 1.0)) && (VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>() >= VERTEX_DOT); 
+        let dotext = VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>();
+        println!("SSD {} {}", dot, dotext);
+        let do_reflect = ((dot >= 0.0) && (dot < 1.0)) && (dotext < VERTEX_DOT); 
         if do_reflect {
+            println!("refE");
             let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
             let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-dot)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
             let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
@@ -591,41 +544,6 @@ impl Motif {
     }
 
 
-    //Plot motif
-    //
-    pub fn display_tetrahedra(&self, file_name: &str) {
-
-        let num_rows = if (self.len() & 3 == 0) {(self.len()/4)} else{ self.len()/4 +1 } as u32; 
-
-        let plot = BitMapBackend::new(file_name, (1300, num_rows*300)).into_drawing_area();
-
-        plot.fill(&WHITE).unwrap();
-
-        let panels = plot.split_evenly((num_rows as usize, 4));
-
-        for (id, panel) in panels.into_iter().enumerate() {
-
-            if id < self.len(){
-                let mut chart = ChartBuilder::on(&panel).margin(10).caption(format!("Base {}", id).as_str(), ("serif", 20))
-                    .build_cartesian_3d(-1.0..1.0, -1.0..1.0, -0.33333333..1.0).unwrap();
-                chart.configure_axes().draw().unwrap();
-
-
-                //Draws the base tetrahedron
-                chart.draw_series(LineSeries::new(SIMPLEX_ITERATOR.map(|a| {let b = a.clone(); (b[0], b[1], b[2])}), &BLACK)).unwrap();
-
-                //Gets the base position
-                let pos: (f64, f64, f64) = match self.pwm[id].as_simplex() { [a,b,c] => (a,b,c) };
-
-                chart.draw_series([pos].into_iter().map(|p| Circle::new(p, 2, &BLUE))).unwrap();
-            }
-
-
-
-        }
-
-    }
-
     pub fn make_opposite(&self) -> Motif {
 
         let mut opposite = self.clone();
@@ -754,7 +672,7 @@ impl Motif {
             //over the regions of possible bases, leaving only number unique kmers. 
             let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
 
-            prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln();
+            prior += (self.len() as f64) * BASE_PRIOR_DENS.ln();
             
             prior
 
@@ -770,7 +688,7 @@ impl Motif {
             //over the regions of possible bases, leaving only number unique kmers. 
             let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
 
-            prior += (((BASE_L-1)*self.len()) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln();
+            prior += (self.len() as f64) * BASE_PRIOR_DENS.ln();
             
             prior
 
@@ -1104,52 +1022,6 @@ impl Motif {
 
     }
 
-    //TODO: Test the absolute crap out of this, and move the ad_grad and ad_calc calculations OUT of this into the many tf gradient calculation
-    //Noise needs to be the noise from the total waveform of the motif set, not just the single motif
-    pub fn single_motif_grad(&self,  DATA: &Waveform, noise: &Noise) -> (f64, Vec<f64>) {
-
-        let binds = self.return_bind_score(DATA.seq());
-
-
-        let d_ad_stat_d_noise: Vec<f64> = noise.ad_grad();
-
-        let d_ad_like_d_ad_stat: f64 = Noise::ad_deriv(noise.ad_calc());
-        
-
-        //End preuse generation
-        let d_noise_d_h = unsafe { self.no_height_waveform_from_binds(&binds, DATA)
-                                        .account_auto(noise.background)};
-        let d_ad_like_d_grad_form_h = (d_ad_like_d_ad_stat * ((&d_noise_d_h * &d_ad_stat_d_noise)) )
-                                    * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                                    / (self.peak_height().signum() * SPREAD_HMC_CONV * (MAX_HEIGHT-MIN_HEIGHT)) + self.d_height_prior_d_hmc();
-      
-
-        let mut d_ad_like_d_grad_form_binds: Vec<f64> = vec![0.0; self.len()*(BASE_L-1)];
-
-
-        for index in 0..d_ad_like_d_grad_form_binds.len() {
-
-            let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
-            let mut bp = index % (BASE_L-1);
-            bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
-                                                                           //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
-                                                                           //This is important, because statically guarentees the safety of using rel_bind
-
-            let prop_bp = unsafe { self.pwm[base_id].rel_bind(bp) } ;
-
-            d_ad_like_d_grad_form_binds[index] = unsafe {
-                   (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, DATA)
-                           .account_auto(noise.background))
-                  * &d_ad_stat_d_noise) * d_ad_like_d_ad_stat * Base::d_prop_d_hmc(prop_bp) 
-            }
-           
-        }
-
-            
-        (d_ad_like_d_grad_form_h, d_ad_like_d_grad_form_binds)
-
-
-    }
 
     //SAFETY: the d_ad_stat_d_noise must be of the same length as the noise vector we get from DATA.
     pub unsafe fn parallel_single_motif_grad(&self,  DATA: &Waveform, d_ad_stat_d_noise: &Vec<f64>, d_ad_like_d_ad_stat: f64, background: &Background) -> Vec<f64> {
@@ -1596,9 +1468,7 @@ impl<'a> MotifSet<'a> {
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             if self.data.seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
                 let ln_post = new_set.replace_motif(new_mot, extend_id);
-                //There are BASE_L ways that we sample BASE_L-1 times from a U(*PROP_POS_REFLECTOR,*PROP_NEG_REFLECTOR) distribution
-                //So, the probability density is (1./(1./(*PROP_POS_REFLECTOR,*PROP_NEG_REFLECTOR))^(BASE_L-1))/BASE_L
-                let base_ln_density = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln(); 
+                let base_ln_density = BASE_PRIOR_DENS.ln(); 
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
             } else {
                 None
@@ -1619,7 +1489,7 @@ impl<'a> MotifSet<'a> {
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln(); 
+            let base_ln_density = BASE_PRIOR_DENS.ln();
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -1865,7 +1735,7 @@ impl<'a> MotifSet<'a> {
                 let mut alter_set = self.clone();
                 let new_ln_post = alter_set.replace_motif(mod_mot,k);
                 let new_ln_like = new_ln_post-alter_set.ln_prior();
-                //println!("mod i: {} \n {:?}", i, alter_set);
+                println!("mod i: {:?} \n {:?}", a, alter_set);
                 (new_ln_post-curr_post)/h
                 //(new_ln_like-curr_like)/h
             }).collect::<Vec<f64>>();
@@ -1878,42 +1748,6 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    #[cfg(test)]
-    fn no_par_gradient(&self) -> Vec<f64> {
-
-       let noise = self.signal.produce_noise(self.data, self.background);
-
-       let mut len_grad: usize = self.set.len();
-
-       for i in 0..self.set.len() {
-           len_grad += self.set[i].len()*(BASE_L-1);
-       }
-
-       let mut gradient = vec![0.0_f64; len_grad];
-
-       let mut finished_compute: usize = 0;
-
-       for motif in &self.set {
-      
-           let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
-           //println!("inds a {} {}", finished_compute, compute_to);
-           let motif_grad = &mut gradient[finished_compute..compute_to];
-           //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
-           let (g, mut grad_vec) = motif.single_motif_grad(self.data, &noise);
-       
-           grad_vec.insert(0, g);
-           //println!("{} {} lens", motif_grad.len(), grad_vec.len());
-           //println!("{:?}", grad_vec);
-           for i in 0..motif_grad.len() {
-               motif_grad[i] = grad_vec[i];
-           }
-          
-           finished_compute = compute_to;
-       }
-
-       gradient
-
-   }
 
 
 
@@ -2681,7 +2515,6 @@ mod tester{
 
         let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , 20., 5, &mut rng);
 
-        mot.display_tetrahedra("trial_tetra.png");
         
         let jacob = b.d_base_d_simplex();
 
@@ -2697,6 +2530,15 @@ mod tester{
         println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
         b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
+        let simp = [0.1_f64, -0.1, -0.2];
+        let simp_b = Base::simplex_to_base(&simplex);
+
+        let b3a = b.add_in_hmc([0.0, 0.0, -1./30.]);
+        let b3 = b.add_in_hmc([0.0, 0.0, -5./30.]);
+
+        println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.as_simplex(), b3a, b3.as_simplex(), b3);
+
+        
     }
 
     #[test]
@@ -2789,27 +2631,17 @@ mod tester{
                               .zip(wave1.produce_noise(&wave, &background).resids().iter())
                               .map(|(&a, &b)| (a-b)/h).collect();
                      
-            //let deriv_n = ((&wave_check).account_auto(&background));
-
-            //let ad_deriv = (wave2.produce_noise(&wave, &background).ad_calc()-wave1.produce_noise(&wave, &background).ad_calc())/h;
-            //let ana_deriv = (&deriv_n*&(wave1.produce_noise(&wave, &background).ad_grad()))*Base::d_prop_d_hmc(prop_bp);
-
-            //println!("ad {} ana {} diff {}", ad_deriv, ana_deriv, ad_deriv-ana_deriv);
-            /*for i in 0..n_diff.len() {
-                println!("{} {} {} {}", i, n_diff[i], deriv_n[i], deriv_n[i]/n_diff[i]);
-            }*/
             let w1 = wave1.raw_wave();
             let w2 = wave2.raw_wave();
             let wc = wave_check.raw_wave();
 
             let prop_bp2 = unsafe{mot2.pwm()[p].rel_bind(bp)};
-            let normalizer = Base::d_prop_d_hmc(prop_bp); //(*PROP_UPPER_CUTOFF-prop_bp) * (prop_bp-*PROP_CUTOFF)/(*PROP_UPPER_CUTOFF-*PROP_CUTOFF);
             let mut i = 0;
             let mut calc: f64 = (w2[i]-w1[i])/h;
             let mut ana: f64 = wc[i];
             println!("Wave checking {} in pos {}", BPS[bp], p);
-            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, normalizer);
-            let ratio = ((prop_bp2-prop_bp)/h)/normalizer;
+            println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, 1.0);
+            let ratio = ((prop_bp2-prop_bp)/h);
             println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
                                           unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
             while (i < (w2.len()-2)) && ((calc == 0.) || (ana == 0.)) {
@@ -2822,9 +2654,9 @@ mod tester{
             let ana_b = wc[i+1];
 
 
-            let num_diff = calc/normalizer;
-            let num_diff_b = calc_b/normalizer;
-            println!("{} {} {} {} {} {} {} {}", i,  num_diff, ana, (num_diff/ana), (num_diff_b/ana_b), normalizer, (calc/ana),((calc/ana)/normalizer));
+            let num_diff = calc;
+            let num_diff_b = calc_b;
+            println!("{} {} {} {} {} {} {} {}", i,  num_diff, ana, (num_diff/ana), (num_diff_b/ana_b), 1.0, (calc/ana),((calc/ana)));
 
         }
 
@@ -3249,7 +3081,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln();
+        let actual_prior = BASE_PRIOR_DENS.ln();
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
@@ -3294,7 +3126,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = ((BASE_L-1) as f64)*(*PROP_POS_REFLECTOR-*PROP_NEG_REFLECTOR).ln()-(BASE_L as f64).ln();
+        let actual_prior = BASE_PRIOR_DENS.ln() ;
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
@@ -3356,7 +3188,7 @@ mod tester{
         assert!(b == b.clone());
 
         let b_mag: f64 = b.show().iter().sum();
-        let supposed_default_dist = b.show().iter().map(|a| ((a/b_mag)-(1.0/(BASE_L as f64))).powi(2)).sum::<f64>().sqrt();
+        let supposed_default_dist = (b.as_simplex()).iter().map(|a| a.powi(2)).sum::<f64>().sqrt();
 
         assert!(supposed_default_dist == b.dist(None));
       
@@ -3451,10 +3283,11 @@ mod tester{
         let background = Background::new(0.25, 2.64, &corrs);
         let noise: Noise = waveform.produce_noise(&waveform2, &background);
 
-        let grad = motif.single_motif_grad(&waveform2, &noise);
+        let d_ad_stat_d_noise = noise.ad_grad();
+        let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
 
-
+        let grad = unsafe{ motif.parallel_single_motif_grad(&waveform2, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, &background)};
 
         let waveform_raw = waveform.raw_wave();
 
@@ -3502,9 +3335,9 @@ mod tester{
         
         //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), (sequence.number_unique_kmers(motif.len()) as f64).ln() -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln()));
+        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), (sequence.number_unique_kmers(motif.len()) as f64).ln() - (motif.len() as f64)*BASE_PRIOR_DENS.ln());
         assert!((motif.pwm_prior(&sequence)+(sequence.number_unique_kmers(motif.len()) as f64).ln()
-                 -(((BASE_L-1)*motif.len()) as f64)*((*PROP_UPPER_CUTOFF-*PROP_CUTOFF).ln())).abs() < 1e-6);
+                 -(motif.len() as f64)*BASE_PRIOR_DENS.ln()).abs() < 1e-6);
 
         let un_mot: Motif = Motif::from_motif(vec![1usize;20], 10., 5, &mut rng);//Sequence
 
