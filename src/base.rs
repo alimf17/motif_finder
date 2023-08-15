@@ -63,17 +63,17 @@ pub const SIMPLEX_VERTICES_POINTS :  [[f64; (BASE_L-1)]; BASE_L] = [[2.*SQRT_2/3
 pub const SIMPLEX_ITERATOR: [&[f64; (BASE_L-1)]; ((BASE_L-1)*(BASE_L-1))] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
                                                                             &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
                                                                             &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[3], &SIMPLEX_VERTICES_POINTS[2]];
-pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  0.0            , -0.3, 0.3], 
-                                                         [-3.0*SQRT_2/20.,  SQRT_2*SQRT_3/4., -0.3, 0.3],
-                                                         [-3.0*SQRT_2/20., -SQRT_2*SQRT_3/4., -0.3, 0.3],
-                                                         [-3.0*SQRT_2/10.,  0.0            ,  0.9, 0.1]];
+pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2,  0.0             , -0.25, 0.25], 
+                                                     [-SQRT_2/4.0,  SQRT_2*SQRT_3/4., -0.25, 0.25],
+                                                     [-SQRT_2/4.0, -SQRT_2*SQRT_3/4., -0.25, 0.25],
+                                                     [0.0        ,  0.0             ,  0.75, 0.25]];
 
 
 //Obviously, this should always be the transpose of INVERT_SIMPLEX. I'm just not good enough at compile time code to make it happen automatically
-pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 3.0*SQRT_2/5.0,  -3.0*SQRT_2/20., -3.0*SQRT_2/20.  , -3.0*SQRT_2/10.], 
+pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -SQRT_2/4.0, -SQRT_2/4.0, 0.0], 
                                                                  [ 0.0           , SQRT_2*SQRT_3/4., -SQRT_2*SQRT_3/4.,   0.0          ],
-                                                                 [ -0.3          ,  -0.3           ,  -0.3            ,   0.9          ],
-                                                                 [  0.3          ,   0.3           ,   0.3            ,   0.1          ]];
+                                                                 [ -0.25          ,  -0.25           ,  -0.25            ,   0.75          ],
+                                                                 [  0.25          ,   0.25           ,   0.25            ,   0.25          ]];
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
 
@@ -261,8 +261,20 @@ impl Base {
         let mut mod_simplex = simplex_coords.to_vec();
         mod_simplex.push(1.0);
 
-        let probs: [f64; BASE_L] = INVERT_SIMPLEX.iter().map(|a| a.iter().zip(mod_simplex.iter()).map(|(&b, &c)| b*c).sum::<f64>()).collect::<Vec<_>>().try_into().unwrap();
+        let mod_simplex = mod_simplex;
 
+        println!("mod sim {:?}", mod_simplex);
+        //let probs: [f64; BASE_L] = INVERT_SIMPLEX.iter().map(|a| a.iter().zip(mod_simplex.iter()).map(|(&b, &c)| b*c).sum::<f64>()).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut probs = [0.0_f64; BASE_L];
+
+        for i in 0..BASE_L{
+            for j in 0..BASE_L {
+                probs[i] += INVERT_SIMPLEX[i][j]*mod_simplex[j];
+            }
+        }
+
+        println!("probs {:?}", probs);
         let max = probs[Base::argmax(&probs)];
 
         let b_form: [f64; BASE_L]  = probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
