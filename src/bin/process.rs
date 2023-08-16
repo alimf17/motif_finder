@@ -15,6 +15,8 @@ use plotters::prelude::full_palette::*;
 use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use motif_finder::base::{SQRT_2, SQRT_3};
 
+const INTERVAL_CELL_LENGTH: f64 = 0.01;
+
 const UPPER_LETTERS: [char; 26] = [
     'A', 'B', 'C', 'D', 'E',
     'F', 'G', 'H', 'I', 'J', 
@@ -200,15 +202,15 @@ pub fn main() {
             set_extracts
         }).flatten().collect::<Vec<_>>();
         let pwm_traces = create_offset_traces(trace_scoop);
-        graph_tetrahedral_traces(&pwm_traces, &good_motifs_count, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
+        graph_tetrahedral_traces(&pwm_traces, &good_motifs_count,0.95, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
         println!("tetrad");
-        let cis = create_credible_intervals(&pwm_traces, 0.95, &good_motifs_count);
+        /*let cis = create_credible_intervals(&pwm_traces, 0.95, &good_motifs_count);
 
 
         println!("Number motifs near medoid: {}", num_good_motifs);
         println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
         println!("Posterior mean: \n {:?}", cis[1]);
-        println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);
+        println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);*/
     }
 
     //TODO: generate lnlikelihood and lnposterior traces here
@@ -317,7 +319,7 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Ar
 
 }
 
-pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, file_name: &str){
+pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, credible: f64, file_name: &str){
 
     let (num_samples, num_bases, _) = samples.dim();
     println!("{:?} {} s", good_motifs_count, num_samples); 
@@ -330,6 +332,9 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
     let panels = plot.split_evenly((num_rows as usize, 4));
 
+
+    let cis = create_credible_intervals(samples, credible, good_motifs_count);
+
     for j in 0..num_bases {
         
 
@@ -338,8 +343,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         chart.configure_mesh().draw().unwrap();
 
 
-        //Draws the base tetrahedra
-
+        //Draws the tetrahedral faces
         let base_tetras = create_tetrahedral_traces(&SIMPLEX_ITERATOR.iter().map(|&[a,b,c]| (*a,*b,*c)).collect::<Vec<_>>());
 
 
@@ -347,6 +351,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
             chart.draw_series(LineSeries::new(face.iter().map(|&a| a), &full_palette::BLACK)).unwrap();
         }
 
+        //Draws the three vertices that show up once
         chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[0]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::RED).filled(), &|coord, size, style| {
             EmptyElement::at(coord)
                 + Circle::new((0, 0), size, style)
@@ -363,6 +368,8 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
                 + Text::new(format!("G"), (0, 15), ("sans-serif", 15))
 
         })).unwrap();
+
+        //Draws the vertex that shows up three times
         chart.draw_series(PointSeries::of_element(create_tetrahedral_traces(&vec![(SIMPLEX_VERTICES_POINTS[3][0], SIMPLEX_VERTICES_POINTS[3][1], SIMPLEX_VERTICES_POINTS[3][2])]).into_iter().take(3).map(|a| a).flatten(), 5, ShapeStyle::from(&full_palette::BLUE).filled(), &|coord, size, style| {
             EmptyElement::at(coord)
                 + Circle::new((0, 0), size, style)
@@ -380,11 +387,27 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
             
                 for little_trace in tetra_traces.iter() {
-                    chart.draw_series(LineSeries::new((little_trace.iter().step_by(100).map(|&a| a)), PALETTE[m])).unwrap();
+                    chart.draw_series(LineSeries::new((little_trace.iter().step_by(100).map(|&a| a)), PALETTE[(m+BASE_L) % 26])).unwrap();
                 }
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
 
+        println!("chart {}", j);
+        //This draws the credible region
+       
+        let ci_color = &GREY.mix(0.1);
+        let ci_low_rect = create_tetrahedral_traces(&cis[j]);
+ 
+        let ci_up = cis[j].iter().map(|a|  (a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH, a.2+INTERVAL_CELL_LENGTH)).collect::<Vec<_>>();
+
+        let ci_hi_react = create_tetrahedral_traces(&ci_up);
+
+        for b in 0..BASE_L {
+            chart.draw_series(ci_low_rect[b].iter().zip(ci_hi_react[b].iter()).map(|(&a, &b)| Rectangle::new([a,b], &ci_color))).unwrap();
+        }
+
+
+        println!("Cred {}", j);
     }
 }
 
@@ -392,7 +415,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
 //need anymore as much as humanly possible.
-pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_motifs_count: &Vec<usize>) -> [Array2<f64>; 3] {
+pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_motifs_count: &Vec<usize>) -> Vec<Vec<(f64, f64, f64)>>{
 
     if credible <= 0.0 {
         panic!("Can't make credible intervals of literally at most zero length!");
@@ -402,8 +425,90 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_moti
 
     let (num_samples, num_bases, _) = samples.dim();
     let credible = credible.min(1.0);
-    let num_interval = ((num_samples as f64)*credible).floor() as usize;
+    let num_interval = ((num_samples as f64)*credible).floor() as u32;
+
+    let z_steps: usize = ((4./3.)/INTERVAL_CELL_LENGTH).floor() as usize;
+    let x_steps: usize = (SQRT_2/INTERVAL_CELL_LENGTH).floor()  as usize;
+    let y_steps: usize = ((2.*SQRT_2/SQRT_3)/INTERVAL_CELL_LENGTH).floor() as usize;
+
+    let zs = (0..z_steps).map(|a| -1./3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
+    let xs = (0..x_steps).map(|a| -SQRT_2/3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
+    let ys = (0..y_steps).map(|a| -SQRT_2/SQRT_3+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
+
+
+
+
+    /*
+    //We know that the number of cells scales with 1/INTERVAL_CELL_LENGTH cubed. 8.*SQRT_3/27. is
+    //the volume of the tetrahedron.
+    let mut actual_cells: Vec<(usize, usize, usize)> = Vec::with_capacity((8.*SQRT_3/27.*INTERVAL_CELL_LENGTH.powi(-3)).ceil() as usize); 
+
+
+    //Establishes which indices actually are in the tetrahedron
+    for z_ind in 0..z_steps{
+        let z = zs[z_ind];
+        let x_lo_thresh = SQRT_2*z/4-SQRT_2/4;
+        let x_hi_thresh =  1./SQRT_2-z/SQRT_2;
+        for x_ind in 0..x_steps {
+            let x = xs[x_ind];
+            if (x >= x_lo_thresh) && (x <= x_hi_thresh) {
+                let y_lo_thresh =  (z-1.)/(SQRT_2*SQRT_3)+x/SQRT_3;
+                let y_hi_thresh = -(z-1.)/(SQRT_2*SQRT_3)-x/SQRT_3;
+                for y_ind in 0..ysteps {
+                    let y = ys[y_ind];
+                    if (y >= y_lo_thresh) && (y <= y_hi_thresh) {
+                        actual_cells.push((x_ind, y_ind, z_ind));
+                    }
+                }
+            }
+
+        }
+    }
+
+    //Actual cells can no longer mutate
+    let actual_cells = actual_cells;
+    */              
     
+    //This will yield a vector where the ith position corresponds to the cells of the
+    //credible region for the ith base
+    let credible_cells_vec = samples.axis_iter(ndarray::Axis(1)).map(|base_vecs| {
+
+        //I picked the smallest unsized int that I could: I can have more than 65000 points in a cell
+        //theoretically (hard but not impossible). But I can't have more than 4 billion: a million
+        //steps still takes a couple of weeks. Billion would just not be practical
+        //The unusual order here is for memory accessibility.
+        let mut cell_counts: Array3<u32> = Array3::<u32>::zeros([x_steps, y_steps, z_steps]);
+
+        for base_vector in base_vecs.axis_iter(ndarray::Axis(0)) {
+
+            let x_ind = ((base_vector[0]-(-SQRT_2/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
+            let y_ind = ((base_vector[1]-(-SQRT_2/SQRT_3))/INTERVAL_CELL_LENGTH).floor() as usize;
+            let z_ind = ((base_vector[2]-(-1.0/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
+            if (x_ind > x_steps) { println!("about to break x {} {}", x_ind, x_steps);}
+            if (y_ind > y_steps) { println!("about to break y {} {}", y_ind, y_steps);}
+            if (z_ind > z_steps) { println!("about to break z {} {}", z_ind, z_steps);}
+            cell_counts[[x_ind, y_ind, z_ind]] += 1;
+
+        }
+
+ 
+        let mut cells_and_counts = cell_counts.indexed_iter().map(|(a, &b)| (a, b)).collect::<Vec<_>>();
+
+        //b.cmp(a) sorts from greatest to least
+        cells_and_counts.sort_unstable_by(|(_, a), (_, b)| b.cmp(a));
+
+        let mut to_interval: u32 = 0;
+        let mut index: usize = 0;
+
+        while to_interval < num_interval {
+            to_interval += cells_and_counts[index].1;
+            index += 1;
+        }
+
+        cells_and_counts.drain(0..index).map(|(a, _)| (xs[a.0], ys[a.1], zs[a.2])).collect::<Vec<(f64, f64, f64)>>()
+
+    }).collect::<Vec<_>>();
+    /*
     let mut means = Array2::<f64>::zeros([num_bases, BASE_L-1]);
     let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
     let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
@@ -436,6 +541,13 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_moti
 
 
     [lower_ci, means, upper_ci]
+
+    */
+
+    credible_cells_vec
+
+
+
 
 }
 
