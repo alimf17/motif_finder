@@ -329,7 +329,7 @@ impl Base {
 
     }
 
-    
+   //TODO: SOMETHING WRONG HERE 
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
 
        let tetra = self.as_simplex();
