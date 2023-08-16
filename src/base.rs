@@ -263,7 +263,6 @@ impl Base {
 
         let mod_simplex = mod_simplex;
 
-        println!("mod sim {:?}", mod_simplex);
         //let probs: [f64; BASE_L] = INVERT_SIMPLEX.iter().map(|a| a.iter().zip(mod_simplex.iter()).map(|(&b, &c)| b*c).sum::<f64>()).collect::<Vec<_>>().try_into().unwrap();
 
         let mut probs = [0.0_f64; BASE_L];
@@ -274,7 +273,6 @@ impl Base {
             }
         }
 
-        println!("probs {:?}", probs);
         let max = probs[Base::argmax(&probs)];
 
         let b_form: [f64; BASE_L]  = probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
@@ -394,7 +392,7 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
     while let Some(push_vec) = end_push {
         (end_start, end_push) = wall_collide(end_start, push_vec);
         count += 1;
-    {println!("cc {} {:?}", count, push_vec);}
+    //{println!("cc {} {:?} {:?} {:?} {:?}", count, push, push_vec, start, end_start);}
     }
     end_start
 }
@@ -403,10 +401,8 @@ fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-
     for i in 0..BASE_L {
         let dot = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
         let dotext = VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>();
-        println!("SSD {} {}", dot, dotext);
         let do_reflect = ((dot >= 0.0) && (dot < 1.0)) && (dotext < VERTEX_DOT); 
         if do_reflect {
-            println!("refE");
             let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
             let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-dot)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
             let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
@@ -1663,7 +1659,7 @@ impl<'a> MotifSet<'a> {
        let mut final_trace: Vec<Self> = Vec::with_capacity(HMC_TRACE_STEPS);
 
        let mut prior_set = self.clone();
-      
+     
        let mut gradient_old = prior_set.gradient();
        let mut momentum_apply = momentum.clone();
 
@@ -1747,7 +1743,6 @@ impl<'a> MotifSet<'a> {
                 let mut alter_set = self.clone();
                 let new_ln_post = alter_set.replace_motif(mod_mot,k);
                 let new_ln_like = new_ln_post-alter_set.ln_prior();
-                println!("mod i: {:?} \n {:?}", a, alter_set);
                 (new_ln_post-curr_post)/h
                 //(new_ln_like-curr_like)/h
             }).collect::<Vec<f64>>();
@@ -2543,14 +2538,24 @@ mod tester{
         b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
         let simp = [0.1_f64, -0.1, -0.2];
-        let simp_b = Base::simplex_to_base(&simplex);
+        let simp_b = Base::simplex_to_base(&simp);
 
-        let b3a = b.add_in_hmc([0.0, 0.0, -1./30.]);
-        let b3 = b.add_in_hmc([0.0, 0.0, -5./30.]);
+        let b3a = simp_b.add_in_hmc([0.0, 0.0, -1./30.]);
+        let b3 = simp_b.add_in_hmc([0.0, 0.0, -5./30.]);
+
+        let sim_b3a = b3a.as_simplex();
+        let sim_b3 = b3.as_simplex();
 
         println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.as_simplex(), b3a, b3.as_simplex(), b3);
 
+        assert!((simp[0]-sim_b3a[0]).abs() < 1e-6, "0th element changes with no reflection");
+        assert!((simp[0]-sim_b3[0] ).abs() < 1e-6, "0th element changes with a reflection");
         
+        assert!((simp[1]-sim_b3a[1]).abs() < 1e-6, "1st element changes with no reflection");
+        assert!((simp[1]-sim_b3[1] ).abs() < 1e-6, "1st element changes with a reflection");
+
+        assert!((-0.23333333333333333333333333-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
+        assert!((-0.3-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
     }
 
     #[test]
@@ -2726,7 +2731,7 @@ mod tester{
         assert!(diff_wave_check < 1e-6, "diff wave fail");
 
         println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
-        println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", eps, dham, acc, motif_set,new_set);
+        println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", HMC_EPSILON, dham, acc, motif_set,new_set);
 
     }
     #[test]
