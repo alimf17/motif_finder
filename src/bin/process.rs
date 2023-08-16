@@ -291,7 +291,6 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Ar
 
     let mut samples = Array3::<f64>::zeros([num_samples, num_bases, BASE_L-1]);
 
-    println!("arr size {} {} {}", num_samples, num_bases, BASE_L-1);
     for (k, (pwm, offset)) in pwms_offsets.into_iter().enumerate() {
 
         for j in 0..num_bases {
@@ -322,7 +321,6 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Ar
 pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, credible: f64, file_name: &str){
 
     let (num_samples, num_bases, _) = samples.dim();
-    println!("{:?} {} s", good_motifs_count, num_samples); 
 
     let num_rows = if (num_bases & 3 == 0) {(num_bases/4)} else{ num_bases/4 +1 } as u32; 
 
@@ -378,7 +376,6 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         
         
         for m in 0..(good_motifs_count.len()-1){
-                println!("GMC {}", good_motifs_count[m]);
             if good_motifs_count[m] < good_motifs_count[m+1] {
 
                 let slice_bases: Vec<(f64, f64, f64)> = ((good_motifs_count[m])..(good_motifs_count[m+1])).map(|k| (samples[[k,j,0]], samples[[k,j,1]], samples[[k,j,2]]) ).collect::<Vec<_>>();
@@ -392,10 +389,9 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
 
-        println!("chart {}", j);
         //This draws the credible region
        
-        let ci_color = &GREY.mix(0.1);
+        let ci_color = &ORANGE.mix(0.1);
         let ci_low_rect = create_tetrahedral_traces(&cis[j]);
  
         let ci_up = cis[j].iter().map(|a|  (a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH, a.2+INTERVAL_CELL_LENGTH)).collect::<Vec<_>>();
@@ -407,7 +403,6 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         }
 
 
-        println!("Cred {}", j);
     }
 }
 
