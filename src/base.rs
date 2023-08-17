@@ -48,7 +48,7 @@ pub const BASE_L: usize = BPS.len();
 
 pub const BASE_PRIOR_DENS: f64 = 1./6.; //Set to 1/Gamma(BASE_L)
 
-pub const VERTICES: [[f64; BASE_L-1]; (BASE_L)] = [[2.*SQRT_2/3., 0., 1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
+pub const VERTICES: [[f64; BASE_L-1]; (BASE_L)] = [[2.*SQRT_2/3., 0., -1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
 
 //This MUST be the transpose of VERTICES
 pub const SIMPLEX_VERTICES: [[f64; BASE_L]; (BASE_L-1)] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
