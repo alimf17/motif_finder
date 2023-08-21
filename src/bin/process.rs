@@ -99,6 +99,12 @@ pub fn main() {
 
             for file_name in iter_files {
                 let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+                
+                /*if interim.len() >= 5 {
+                    println!("{} {:?} inter", file_name, interim.index_into(0..5));
+                } else{
+                    println!("{} {:?} inter", file_name, interim.index_into(0..1));
+                }*/
                 SetTraceCollections[chain].append(interim);
             }
 
@@ -185,7 +191,8 @@ pub fn main() {
 
     let mut meds = kmedoids::random_initialization(num_sort_mots, tf_num, &mut rng);
     
-    
+   
+    println!("clust {:?}", &clustering_motifs[0..5]);
     let dist_array = establish_dist_array(&clustering_motifs);
     let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
 
@@ -331,7 +338,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
     let panels = plot.split_evenly((num_rows as usize, 4));
 
 
-    let cis = create_credible_intervals(samples, credible, good_motifs_count);
+    //let cis = create_credible_intervals(samples, credible, good_motifs_count);
 
     for j in 0..num_bases {
         
@@ -384,22 +391,23 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
             
                 for little_trace in tetra_traces.iter() {
-                    chart.draw_series(LineSeries::new((little_trace.iter().step_by(100).map(|&a| a)), PALETTE[(m+BASE_L) % 26])).unwrap();
+                    chart.draw_series(little_trace.iter().step_by(50).map(|&a| Circle::new(a,1_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
                 }
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
 
         //This draws the credible region
        
-        let ci_color = &ORANGE.mix(0.1);
-        let ci_low_rect = create_tetrahedral_traces(&cis[j]);
+        //let ci_color = &ORANGE.mix(0.1);
+        //let ci_low_rect = create_tetrahedral_traces(&cis[j]);
  
-        let ci_up = cis[j].iter().map(|a|  (a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH, a.2+INTERVAL_CELL_LENGTH)).collect::<Vec<_>>();
+        //let ci_up = cis[j].iter().map(|a|  (a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH, a.2+INTERVAL_CELL_LENGTH)).collect::<Vec<_>>();
 
-        let ci_hi_react = create_tetrahedral_traces(&ci_up);
+        //let ci_hi_react = create_tetrahedral_traces(&ci_up);
 
         for b in 0..BASE_L {
-            chart.draw_series(ci_low_rect[b].iter().zip(ci_hi_react[b].iter()).map(|(&a, &b)| Rectangle::new([a,b], &ci_color))).unwrap();
+            //chart.draw_series(ci_low_rect[b].iter().zip(ci_hi_react[b].iter()).map(|(&a, &b)| Rectangle::new([a,b], &ci_color))).unwrap();
+          //  chart.draw_series(ci_low_rect[b].iter().map(|a| Rectangle::new([a,(a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH)], &ci_color))).unwrap();
         }
 
 

@@ -398,19 +398,41 @@ fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-
 }
 
 fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
+
+    let mut min_stop: Option<f64> = None;
+    let mut vert_min: Option<usize> = None;
     for i in 0..BASE_L {
-        let dot = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
-        let dotext = VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>();
-        let do_reflect = ((dot >= 0.0) && (dot < 1.0)) && (dotext < VERTEX_DOT); 
-        if do_reflect {
-            let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+dot*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-            let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-dot)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-            let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
-            remaining_trajectory = remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
-            return (new_start, Some(remaining_trajectory));
+        let stop = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
+        if (stop >= 0.0) && (stop < 1.0) { 
+            (min_stop, vert_min) = match min_stop {
+                Some(ms) => if ms > stop { (Some(stop), Some(i)) } else {(min_stop, vert_min)},
+                None => (Some(stop), Some(i)),
+            }
         }
     }
-    (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None)
+
+    match min_stop {
+        None =>  (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None),
+        Some(dot) => {
+            let i = vert_min.expect("this should not be None if min_stop has a value");
+            let dotext = VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>();
+            if dotext < VERTEX_DOT {
+
+                //The 1e-6s that we subtract from dot are a numerical guard. If we let things go
+                //right up to the boundary, numerical errors can end with us outside of the
+                //tetrahedron.
+                let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+(dot-1e-6)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+                let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-(dot-1e-6))*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+                let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+                remaining_trajectory = remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
+                (new_start, Some(remaining_trajectory))
+            } else {
+                (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None)
+            }
+
+        },
+    }
+
 }
 
 
@@ -622,7 +644,7 @@ impl Motif {
 
         for i in 0..self.len() {
             
-            let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))).collect::<Vec<_>>().try_into().unwrap();
+            let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps).collect::<Vec<_>>().try_into().unwrap();
             new_mot.pwm[i] = self.pwm[i].add_in_hmc(slice);
         }
 
@@ -1703,12 +1725,21 @@ impl<'a> MotifSet<'a> {
 
        let mut delta_kinetic_energy: f64 = 0.0;
 
+
+       //Our M-H cutoff is exp(-(new hamiltonian-old hamiltonian))
+       //ie exp(old_hamiltonian-new hamiltonian)
+       //hamiltonian = kinetic+potential, and potential = -ln posterior
+       //So, the delta_kinetic_energy is (momentum^2-momentum_apply^2)/2
+       //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
+       //self.ln_post
+
        for i in 0..momentum.len() {
-           delta_kinetic_energy += (momentum_apply[i].powi(2) - momentum[i].powi(2))/2.0;
+           delta_kinetic_energy += (momentum[i].powi(2) - momentum_apply[i].powi(2)  )/2.0;
        }
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
+       //println!("d k {} p {} old_mots {:?} new mots {:?} mot_dists {:?}",delta_kinetic_energy, delta_potential_energy,self.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), prior_set.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), self.set.iter().zip(prior_set.set.iter()).map(|(a,b)| a.distance_function(b)).collect::<Vec<_>>()); 
        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
        } else {
@@ -1769,7 +1800,7 @@ impl Debug for MotifSet<'_> {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrippedMotifSet {
     set: Vec<Motif>,
     width: f64,
@@ -2329,6 +2360,9 @@ impl SetTraceDef {
         self.trace.append(&mut attachment.trace);
     }
 
+    pub fn index_into(&self, range: std::ops::Range<usize>) -> &[StrippedMotifSet] {
+        &self.trace[range]
+    }
 }
 
 
@@ -2556,6 +2590,11 @@ mod tester{
 
         assert!((-0.23333333333333333333333333-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
         assert!((-0.3-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
+    
+        let b_a = b.add_in_hmc([10.0, -10.0, 1./3.]);
+
+        println!("b_a {:?}", b_a);
+    
     }
 
     #[test]
