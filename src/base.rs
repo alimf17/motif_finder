@@ -402,8 +402,8 @@ fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-
     let mut min_stop: Option<f64> = None;
     let mut vert_min: Option<usize> = None;
     for i in 0..BASE_L {
-        let stop = (VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
-        if (stop >= 0.0) && (stop < 1.0) { 
+        let poss_stop = detect_reflect(start, push, VERTICES[i], VERTEX_DOT); //(VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
+        if let Some(stop) = poss_stop { 
             (min_stop, vert_min) = match min_stop {
                 Some(ms) => if ms > stop { (Some(stop), Some(i)) } else {(min_stop, vert_min)},
                 None => (Some(stop), Some(i)),
@@ -412,32 +412,87 @@ fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-
     }
 
     match min_stop {
-        None =>  (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None),
+        None =>  (add_traj(start, push), None), //(start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None),
         Some(dot) => {
             let i = vert_min.expect("this should not be None if min_stop has a value");
-            let dotext = VERTICES[i].iter().zip(start.iter()).zip(push.iter()).map(|((&a, &b), &c)| a*(b+(dot+1e-6)*c)).sum::<f64>();
-            if dotext < VERTEX_DOT {
 
-                //The 1e-6s that we subtract from dot are a numerical guard. If we let things go
-                //right up to the boundary, numerical errors can end with us outside of the
-                //tetrahedron.
-                let new_start: [f64; BASE_L-1] = start.iter().zip(push.iter()).map(|(&a, &b)| a+(dot-1e-6)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-                let mut remaining_trajectory: [f64; BASE_L-1] = push.iter().map(|&b| (1.0-(dot-1e-6))*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-                let traj_dot = remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
-                remaining_trajectory = remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
-                (new_start, Some(remaining_trajectory))
-            } else {
-                (start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None)
-            }
-
+            //The 1e-6s that we subtract from dot are a numerical guard. If we let things go
+            //right up to the boundary, numerical errors can end with us outside of the
+            //tetrahedron.
+            let new_start: [f64; BASE_L-1] = add_mult_traj(start, push, dot-1e-6);//start.iter().zip(push.iter()).map(|(&a, &b)| a+(dot-1e-6)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+            let mut remaining_trajectory: [f64; BASE_L-1] = mult_traj(push, 1.0-(dot-1e-6));//push.iter().map(|&b| (1.0-(dot-1e-6))*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
+            let traj_dot = dot_prod(remaining_trajectory, VERTICES[i]); //remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+            remaining_trajectory = add_mult_traj(remaining_trajectory, VERTICES[i],-2.0*traj_dot); //remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
+            (new_start, Some(remaining_trajectory))
         },
     }
 
 }
+//Usage: Always pick normal so that the region you want to remain in has a dot product GREATER than boundary_dot_value
+fn detect_reflect(start: [f64; BASE_L-1], push: [f64; BASE_L-1], normal: [f64; BASE_L-1], boundary_dot_value: f64) -> Option<f64> {
 
+    //For our tetrahedral walls, using vertices as the normal vector of the plane means that outside
+    //the tetrahedron dots to a negative value with the normal, so we can only theoretically approach 
+    //if our push vector dotted with the normal is negative. This is an important check: the start
+    //vector is allowed to start ON a boundary, so this check keeps us from reflecting if we start 
+    //on the boundary but move away. For reflecting with bases, we choose the normal vector
+    //base_vertex_start-base_vertex_end to keep the same barrier. And in general, it is always
+    //possible to choose the normal such that the negative dot direction is the direction hitting
+    //the wall. If you picked the normal such that this direction is positive, take its negation.
+    let approach_wall = dot_prod(push, normal);
 
+    //If approach_wall is exactly 0, I'm moving parallel to the boundary, not crossing it.
+    if approach_wall >= 0.0 { return None; }
 
+    let stop = (boundary_dot_value-dot_prod(start, normal))/approach_wall;
 
+    //stop <= 0.0 means that we would hit the wall going backwards, which means that we're moving
+    //away from the wall. But we already checked this with approach_wall >= 0.0 returning None
+    if (stop > 1.0) { //|| (stop <= 0.0)   {
+        return None;
+    }
+
+    Some(stop)
+}
+
+fn dot_prod(a: [f64; BASE_L-1], b: [f64; BASE_L-1]) -> f64 {
+
+    let mut dot: f64 = 0.0;
+
+    for i in 0..(BASE_L-1) {
+        dot += a[i]*b[i];
+    }
+
+    dot
+}
+
+fn add_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
+
+    let mut out = [0.0_f64; BASE_L-1];
+    for i in 0..(BASE_L-1) {
+        out[i] = a[i]+b[i];
+    }
+    out
+
+}
+
+fn mult_traj(a: [f64; BASE_L-1], lambda: f64) -> [f64; BASE_L-1] {
+    let mut out = [0.0_f64; BASE_L-1];
+    for i in 0..(BASE_L-1) {
+        out[i] = a[i] * lambda;
+    }
+    out
+}
+
+fn add_mult_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1], lambda: f64) -> [f64; BASE_L-1] {
+
+    let mut out = [0.0_f64; BASE_L-1];
+    for i in 0..(BASE_L-1) {
+        out[i] = a[i]+b[i] * lambda;
+    }
+    out
+
+}
 
 
 
