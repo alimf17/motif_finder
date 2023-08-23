@@ -77,6 +77,31 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
 
+const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
+const ADD_MULT_TRAJ_COMP: fn([f64; BASE_L-1], [f64; BASE_L-1], f64) -> [f64; BASE_L-1] = add_mult_traj;
+
+
+static SIMPLEX_CONFINING_NORMALS: Lazy<[[[f64; BASE_L-1]; BASE_L-1]; (BASE_L)]> = Lazy::new(|| {
+
+
+    let mut scn = [[[0_f64; BASE_L-1]; BASE_L-1]; (BASE_L)];
+    let div_mag = 1./(2.*SQRT_2/SQRT_3);
+    for i in 0..BASE_L {
+        for j in 0..BASE_L {
+            if j < i {
+                //scn[i][j] = mult_traj(add_mult_traj(VERTICES[i], VERTICES[j], -1_f64),div_mag);
+                scn[i][j] = MULT_TRAJ_COMP(ADD_MULT_TRAJ_COMP(VERTICES[i], VERTICES[j], -1_f64),div_mag);
+            }
+            if j > i {
+                //scn[i][j-1] = mult_traj(add_mult_traj(VERTICES[i], VERTICES[j], -1_f64),div_mag);
+                scn[i][j-1] = MULT_TRAJ_COMP(ADD_MULT_TRAJ_COMP(VERTICES[i], VERTICES[j], -1_f64),div_mag);
+            }
+        }
+    }
+
+    scn
+});
+
 const RT: f64 =  8.31446261815324*298./4184.; //in kcal/mol
 
 const CLOSE: f64 = 1e-5;
@@ -328,10 +353,10 @@ impl Base {
     }
 
    //TODO: SOMETHING WRONG HERE 
-    pub fn add_in_hmc(&self, addend: [f64; BASE_L-1]) -> Self {
+    pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.as_simplex();
-       Base::simplex_to_base(&reflect_tetra(tetra, addend))
+       Base::simplex_to_base(&reflect_tetra(tetra, addend, confine_base))
 
     }
 
@@ -385,44 +410,71 @@ fn reflect(a: f64) -> f64 {
 }
 
 //Note that arrays of Copy are themselves Copy
-fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
+fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> [f64; BASE_L-1] {
     let mut end_start = start;
     let mut end_push = Some(push);
-    let mut count: usize = 0;
+    //let mut count: usize = 0;
     while let Some(push_vec) = end_push {
-        (end_start, end_push) = wall_collide(end_start, push_vec);
-        count += 1;
-    //{println!("cc {} {:?} {:?} {:?} {:?}", count, push, push_vec, start, end_start);}
+        (end_start, end_push) = wall_collide(end_start, push_vec, confine_base);
+      //  count += 1;
+    //if end_push.is_some() {println!("cc {} {:?} {:?} {:?} {:?} {:?}", count, push, push_vec, start, end_start, end_push);}
     }
     end_start
 }
 
-fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1]) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
+fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
 
+    //This checks our reflections across the regular tetrahedral walls
     let mut min_stop: Option<f64> = None;
-    let mut vert_min: Option<usize> = None;
+    let mut vert_min: Option<[f64; BASE_L-1]> = None;
     for i in 0..BASE_L {
         let poss_stop = detect_reflect(start, push, VERTICES[i], VERTEX_DOT); //(VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
         if let Some(stop) = poss_stop { 
             (min_stop, vert_min) = match min_stop {
-                Some(ms) => if ms > stop { (Some(stop), Some(i)) } else {(min_stop, vert_min)},
-                None => (Some(stop), Some(i)),
+                Some(ms) => if ms > stop { (Some(stop), Some(VERTICES[i])) } else {(min_stop, vert_min)},
+                None => (Some(stop), Some(VERTICES[i])),
             }
         }
     }
 
+    //This reflects us towards maintaining the same best bast when necessary
+    if confine_base {
+        let mut close_base = 0_usize;
+        let mut close_dot = -f64::INFINITY;
+        for i in 0..BASE_L {
+            let alignment = dot_prod(start, VERTICES[i]);
+            if alignment > close_dot {
+                close_dot = alignment;
+                close_base = i;
+            }
+        }
+
+        for i in 0..(BASE_L-1) {
+
+            let poss_stop = detect_reflect(start, push, SIMPLEX_CONFINING_NORMALS[close_base][i], 0.0);
+            if let Some(stop) = poss_stop {
+                (min_stop, vert_min) = match min_stop {
+                    Some(ms) => if ms > stop { (Some(stop), Some(SIMPLEX_CONFINING_NORMALS[close_base][i])) } else {(min_stop, vert_min)},
+                    None => (Some(stop), Some(SIMPLEX_CONFINING_NORMALS[close_base][i])),
+                }
+            }
+        }
+        
+    }
+
+    //This DOES our reflection
     match min_stop {
         None =>  (add_traj(start, push), None), //(start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None),
         Some(dot) => {
-            let i = vert_min.expect("this should not be None if min_stop has a value");
+            let vert = vert_min.expect("this should not be None if min_stop has a value");
 
             //The 1e-6s that we subtract from dot are a numerical guard. If we let things go
             //right up to the boundary, numerical errors can end with us outside of the
             //tetrahedron.
             let new_start: [f64; BASE_L-1] = add_mult_traj(start, push, dot-1e-6);//start.iter().zip(push.iter()).map(|(&a, &b)| a+(dot-1e-6)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
             let mut remaining_trajectory: [f64; BASE_L-1] = mult_traj(push, 1.0-(dot-1e-6));//push.iter().map(|&b| (1.0-(dot-1e-6))*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-            let traj_dot = dot_prod(remaining_trajectory, VERTICES[i]); //remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
-            remaining_trajectory = add_mult_traj(remaining_trajectory, VERTICES[i],-2.0*traj_dot); //remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
+            let traj_dot = dot_prod(remaining_trajectory, vert); //remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+            remaining_trajectory = add_mult_traj(remaining_trajectory, vert,-2.0*traj_dot); //remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
             (new_start, Some(remaining_trajectory))
         },
     }
@@ -683,7 +735,7 @@ impl Motif {
     }
 
     //Safety: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
-    unsafe fn add_momentum(&self, eps: f64, momentum: &[f64]) -> Self {
+    unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
 
         let mut new_mot = self.clone();
         
@@ -700,7 +752,7 @@ impl Motif {
         for i in 0..self.len() {
             
             let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps).collect::<Vec<_>>().try_into().unwrap();
-            new_mot.pwm[i] = self.pwm[i].add_in_hmc(slice);
+            new_mot.pwm[i] = self.pwm[i].add_in_hmc(slice, confine_base);
         }
 
         new_mot
@@ -1759,7 +1811,11 @@ impl<'a> MotifSet<'a> {
            let mut next_start = 0;
            for k in 0..self.set.len() {
                next_start += self.set[k].len()*(BASE_L-1)+1;
-               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start])};
+               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
+              
+               if (!self.data.seq().kmer_in_seq(&new_set.set[k].best_motif())) {
+                   new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], true)};
+               }
                start = next_start;
            }
 
@@ -1824,7 +1880,7 @@ impl<'a> MotifSet<'a> {
                 let mut perturb_vec = vec![0.0_f64; len_gradient_form];
                
                 perturb_vec[i] = h;
-                let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice())};
+                let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice(), false)};
 
                 let mut alter_set = self.clone();
                 let new_ln_post = alter_set.replace_motif(mod_mot,k);
@@ -2614,9 +2670,9 @@ mod tester{
         
         let jacob = b.d_base_d_simplex();
 
-        let b0 = b.add_in_hmc([1e-6, 0.0, 0.0]);
-        let b1 =  b.add_in_hmc([0.0, 1e-6, 0.0]);
-        let b2 =  b.add_in_hmc([0.0, 0.0, 1e-6]);
+        let b0 = b.add_in_hmc([1e-6, 0.0, 0.0], false);
+        let b1 =  b.add_in_hmc([0.0, 1e-6, 0.0], false);
+        let b2 =  b.add_in_hmc([0.0, 0.0, 1e-6], false);
 
         println!("{:?} {:?} {} {} {}", b.as_simplex(), b0.as_simplex(), b0.as_simplex()[0]-b.as_simplex()[0],  b0.as_simplex()[1]-b.as_simplex()[1],  b0.as_simplex()[2]-b.as_simplex()[2]);
         println!("{:?} {:?} {} {} {}", b.as_simplex(), b1.as_simplex(), b1.as_simplex()[0]-b.as_simplex()[0],  b1.as_simplex()[1]-b.as_simplex()[1],  b1.as_simplex()[2]-b.as_simplex()[2]);
@@ -2629,8 +2685,8 @@ mod tester{
         let simp = [0.1_f64, -0.1, -0.2];
         let simp_b = Base::simplex_to_base(&simp);
 
-        let b3a = simp_b.add_in_hmc([0.0, 0.0, -1./30.]);
-        let b3 = simp_b.add_in_hmc([0.0, 0.0, -5./30.]);
+        let b3a = simp_b.add_in_hmc([0.0, 0.0, -1./30.], false);
+        let b3 = simp_b.add_in_hmc([0.0, 0.0, -5./30.], false);
 
         let sim_b3a = b3a.as_simplex();
         let sim_b3 = b3.as_simplex();
@@ -2646,10 +2702,34 @@ mod tester{
         assert!((-0.23333333333333333333333333-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
         assert!((-0.3-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
     
-        let b_a = b.add_in_hmc([10.0, -10.0, 1./3.]);
+        let b_a = b.add_in_hmc([10.0, -10.0, 1./3.], false);
 
         println!("b_a {:?}", b_a);
-    
+  
+        let b_b = b.add_in_hmc([10.0, -10.0, 1./3.], true);
+
+        println!("best o {} best nr {} best r {}", BPS[b.best_base()],BPS[b_a.best_base()], BPS[b_b.best_base()]);
+
+        println!("b {:?}, nr {:?}, r {:?}", b, b_a, b_b);
+
+        let confine_start = Base::simplex_to_base(&[1_f64/3., 0., 0.]);
+
+
+        let mom_confine_ref = [0_f64, 0., SQRT_2/3.];
+
+        //let confine_flip = [0_f64, 0., - SQRT_2/3.];
+        println!("pre ref");
+        let confine_end = confine_start.add_in_hmc(mom_confine_ref, true);
+
+        let confine_end_simp = confine_end.as_simplex();
+
+        //let should_start = confine_end.add_in_hmc(confine_flip, true);
+        println!("end simp {:?} prop_end_simp {:?}", confine_end_simp, [5_f64/9., 0., SQRT_2/3.-(2.*SQRT_2)/9.]);
+        
+        //println!("start {:?} back_to_start {:?}", confine_start, should_start);
+
+
+
     }
 
     #[test]
@@ -2693,10 +2773,10 @@ mod tester{
 
         let b: Base = Base::new([0.1, 0.2, 0.3, 0.4]);
 
-        let b2 = b.add_in_hmc([0.0; 3]);
+        let b2 = b.add_in_hmc([0.0; 3], false);
 
         println!("2");
-        let b3 = b.add_in_hmc([0.0001, 0.0, 0.0]);
+        let b3 = b.add_in_hmc([0.0001, 0.0, 0.0], false);
 
         println!("b {:?} b2 {:?} b3 {:?}", b, b2, b3);
 
@@ -2733,7 +2813,7 @@ mod tester{
             let mut mommy = mom.clone();
             mommy[j+1] = h;
         
-            let mot2 = unsafe{mot.add_momentum(1.0, &mommy)};
+            let mot2 = unsafe{mot.add_momentum(1.0, &mommy, false)};
        
             let wave2 = mot2.generate_waveform(&wave);
 
