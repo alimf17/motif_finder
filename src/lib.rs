@@ -9,7 +9,7 @@ use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;
 
-const MOMENTUM_SD: f64 = 0.01;
+const MOMENTUM_SD: f64 = 0.1;
 static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
 
 pub const NUM_CHECKPOINT_FILES: usize = 25;

@@ -136,7 +136,7 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 //CONVERSION_MARGIN protects us during conversion, and REFLECTOR cuts off boundary values in HMC
 //before they can get infinite and thus unfixable.  
 //These numbers were empirically determined, not theoretically. 
-const REFLECTOR: f64 = 40.0;
+const REFLECTOR: f64 = 15.0;
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
@@ -352,7 +352,6 @@ impl Base {
 
     }
 
-   //TODO: SOMETHING WRONG HERE 
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.as_simplex();
@@ -1850,10 +1849,13 @@ impl<'a> MotifSet<'a> {
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
-       //println!("d k {} p {} old_mots {:?} new mots {:?} mot_dists {:?}",delta_kinetic_energy, delta_potential_energy,self.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), prior_set.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), self.set.iter().zip(prior_set.set.iter()).map(|(a,b)| a.distance_function(b)).collect::<Vec<_>>()); 
+       if(delta_potential_energy == -f64::INFINITY) {
+            println!("d k {} p {} old_mots {:?} new mots {:?} mot_dists {:?}",delta_kinetic_energy, delta_potential_energy,self.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), prior_set.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), self.set.iter().zip(prior_set.set.iter()).map(|(a,b)| a.distance_function(b)).collect::<Vec<_>>()); 
+       }
        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
        } else {
+           //println!("rejected. the old mot is {:?}, and the diff is {}", self, delta_potential_energy+delta_kinetic_energy);
            (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
        }
 
