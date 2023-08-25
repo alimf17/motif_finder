@@ -121,6 +121,8 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
+static PROPOSE_EXTEND: Lazy<Dirichlet> = Lazy::new(|| Dirichlet::new(vec![2.0_f64; BASE_L]).unwrap());
+
 const PROB_POS_PEAK: f64 = 0.9;
 
 pub const THRESH: f64 = 1e-3; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
@@ -213,6 +215,13 @@ impl Base {
         }
 
         Base { props: att}
+    }
+
+    pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
+
+        let props: [f64; BASE_L] = (*PROPOSE_EXTEND.sample(rng).data.as_vec()).clone().try_into().expect("We constructed PROPOSE_EXTEND based on BASE_L");
+        Base{ props: props}
+
     }
 
     pub fn from_bp<R: Rng + ?Sized>(best: usize, rng: &mut R) -> Base {
@@ -1600,11 +1609,12 @@ impl<'a> MotifSet<'a> {
         } else {
 
             let mut new_mot = self.set[extend_id].clone();
-            new_mot.pwm.push(Base::rand_new(rng));
+            let new_base = Base::propose_safe_new(rng);
+            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(new_base.as_probabilities().to_vec().try_into().unwrap()));
+            new_mot.pwm.push(new_base);
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             if self.data.seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
                 let ln_post = new_set.replace_motif(new_mot, extend_id);
-                let base_ln_density = BASE_PRIOR_DENS.ln(); 
                 Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
             } else {
                 None
@@ -1625,7 +1635,7 @@ impl<'a> MotifSet<'a> {
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = BASE_PRIOR_DENS.ln();
+            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(old_base.expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -3274,7 +3284,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = BASE_PRIOR_DENS.ln();
+        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
@@ -3319,7 +3329,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = BASE_PRIOR_DENS.ln() ;
+        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 

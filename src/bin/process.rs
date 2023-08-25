@@ -126,13 +126,13 @@ pub fn main() {
         let mut samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
         let pow_samples = samples.len().ilog2() + 1;
         let trace_min = samples.iter().min_by(|a, b| a.total_cmp(b));
-        let res = samples_fft_to_spectrum(
+        /*let res = samples_fft_to_spectrum(
         &samples[0..16384],
         samples.len() as u32,
         FrequencyLimit::All,
         None,).unwrap();
         let daaa = res.data().iter().map(|(a, b)| (a.val(), b.val().powi(2)/(4.0*16384.))).collect::<Vec<_>>();
-        //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());
+        //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());*/
         plot_post.line(format!("Chain {}", letter), tracey.into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
@@ -202,6 +202,8 @@ pub fn main() {
         println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
+        let mot_size = SetTraceCollections[0].len() as f64;
+        let distance_cutoff = mot_size*0.5753378-1.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
         let trace_scoop = SetTraceCollections.iter().enumerate().map(|(m, a)| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 3.0);
             num_good_motifs+= set_extracts.len();
