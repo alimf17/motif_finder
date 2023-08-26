@@ -225,6 +225,23 @@ impl Base {
 
     }
 
+    pub fn from_bp_with_uniforms<R: Rng + ?Sized>(best: usize, rng: &mut R) -> Base {
+
+        let mut props: [f64; BASE_L] = [0.; BASE_L];
+        
+        for i in 0..BASE_L{
+            if i == best {
+                props[i] = 1.0;
+            } else {
+                props[i] = rng.gen();
+            }
+        }
+        
+        Base{ props: props }
+
+    }
+
+
     pub fn make_best(&self, best: usize) -> Base {
 
         let mut base2 = self.props.clone();
@@ -939,6 +956,8 @@ impl Motif {
 
 
     }
+
+
    
     //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
     //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly

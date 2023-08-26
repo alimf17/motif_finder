@@ -5,9 +5,12 @@ use std::ops::{Sub, SubAssign};
 use std::ops::Mul;
 use std::cmp::max;
 use std::cmp::min;
+use std::collections::HashMap;
+
 use core::f64::consts::PI;
 
 use crate::sequence::Sequence;
+use crate::sequence::BP_PER_U8;
 use crate::modified_t::*;
 use statrs::distribution::StudentsT;
 use statrs::distribution::{Continuous, ContinuousCDF};
@@ -278,6 +281,84 @@ impl<'a> Waveform<'a> {
        
 
     }
+
+
+    pub fn kmer_propensities(&self, k: usize) -> Vec<f64> {
+
+
+    /*wave: Vec<f64>,
+    spacer: usize,
+    point_lens: Vec<usize>,
+    start_dats: Vec<usize>,
+    seq: &'a Sequence,*/
+
+        let coded_sequence = self.seq.seq_blocks();
+        let block_lens = self.seq.block_lens(); //bp space
+        let block_starts = self.seq.block_u8_starts(); //stored index space
+
+        let mut kmer_hash: HashMap<u64, usize> = HashMap::with_capacity(self.seq.number_unique_kmers(k)); 
+        
+        for (i, mot) in self.seq.unique_kmers(k).into_iter().enumerate() {
+            let _ = kmer_hash.insert(mot, i);
+        }
+
+
+        let mut uncoded_seq: Vec<usize> = vec![0; self.seq.max_len()];
+
+        let mut ind = 0;
+
+        let mut store = Sequence::code_to_bases(coded_sequence[0]);
+
+        let mut propensities: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+
+        {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..((block_lens[i])-k) {
+
+                    let center = j + (k/2);
+                    //ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+                    let lower_data_ind = center/self.spacer; 
+
+                    //Center cannot possibly beyond the data because of how I take j: I stop before j+k runs 
+                    //into the sequence end, which will always make lower_data_ind hit, at most the largest
+                    //location. BUT, I CAN be over any ability to check the next location
+
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    let u64_mot = Sequence::kmer_to_u64(&(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
+                    let between = center % self.spacer;
+                    if (between == 0) || (lower_data_ind + 1 >= self.point_lens[i]) {
+                        propensities[kmer_hash[&u64_mot]] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(2);
+                    } else {
+                        let weight = (between as f64)/(self.spacer as f64);
+                        propensities[kmer_hash[&u64_mot]] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(2);
+                    }
+
+                }
+
+            }
+        }
+
+
+        propensities
+
+
+    }
+
+
 
     pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
         

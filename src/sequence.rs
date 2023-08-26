@@ -275,6 +275,8 @@ impl Sequence {
         V
 
     }
+
+
     
     pub fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
 
@@ -333,6 +335,8 @@ impl Sequence {
         ret
 
     }
+
+
 
     //We exploit the ordering of the u64 versions of kmer to binary search
     pub fn kmer_in_seq(&self, kmer: &Vec<usize>) -> bool {
