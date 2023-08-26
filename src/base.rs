@@ -175,11 +175,6 @@ impl Base {
 
         let max = Self::max(&props);
         
-        //We can rely on perfect float equality because max copies its result
-        let mut maxes = props.iter().enumerate().filter(|(_,&a)| (a == max)).map(|(b, _)| b).collect::<Vec<usize>>(); 
-        let max_ind = maxes[0]; //We should rarely if ever have exact equality. This is just me defending against the alternative
-       
-
         for i in 0..props.len() {
                 props[i] = (props[i]/max);
         }
@@ -220,7 +215,7 @@ impl Base {
     pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
         let props: [f64; BASE_L] = (*PROPOSE_EXTEND.sample(rng).data.as_vec()).clone().try_into().expect("We constructed PROPOSE_EXTEND based on BASE_L");
-        Base{ props: props}
+        Base::new(props)
 
     }
 
