@@ -351,7 +351,7 @@ impl<'a> Waveform<'a> {
                 }
 
             }
-            println!("unique u64 {}-mers: {:?}", k, self.seq.unique_kmers(k));
+            //println!("unique u64 {}-mers: {:?}", k, self.seq.unique_kmers(k));
 
         }
 

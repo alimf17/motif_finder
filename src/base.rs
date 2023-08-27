@@ -3322,10 +3322,19 @@ mod tester{
         }
 
         let should_prior = ln_prop-(death_mot.calc_ln_post());
+        
+        let remaining = motif_set.data-&death_mot.signal;
+        let propensities = remaining.kmer_propensities(motif_set.set[l].len());
+        let pick_prob = propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
-        let actual_prior = motif_set.set[l].height_prior()+motif_set.set[l].pwm_gen_prob(&sequence);
 
-        assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
+
+        let actual_prior = motif_set.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+
+        println!("priors {} {} {} {}", motif_set.set[l].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
+
+        //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
+        assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
 
         //fn propose_extend_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
 
