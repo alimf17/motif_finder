@@ -296,20 +296,15 @@ impl<'a> Waveform<'a> {
         let block_lens = self.seq.block_lens(); //bp space
         let block_starts = self.seq.block_u8_starts(); //stored index space
 
-        let mut kmer_hash: HashMap<u64, usize> = HashMap::with_capacity(self.seq.number_unique_kmers(k)); 
-        
-        for (i, mot) in self.seq.unique_kmers(k).into_iter().enumerate() {
-            let _ = kmer_hash.insert(mot, i);
-        }
-
-
         let mut uncoded_seq: Vec<usize> = vec![0; self.seq.max_len()];
 
         let mut ind = 0;
 
         let mut store = Sequence::code_to_bases(coded_sequence[0]);
 
-        let mut propensities: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+        //let mut propensities: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+
+        let mut propensities: Vec<f64> = vec![0.0; self.seq.number_unique_kmers(k)];
 
         {
             let uncoded_seq = uncoded_seq.as_mut_slice();
@@ -328,7 +323,7 @@ impl<'a> Waveform<'a> {
 
                 for j in 0..((block_lens[i])-k) {
 
-                    let center = j + (k/2);
+                    let center = j + ((k-1)/2);
                     //ind = BP_PER_U8*block_starts[i]+(j as usize);
 
                     let lower_data_ind = center/self.spacer; 
@@ -341,15 +336,23 @@ impl<'a> Waveform<'a> {
                     let u64_mot = Sequence::kmer_to_u64(&(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
                     let between = center % self.spacer;
                     if (between == 0) || (lower_data_ind + 1 >= self.point_lens[i]) {
-                        propensities[kmer_hash[&u64_mot]] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(2);
+                        /*#[cfg(test)]{
+                            println!("block {} j {} kmer {} amount {}", i, j,u64_mot, self.wave[self.start_dats[i]+lower_data_ind]); 
+                        }*/
+                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(2);
                     } else {
                         let weight = (between as f64)/(self.spacer as f64);
-                        propensities[kmer_hash[&u64_mot]] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(2);
+                        /*#[cfg(test)]{
+                            println!("block {} j {} kmer {} amount {}", i, j, u64_mot, self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight);
+                        }*/
+                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(2);
                     }
 
                 }
 
             }
+            println!("unique u64 {}-mers: {:?}", k, self.seq.unique_kmers(k));
+
         }
 
 
@@ -1008,7 +1011,7 @@ pub fn aberth_vec(polynomial: &Vec<f64>, epsilon: f64) -> Result<Vec<Complex<f64
 
       if !new_z.approx_eq(zs[i], epsilon) {
         converged = false;
-      }
+        }
     }
     if converged {
       return Ok(new_zs);
@@ -1184,17 +1187,27 @@ mod tests{
     fn real_wave_check(){
         let k = Kernel::new(5.0, 5, 2.0);
         let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
+        //let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
 
         unsafe{
 
         signal.place_peak(&k, 1, 20);
 
+        let t = Instant::now();
+        //kmer_propensities is tested by inspection, not asserts, because coming up with a good assert case was hard and I didn't want to
+        //It passed the inspections I gave it, though
+        let propens = signal.kmer_propensities(9);
+        println!("duration {:?}", t.elapsed());
+
+        //println!("{:?}", signal);
+        println!("{:?}", propens);
         //Waves are in the correct spot
         assert!((signal.raw_wave()[21]-2.0).abs() < 1e-6);
 
         signal.place_peak(&k, 1, 2);
 
+        println!("after second ins {:?}", signal.kmer_propensities(9));
         //Waves are not contagious
         assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
 

@@ -618,7 +618,32 @@ impl Motif {
 
         pwm = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
 
-        //let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+
+        let sign: f64 = rng.gen();
+        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
+
+        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+
+        let kernel = Kernel::new(peak_width, spacer, peak_height);
+
+        Motif {
+            peak_height: peak_height,
+            kernel: kernel,
+            pwm: pwm,
+        }
+
+
+    }
+
+    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<usize>, peak_width: f64, spacer: usize, rng: &mut R) -> Motif {
+        
+        let mut pwm: Vec<Base> = Vec::with_capacity(MAX_BASE);
+
+        pwm = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
+
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
 
 
         let sign: f64 = rng.gen();
@@ -651,6 +676,26 @@ impl Motif {
         
 
     }
+
+    pub fn rand_propensity_mot<R: Rng + ?Sized>(peak_width: f64, wave: &Waveform, rng: &mut R) -> (Motif, f64) {
+
+        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+        let propensities = wave.kmer_propensities(num_bases);
+
+        let mut sum_prop: f64 = 0.0;
+        
+        for p in propensities.iter() { sum_prop += *p; }
+
+        let dist = WeightedIndex::new(&propensities).unwrap();
+
+        let selection = dist.sample(rng);
+
+        let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
+
+        (Self::from_motif_uniform(mot, peak_width, wave.spacer(), rng), propensities[selection]/sum_prop)
+    }
+
     pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, peak_width: f64, seq: &Sequence, spacer: usize, rng: &mut R) -> Motif {
 
 
@@ -1588,8 +1633,9 @@ impl<'a> MotifSet<'a> {
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
-        let new_mot = Motif::rand_mot(self.width, self.data.seq(), self.data.spacer(), rng); //rand_mot always generates a possible motif
-        let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_gen_prob(self.data.seq());
+        let remaining = self.data-&self.signal;
+        let (new_mot, pick_prob) = Motif::rand_propensity_mot(self.width, &remaining, rng); //rand_mot always generates a possible motif
+        let ln_gen_prob = new_mot.height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
         let ln_post = new_set.add_motif(new_mot);
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
 
@@ -1604,12 +1650,26 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
-            let ln_gen_prob = self.set[rem_id].height_prior()+self.set[rem_id].pwm_gen_prob(self.data.seq());
+            let mod_signal = &(self.signal)-&(self.set[rem_id].generate_waveform(self.data));
+            let remaining = self.data-&mod_signal;
+            let propensities = remaining.kmer_propensities(self.set[rem_id].len());
+            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))]/propensities.iter().sum::<f64>();
+            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
             let ln_post = new_set.remove_motif(rem_id);
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
+/*
+    fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
+        let heights: Vec<Option<f64>> = self.set.iter().map(|a| a.
+
+    }
+
+    fn propose_merge_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+    }
+*/
 
     //I'm only extending motifs on one end
     //This saves a bit of time from not having to reshuffle motif vectors
@@ -3226,10 +3286,16 @@ mod tester{
 
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
-        let actual_prior = birth_mot.set[l].height_prior()+birth_mot.set[l].pwm_gen_prob(&sequence);
+        let remaining = motif_set.data-&motif_set.signal;
+        let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
+        let pick_prob = propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+
+
+        let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
        
+        println!("done birth");
         //fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
 
         let killed = motif_set.propose_kill_motif(&mut rng);

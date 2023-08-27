@@ -37,7 +37,8 @@ pub struct Sequence {
     block_lens: Vec<usize>,
     max_len: usize,
     kmer_dict: HashMap<usize, Vec<u64>>,
-    kmer_nums: HashMap<usize, usize>
+    kmer_id_dict: Vec<HashMap<u64, usize>>,
+    kmer_nums: HashMap<usize, usize>,
 }
 
 
@@ -106,6 +107,7 @@ impl Sequence {
         }
 
         let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
+        let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
         let orig_nums: HashMap<usize, usize> = HashMap::new();
 
         let mut seq = Sequence{
@@ -114,6 +116,7 @@ impl Sequence {
                     block_lens: block_ls,
                     max_len: max_len,
                     kmer_dict: orig_dict, 
+                    kmer_id_dict: orig_id_dict,
                     kmer_nums: orig_nums,
                     };
 
@@ -143,6 +146,7 @@ impl Sequence {
         let max_len: usize = *block_lens.iter().max().unwrap();
         let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
         let orig_nums: HashMap<usize, usize> = HashMap::new();
+        let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
 
         let mut seq = Sequence{
                     seq_blocks: seq_blocks,
@@ -150,6 +154,7 @@ impl Sequence {
                     block_lens: block_lens,
                     max_len: max_len,
                     kmer_dict: orig_dict, 
+                    kmer_id_dict: orig_id_dict,
                     kmer_nums: orig_nums,
         };
 
@@ -161,17 +166,23 @@ impl Sequence {
     fn initialize_kmer_dicts(&mut self) {
 
         let mut kmer_dict: HashMap<usize, Vec<u64>> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
+        
+        let mut kmer_id_dict: Vec<HashMap<u64, usize>> = Vec::with_capacity(MAX_BASE+1-MIN_BASE);
 
         let mut kmer_nums: HashMap<usize, usize> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
 
         for k in MIN_BASE..MAX_BASE+1 {
 
             let kmer_arr = self.generate_kmers(k);
+            let mut minimap: HashMap<u64, usize> = HashMap::with_capacity(kmer_arr.len());
+            let _ = kmer_arr.iter().enumerate().map(|(a, &b)| minimap.insert(b, a)).collect::<Vec<_>>();
+            kmer_id_dict.push(minimap);
             kmer_nums.insert(k, kmer_arr.len());
             kmer_dict.insert(k, kmer_arr);
         }
 
         self.kmer_dict = kmer_dict;
+        self.kmer_id_dict = kmer_id_dict;
         self.kmer_nums = kmer_nums;
 
     }
@@ -236,7 +247,7 @@ impl Sequence {
     //Note: these are very much designed to minimize how much self.kmer_dict
     //      is directly accessed. 
 
-    //Contract: k is an element of [MIN_BASE, MAX_BASE]
+    //Panics: if k is not an element of [MIN_BASE, MAX_BASE]
     pub fn number_unique_kmers(&self, k: usize) -> usize {
         self.kmer_nums[&k]
     }
@@ -249,6 +260,16 @@ impl Sequence {
     pub fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
         self.kmer_dict[&k][id]
     }
+
+    pub fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
+        self.kmer_id_dict[k-MIN_BASE].get(&kmer).copied()
+    }
+
+    //Panics: if kmer is not a valid u64 version of a k-mer represented in the sequence
+    pub fn id_of_u64_kmer_or_die(&self, k: usize, kmer: u64) -> usize {
+        self.kmer_id_dict[k-MIN_BASE][&kmer]
+    }
+
 
 
     pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
