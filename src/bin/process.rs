@@ -169,7 +169,7 @@ pub fn main() {
         ref_pwms.append(&mut (trace.ret_rand_motifs(ref_per_chain, &mut rng)));
     }
 
-    let cluster_per_chain: usize = min_len.min(2000);
+    let cluster_per_chain: usize = min_len.min(10000);
 
     let motif_num_traces = SetTraceCollections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
@@ -196,6 +196,7 @@ pub fn main() {
     let dist_array = establish_dist_array(&clustering_motifs);
     let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
 
+    println!("iter {} swap {}", n_iter, n_swap);
     println!("min {}", min_len);
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
@@ -203,7 +204,7 @@ pub fn main() {
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let mot_size = SetTraceCollections[0].len() as f64;
-        let distance_cutoff = mot_size*0.5753378-1.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
+        let distance_cutoff = mot_size*0.5753378-0.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
         let trace_scoop = SetTraceCollections.iter().enumerate().map(|(m, a)| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 3.0);
             num_good_motifs+= set_extracts.len();
@@ -393,7 +394,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
             
                 for little_trace in tetra_traces.iter() {
-                    chart.draw_series(little_trace.iter().step_by(50).map(|&a| Circle::new(a,1_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
+                    chart.draw_series(little_trace.iter().step_by(10).map(|&a| Circle::new(a,1_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
                 }
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }

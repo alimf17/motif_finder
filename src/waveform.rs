@@ -11,6 +11,7 @@ use core::f64::consts::PI;
 
 use crate::sequence::Sequence;
 use crate::sequence::BP_PER_U8;
+use crate::base::{MIN_HEIGHT, MAX_HEIGHT};
 use crate::modified_t::*;
 use statrs::distribution::StudentsT;
 use statrs::distribution::{Continuous, ContinuousCDF};
@@ -335,20 +336,32 @@ impl<'a> Waveform<'a> {
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let u64_mot = Sequence::kmer_to_u64(&(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
                     let between = center % self.spacer;
-                    if (between == 0) || (lower_data_ind + 1 >= self.point_lens[i]) {
+                    let to_add = if (between == 0) || (lower_data_ind + 1 >= self.point_lens[i]) {
                         /*#[cfg(test)]{
                             println!("block {} j {} kmer {} amount {}", i, j,u64_mot, self.wave[self.start_dats[i]+lower_data_ind]); 
                         }*/
-                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(2);
+                        //propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(-2);
+                        (self.wave[self.start_dats[i]+lower_data_ind])
                     } else {
                         let weight = (between as f64)/(self.spacer as f64);
                         /*#[cfg(test)]{
                             println!("block {} j {} kmer {} amount {}", i, j, u64_mot, self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight);
                         }*/
-                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(2);
-                    }
+                        //propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(-2);
+                        (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight)
+                    };
 
+                    //A motif should never be proposed unless there's a place in the signal that
+                    //could reasonably considered motif-ish
+                    //Note: this does NOT interfere with detailed balance: motifs are always
+                    //proposed with a minimum height and so when death is proposed, it should
+                    //always be the case that there's SOMEWHERE with the height minimum
+                    if to_add.abs() > (MIN_HEIGHT+2.0) {
+                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += to_add.powi(2);
+                    }
                 }
+
+            
 
             }
             //println!("unique u64 {}-mers: {:?}", k, self.seq.unique_kmers(k));
@@ -429,7 +442,25 @@ impl<'a> Waveform<'a> {
 
     }
 
+    pub fn generate_all_locs(&self) -> Vec<usize> {
 
+        let mut length: usize = 0;
+        for &a in self.point_lens.iter() { length += a; }
+
+        let mut locations: Vec<usize> = Vec::with_capacity(length);
+
+        println!("starts {:?}", self.start_dats);
+        println!("lens {:?}", self.point_lens);
+        for i in 0..(self.start_dats.len()){
+
+            for j in 0..(self.point_lens[i]){
+                locations.push((self.start_dats[i]+j)*self.spacer);
+            }
+        }
+
+        locations
+
+    }
 
     pub fn spacer(&self) -> usize {
         self.spacer

@@ -114,14 +114,14 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //You need to force it to be at most 12. 
 
 
-const MIN_HEIGHT: f64 = 3.;
-const MAX_HEIGHT: f64 = 15.;
+pub const MIN_HEIGHT: f64 = 3.;
+pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
-static PROPOSE_EXTEND: Lazy<Dirichlet> = Lazy::new(|| Dirichlet::new(vec![2.0_f64; BASE_L]).unwrap());
+static PROPOSE_EXTEND: Lazy<Dirichlet> = Lazy::new(|| Dirichlet::new(vec![10.0_f64; BASE_L]).unwrap());
 
 const PROB_POS_PEAK: f64 = 0.9;
 
@@ -131,7 +131,7 @@ const SPREAD_HMC_CONV: f64 = 15.0;
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
-const NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
+const NECESSARY_MOTIF_IMPROVEMENT: f64 = 1.0_f64;
 
 //When converting between gradient compatible and incompatible representations
 //We sometimes end up with numerical errors that basically make infinities where there shouldn't be
@@ -677,7 +677,7 @@ impl Motif {
 
     }
 
-    pub fn rand_propensity_mot<R: Rng + ?Sized>(peak_width: f64, wave: &Waveform, rng: &mut R) -> (Motif, f64) {
+    pub fn rand_propensity_mot<R: Rng + ?Sized>(peak_width: f64, wave: &Waveform, rng: &mut R) -> Option<(Motif, f64)> {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
@@ -687,13 +687,17 @@ impl Motif {
         
         for p in propensities.iter() { sum_prop += *p; }
 
+        if sum_prop <= 0.0 {
+            return None;
+        }
+
         let dist = WeightedIndex::new(&propensities).unwrap();
 
         let selection = dist.sample(rng);
 
         let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
 
-        (Self::from_motif_uniform(mot, peak_width, wave.spacer(), rng), propensities[selection]/sum_prop)
+        Some((Self::from_motif_uniform(mot, peak_width, wave.spacer(), rng), propensities[selection]/sum_prop))
     }
 
     pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, peak_width: f64, seq: &Sequence, spacer: usize, rng: &mut R) -> Motif {
@@ -1510,6 +1514,7 @@ impl<'a> MotifSet<'a> {
 
         let diff_ln_like = new-old;
 
+        println!("accept ln prob {}", diff_ln_like);
         //Always accept if new likelihood is better
         if (diff_ln_like > 0.0) {
             true
@@ -1542,7 +1547,7 @@ impl<'a> MotifSet<'a> {
     //Instead, we only want to consider an additional motif if 
     //it brings an improvement of at least NECESSARY_MOTIF_IMPROVEMENT to the ln posterior
     //This amounts to a geometric prior with positive integer support 
-    //and p = 1-NECESSARY_MOTIF_IMPROVEMENT.exp().
+    //and p = 1-(-NECESSARY_MOTIF_IMPROVEMENT).exp().
     //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     //for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
@@ -1634,11 +1639,17 @@ impl<'a> MotifSet<'a> {
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let remaining = self.data-&self.signal;
-        let (new_mot, pick_prob) = Motif::rand_propensity_mot(self.width, &remaining, rng); //rand_mot always generates a possible motif
-        let ln_gen_prob = new_mot.height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
-        let ln_post = new_set.add_motif(new_mot);
-        Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
-
+        let attempt = Motif::rand_propensity_mot(self.width, &remaining, rng); //There may not always be a place with decent propensities
+        match attempt {
+            None => {println!("No good propensities"); None},
+            Some((new_mot, pick_prob)) => {
+                let ln_gen_prob = new_mot.height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+                let h_prior = new_mot.height_prior();
+                let ln_post = new_set.add_motif(new_mot);
+                println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+                Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
+            }
+        }
     }
 
     //This proposes removing an old motif for the next motif set
@@ -1653,9 +1664,14 @@ impl<'a> MotifSet<'a> {
             let mod_signal = &(self.signal)-&(self.set[rem_id].generate_waveform(self.data));
             let remaining = self.data-&mod_signal;
             let propensities = remaining.kmer_propensities(self.set[rem_id].len());
-            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))]/propensities.iter().sum::<f64>();
+            let sum_propensities = propensities.iter().sum::<f64>();
+            if sum_propensities <= 0.0 {
+                return None;
+            }
+            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))]/sum_propensities;
             let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
             let ln_post = new_set.remove_motif(rem_id);
+            println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
@@ -1740,9 +1756,12 @@ impl<'a> MotifSet<'a> {
 
         match proposal {
 
-            None => (self.clone(), which_rj, false),
+            None => {
+                println!("Failed move {}", which_rj);
+                (self.clone(), which_rj, false)
+            },
             Some((new_mot, modded_ln_like)) => {
-
+                println!("old ln P {}, modded ln P {}", self.ln_post.unwrap(), modded_ln_like);
                 if Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng) {
                     (new_mot, which_rj, true)
                 } else { 
@@ -2316,6 +2335,10 @@ impl<'a> SetTrace<'a> {
         self.trace[self.trace.len()-1].give_activated(self.data, self.background)
     }
 
+    pub fn current_set_to_print(&self) -> StrippedMotifSet {
+        self.trace[self.trace.len()-1].give_stored()
+    }
+
     pub fn quiet_last_set(&mut self) {
         
         if let Some(set_mut_ref) = self.trace.last_mut() {
@@ -2355,10 +2378,49 @@ impl<'a> SetTrace<'a> {
 
         fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap());
 
-
         self.save_initial_state(output_dir, run_name);
     }
 
+    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+        let current_active = self.current_set();
+    
+        let locs = self.data.generate_all_locs();
+
+        let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
+
+        let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
+       
+        plot.fill(&WHITE).unwrap();
+
+        let mut chart = ChartBuilder::on(&plot)
+            .set_label_area_size(LabelAreaPosition::Left, 40)
+            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .caption("Signal Comparison", ("sans-serif", 40))
+            .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
+
+
+        chart.configure_mesh().draw().unwrap();
+
+        chart.draw_series(current_active.data.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
+       
+        let current_resid = current_active.data-&current_active.signal;
+        chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
+
+        let max_draw = current_active.set.len().min(3);
+
+        let COLORS = [&RED, &GREEN, &CYAN];
+
+        for i in 0..max_draw {
+
+            let occupancy = current_active.set[i].generate_waveform(current_active.data);
+            chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), COLORS[i])).unwrap().label(format!("Motif {}", i).as_str());
+
+        }
+
+        chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
+
+    }
 
     /*
 

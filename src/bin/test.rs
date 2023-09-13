@@ -1,44 +1,4 @@
 #[allow(unused_parens)]
-/*mod base;
-mod sequence;
-mod waveform;
-mod data_struct;
-mod modified_t;*/
-/*use super::base;
-use super::sequence;
-use super::waveform;
-use super::data_struct;
-use super::modified_t;*/
-/*
- error[E0425]: cannot find value `NULL_CHAR` in this scope
-   --> src/bin/tool.rs:107:163
-    |
-107 |     let (total_data,data_string): (All_Data, String) = All_Data::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
-    |                                                                                                                                                                   ^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_CHECKPOINT_FILES` in this scope
-   --> src/bin/tool.rs:113:37
-    |
-113 |     let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
-    |                                     ^^^^^^^^^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_RJ_STEPS` in this scope
-   --> src/bin/tool.rs:114:38
-    |
-114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
-    |                                      ^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_HMC_STEPS` in this scope
-   --> src/bin/tool.rs:114:51
-    |
-114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
-    |                                                   ^^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `MAX_E_VAL` in this scope
-   --> src/bin/tool.rs:124:149
-    |
-124 |         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length, &mut rng),
- */
 
 
 use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
@@ -74,28 +34,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-/*
 
-const NULL_CHAR: Option<char> = None;
- 
-const MOMENTUM_SD: f64 = 1.0;
-static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
-
-const NUM_CHECKPOINT_FILES: usize = 25;
-
-const NUM_RJ_STEPS: usize = 1;
-const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
-const NUM_BASE_LEAP_STEPS: usize = 1;
-const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
-const NUM_HMC_STEPS: usize = 50;
-const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
-
-const HMC_TRACE_STEPS: usize = 5; 
-const HMC_EPSILON: f64 = 1.0/16.0; 
-
-//This only matters when taking in a meme file
-const MAX_E_VAL: f64 = 0.01;
-*/
 fn main() {
 
     //Must have the following arguments:
@@ -107,7 +46,6 @@ fn main() {
     //5) Data file name
     //6) The average length of the DNA fragments after your DNAse digest
     //7) A positive integer corresponding to the spacing between data points in bp
-    //8) Number of advances to run the set trace
     //May also have the following arguments:
 
     //9) Either the word "meme" or the word "json". If one of these is not the argument,
@@ -118,7 +56,7 @@ fn main() {
     //   If they're not identical, the program will panic on the spot
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 9 {
+    if args.len() < 8 {
         panic!("Not enough arguments!");
     }
 
@@ -133,19 +71,15 @@ fn main() {
     assert!(spacing > 0, "The spacing cannot be zero!");
     assert!(fragment_length > spacing, "The fragment length must be strictly greater than the spacing!");
 
-    let num_advances: usize = args[8].parse().expect("The number of advances to run must be a positive integer!");
- 
     let (total_data,data_string): (All_Data, String) = All_Data::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
 
     let data: Waveform = total_data.validated_data();
 
     let background = total_data.background();
 
-    let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
-    let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
     //Initialize trace
-    let mut current_trace: SetTrace = SetTrace::new_empty(capacity,data_string.clone(), &data, &background);
+    let mut current_trace: SetTrace = SetTrace::new_empty(10,data_string.clone(), &data, &background);
 
     let mut rng = rand::thread_rng();
     
@@ -169,36 +103,8 @@ fn main() {
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
-    let mut acceptances: [usize;6]= [0;6];
-    let mut trials: [usize;6] = [0;6];
-    let mut rates: [f64; 6] = [0.;6];
+    current_trace.save_trace(output_dir, run_name, 0);
 
-    let mut trackHMC: usize = 0;
-
-    for step in 0..num_advances {
- 
-        let (selected_move, accepted) = current_trace.advance(&mut rng);
-
-        trials[selected_move] += 1;
-        if accepted {acceptances[selected_move] += 1;}
-        rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
-
-        if step % 10 == 0 {
-            println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
-            if (acceptances[5]-trackHMC) == 0 {
-                println!("Not really changing motif???");
-                println!("{:?}", current_trace.current_set_to_print());
-            }
-            trackHMC=acceptances[5];
-        }
-        if step % save_step == 0 {
-            
-            current_trace.save_trace(output_dir, run_name, step);
-            current_trace.save_and_drop_history(output_dir, run_name, step);
-
-        }
-
-    }
 
 
     println!("Finished run");

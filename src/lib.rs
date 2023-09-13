@@ -9,7 +9,7 @@ use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;
 
-const MOMENTUM_SD: f64 = 0.1;
+const MOMENTUM_SD: f64 = 1.0;
 static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
 
 pub const NUM_CHECKPOINT_FILES: usize = 25;
@@ -22,7 +22,7 @@ pub const NUM_HMC_STEPS: usize = 1;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 2;
-const HMC_EPSILON: f64 = 1./256.; //2^(-21)
+const HMC_EPSILON: f64 = 1./2097152.; //2^(-21)
 
 //This only matters when taking in a meme file
 pub const MAX_E_VAL: f64 = 0.01;

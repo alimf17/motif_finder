@@ -116,6 +116,7 @@ impl All_Data {
 
         let file_out = format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
 
+        println!("formatted");
         let check_initialization = fs::read_to_string(file_out.as_str());
 
         match check_initialization {
@@ -123,19 +124,24 @@ impl All_Data {
             Err(error) => (), //We just want the full preprocessing to try to continue if we get an error from read_to_string
         };
 
+        println!("checked if initialized and isn't");
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);
 
+        println!("processed fasta");
         let sequence_len = pre_sequence.len();
 
         let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular);
  
+        println!("processed data");
 
         let (seq, data) = Self::synchronize_sequence_and_data(pre_sequence, pre_data, sequence_len, spacing); 
 
+        println!("synchronized fasta and data");
         let full_data: All_Data = All_Data {seq: seq, data: data, background: background};
 
         let wave = full_data.validated_data(); //This won't be returned: it's just a validation check.
 
+        println!("validated data");
         //This probably isn't necessary, but helps ensure that the validation check doesn't get optimized away by the compiler
         assert!(spacing == wave.spacer(), "Somehow, the data waveform got mangled");
         
@@ -300,6 +306,7 @@ impl All_Data {
 
         raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
 
+        println!("Data sorted");
         let start_loc: usize = raw_locs_data[0].0;
         let last_loc: usize = raw_locs_data.last().unwrap().0;
 
@@ -328,6 +335,8 @@ impl All_Data {
                 (*point).0 -= 1;
             }
         }
+
+        println!("Normalized data location");
 
         //Compress all data so that locations are unique by taking the mean of the data
 
@@ -377,6 +386,7 @@ impl All_Data {
             *dat = (*dat-median)/mad_as_sd;
         }
 
+        println!("refined data values");
         //Here, refined_locs_data ultimately has one data value for every represented location in the data,
         //with the data sorted by location in ascending order
  
@@ -384,6 +394,7 @@ impl All_Data {
 
         for i in 0..(refined_locs_data.len()-1){
 
+            let max_ar: usize = (2*(fragment_length)+5).min(25_usize);
             let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
             if jump >= 2*(fragment_length)+5 { //We need the times 2 because the ar correlations can be at least that big. We then add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
                 start_gaps.push(i);
@@ -430,6 +441,7 @@ impl All_Data {
 
         };
         
+        println!("Cut out invalid data");
 
         if start_gaps.len() > 1 {
             for i in 0..(start_gaps.len()-1) {
@@ -468,7 +480,7 @@ impl All_Data {
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
-        let data_zone: usize = fragment_length/spacing;
+        let data_zone: usize = (fragment_length/spacing);
 
         for block in lerped_blocks {
 
@@ -502,6 +514,8 @@ impl All_Data {
                 }
             }
         }
+
+        println!("sorted data data away from background inference data");
 
         if ar_blocks.len() == 0 {
             panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
@@ -607,6 +621,8 @@ impl All_Data {
 
         }
 
+        println!("Ensured that cutting happened");
+
 
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
@@ -619,8 +635,9 @@ impl All_Data {
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
 
-        let background_dist = Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone);
+        let background_dist = Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30));
 
+        println!("inferred background dist");
 
         let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
                                                                      .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
@@ -718,7 +735,9 @@ impl All_Data {
             let num_coeffs = a+1;
             let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks, num_coeffs);
 
+            println!("correlations {}", a);
             let new_coeffs = Self::compute_ar_coeffs(&correlations);
+            println!("coefficients {}", a);
 
             let mut noises: Vec<f64> = Vec::with_capacity(data_len);
             
@@ -730,16 +749,20 @@ impl All_Data {
                     None => (),
                 };
             }
+            println!("filters {}", a);
 
             let (pre_sd, pre_df) = Self::estimate_t_dist(&noises);
+            println!("estimatess {}", a);
             let lnlike = Self::lnlike(&noises, pre_sd, pre_df);
 
             let new_bic = Self::bic(lnlike, data_len, num_coeffs);
+            println!("bics {}", a);
             ([pre_sd, pre_df, new_bic], new_coeffs)
         }).collect();
 
         let ([sd, df, bic], coeffs) = models.iter().min_by(|([_, _, a], _),([_, _, b], _)| a.total_cmp(b)).unwrap(); 
         
+        println!("sorted");
 
 
         //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
