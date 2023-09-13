@@ -125,7 +125,7 @@ static PROPOSE_EXTEND: Lazy<Dirichlet> = Lazy::new(|| Dirichlet::new(vec![10.0_f
 
 const PROB_POS_PEAK: f64 = 0.9;
 
-pub const THRESH: f64 = 1e-3; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
+pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
 const SPREAD_HMC_CONV: f64 = 15.0;
 

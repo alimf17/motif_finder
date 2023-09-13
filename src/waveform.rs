@@ -87,15 +87,15 @@ impl Kernel {
     pub fn new(peak_width: f64, spacer: usize, peak_height: f64) -> Kernel {
 
         let data_width = peak_width/(spacer as f64);
-        let span = (data_width*WIDE) as isize;
+        let span = (peak_width*WIDE) as isize;
 
         let domain: Vec<isize> = (-span..(span+1)).collect();
 
-        let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*data_width.powf(2.0))).exp()*peak_height).collect();
+        let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*peak_width.powf(2.0))).exp()*peak_height).collect();
 
         Kernel{
             peak_height: peak_height,
-            peak_width: data_width,
+            peak_width: peak_width,
             kernel: range,
         }
 
@@ -1207,11 +1207,12 @@ mod tests{
         let kernb = &k*4.0;
 
 
-        assert!(kern.len() == 6*(((sd as f64)/(spacer as f64)) as usize)+1);
+        println!("kern len {}", (kern.len()));
+        assert!(kern.len() == 6*(sd as  usize)+1);
 
         assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
 
-        assert!((k.get_sd()-(sd as f64)/(spacer as f64)).abs() < 1e-6);
+        assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
     }
 
     #[test]
