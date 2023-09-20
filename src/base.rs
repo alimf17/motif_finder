@@ -429,6 +429,23 @@ fn reflect(a: f64) -> f64 {
     
 }
 
+fn reflect_abs_height(a: f64) -> f64 {
+    if (a > MIN_HEIGHT) && (a < MAX_HEIGHT) {
+        return a;
+    }
+
+    let reflect_check = ((a.abs()-MIN_HEIGHT)/(MAX_HEIGHT-MIN_HEIGHT));
+    let try_end = reflect_check-reflect_check.floor();
+    let flip_space = (reflect_check.floor() as i32 & 0x01_i32) == 1;
+
+    if flip_space {
+        MAX_HEIGHT-try_end*(MAX_HEIGHT-MIN_HEIGHT)
+    } else {
+        MIN_HEIGHT+try_end*(MAX_HEIGHT-MIN_HEIGHT)
+    }
+    //-reflect_cond*(MAX_HEIGHT-MIN_HEIGHT)*a_sign*a.signum()+a_sign*a
+}
+                                 
 //Note that arrays of Copy are themselves Copy
 fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> [f64; BASE_L-1] {
     let mut end_start = start;
@@ -809,10 +826,10 @@ impl Motif {
         let mut new_mot = self.clone();
         
         //if momentum[0] != 0.0 {
-            let mut h = -SPREAD_HMC_CONV*((MAX_HEIGHT-MIN_HEIGHT)/(self.peak_height.abs()-MIN_HEIGHT)-1.0).ln();
+            let mut h = self.peak_height.abs();
             h += (eps*momentum[0]);
-            h = reflect(h);
-            h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h/SPREAD_HMC_CONV).exp())));
+            h = reflect_abs_height(h);
+            //h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h/SPREAD_HMC_CONV).exp())));
             new_mot.peak_height = self.peak_height.signum()*h;
 
         //}
@@ -1243,9 +1260,7 @@ impl Motif {
             if i == 0 {
                 let d_noise_d_h = self.no_height_waveform_from_binds(&binds, DATA)
                                                .account_auto(background);
-                (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise)))
-                * (self.peak_height().abs()-MIN_HEIGHT) * (MAX_HEIGHT - self.peak_height().abs())
-                / (self.peak_height().signum() * SPREAD_HMC_CONV  * (MAX_HEIGHT-MIN_HEIGHT)) +self.d_height_prior_d_hmc()
+                (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise))) + self.d_height_prior_d_hmc()
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
@@ -2663,7 +2678,7 @@ impl TruncatedLogNormal {
         if x < self.min || x > self.max {
             unreachable!("The height translation from hmc height seems to be going awry");
         } else {
-            self.d_ln_pdf(x)*(x-self.min)*(self.max-x)/(SPREAD_HMC_CONV*(self.max-self.min))
+            self.d_ln_pdf(x)//*(x-self.min)*(self.max-x)/(SPREAD_HMC_CONV*(self.max-self.min))
         }
 
     }
