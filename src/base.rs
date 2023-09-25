@@ -1849,7 +1849,10 @@ impl<'a> MotifSet<'a> {
                panic!("No states being selected from!");
            }*/
 
-           //println!("{:?}", selection_probs);
+           println!("base leap sel {:?}", selection_probs);
+
+           let likes = (0..likes_and_mots.len()).map(|i| likes_and_mots[i].0).collect::<Vec<_>>();
+           println!("likes base leap {:?}", likes);
 
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(rng)].1.clone();

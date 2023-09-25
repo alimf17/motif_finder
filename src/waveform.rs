@@ -356,7 +356,7 @@ impl<'a> Waveform<'a> {
                     //Note: this does NOT interfere with detailed balance: motifs are always
                     //proposed with a minimum height and so when death is proposed, it should
                     //always be the case that there's SOMEWHERE with the height minimum
-                    if to_add.abs() > (MIN_HEIGHT+2.0) {
+                    if to_add.abs() > (0.0) {
                         propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += to_add.powi(2);
                     }
                 }
@@ -378,7 +378,7 @@ impl<'a> Waveform<'a> {
 
     pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
         
-        let residual = data-self;
+        let residual = self-data;
 
         residual.produce_resid_noise(background)
 
@@ -386,7 +386,7 @@ impl<'a> Waveform<'a> {
    
     pub fn account_auto<'b>(&self, background: &'b Background) -> Noise<'b> {
 
-        (self*(-1.)).produce_resid_noise(background)
+        (self*(1.)).produce_resid_noise(background)
 
     }
 
@@ -852,6 +852,8 @@ impl<'a> Noise<'a> {
 
     }
 
+    //My low approximation is screwed up. It's derived from the low tail approximation of the
+    //marsaglia (2004) paper
     fn low_val(lA: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
@@ -863,30 +865,28 @@ impl<'a> Noise<'a> {
         let p: f64 = cfs.iter().zip(expo)
                         .map(|(&c, e)| c*e*lA.sqrt().powf(e-2.0)/2.0 + C*c*lA.sqrt().powf(e-4.0)).sum();
 */
-        -C/lA+Self::polynomial_sqrt_la(lA).ln()
+        -C/lA-2.5*lA.ln()+Self::polynomial_sqrt_la(lA).ln()
 
     }
 
     fn deriv_low_val(la: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        C/(la*la) + Self::deriv_polynomial_sqrt_la(la)/Self::polynomial_sqrt_la(la)
+        C/(la*la)- 2.5/la + Self::deriv_polynomial_sqrt_la(la)/Self::polynomial_sqrt_la(la)
 
     }
 
     fn polynomial_sqrt_la(la: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        const cfs: [f64; 6] = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
+        const cfs: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
         const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
 
-        let mut p: f64 = 0.;
-        let root_la = la.sqrt();
+        let mut p: f64 = C*cfs[0]+(C*cfs[1]-cfs[0]/2.)*la.powi(1)+4.5*cfs[5]*la.powi(6);
 
-        for i in 0..cfs.len() {
-            p+= cfs[i]*expo[i]*root_la.powf(expo[i]-2.)/2.+C*cfs[i]*root_la.powf(expo[i]-4.);
+        for i in 2..cfs.len() {
+            p += (-1_f64).powi((i+1) as i32)*(C*cfs[i]-((2*i-3) as f64)*cfs[i-1]/2.)*la.powi(i as i32);
         }
-
         return p
 
     }
@@ -894,14 +894,13 @@ impl<'a> Noise<'a> {
     fn deriv_polynomial_sqrt_la(la:f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        const cfs: [f64; 6] = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
+        const cfs: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
         const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
 
-        let mut p: f64 = 0.;
-        let root_la = la.sqrt();
+        let mut p: f64 = (C*cfs[1]-cfs[0]/2.)+27.*cfs[5]*la.powi(5);
 
-        for i in 0..cfs.len() {
-            p+= cfs[i]*expo[i]*(expo[i]-2.)*root_la.powf(expo[i]-4.)/4.+C*cfs[i]*(expo[i]-4.)*root_la.powf(expo[i]-6.)/2.;
+        for i in 2..cfs.len() {
+            p+= (-1_f64).powi((i+1) as i32)*(i as f64)*(C*cfs[i]-((2*i-3) as f64)*cfs[i-1]/2.)*la.powi((i-1) as i32);
         }
 
         return p
@@ -919,14 +918,14 @@ impl<'a> Noise<'a> {
     }
 
     fn weight_fn(a: f64) -> f64 {
-        const A0: f64 = 2.64;
-        const k: f64 = 84.44556;
+        const A0: f64 = 2.0;
+        const k: f64 = 16.0;
         1.0/(1.0+(a/A0).powf(k))
     }
 
     fn deriv_weight_fn(a: f64) -> f64 {
-        const A0: f64 = 2.64;
-        const k: f64 = 84.44556;
+        const A0: f64 = 2.0;
+        const k: f64 = 16.0;
         let aa = a/A0;
         -(k/A0)*((k-1.)*aa.ln()-2.*(aa.powf(k)).ln_1p()).exp()
     }
@@ -1218,8 +1217,8 @@ mod tests{
     #[test]
     fn real_wave_check(){
         let k = Kernel::new(5.0, 5, 2.0);
-        let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
-        //let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
+        //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
+        let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
 
         unsafe{

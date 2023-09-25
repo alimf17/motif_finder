@@ -460,7 +460,7 @@ mod tests{
     use std::time::{Duration, Instant};
     use statrs::function::gamma;
     #[test]
-    fn attempt() {
+    fn background_attempt() {
 
         let scale = 0.25;
         let dis = BackgroundDist::new(scale, 2.84);
