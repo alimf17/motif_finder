@@ -9,7 +9,7 @@ use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background, WIDE};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::ContinuousLnCDF;
 use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
-use crate::data_struct::All_Data;
+use crate::data_struct::AllData;
 
 use rand::Rng;
 use rand::prelude::IteratorRandom;
@@ -2494,7 +2494,7 @@ impl SetTraceDef {
         
         let check_data = fs::read_to_string(self.all_data_file.as_str())?;
 
-        let full_data: All_Data = serde_json::from_str(check_data.as_str())?;
+        let full_data: AllData = serde_json::from_str(check_data.as_str())?;
 
         Ok(self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>())
 

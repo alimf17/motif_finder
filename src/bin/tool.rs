@@ -13,7 +13,7 @@ use super::modified_t;*/
  error[E0425]: cannot find value `NULL_CHAR` in this scope
    --> src/bin/tool.rs:107:163
     |
-107 |     let (total_data,data_string): (All_Data, String) = All_Data::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
+107 |     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
     |                                                                                                                                                                   ^^^^^^^^^ not found in this scope
 
 error[E0425]: cannot find value `NUM_CHECKPOINT_FILES` in this scope
@@ -135,7 +135,7 @@ fn main() {
 
     let num_advances: usize = args[8].parse().expect("The number of advances to run must be a positive integer!");
  
-    let (total_data,data_string): (All_Data, String) = All_Data::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR);
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR);
 
     let data: Waveform = total_data.validated_data();
 

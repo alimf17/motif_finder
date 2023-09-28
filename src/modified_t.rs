@@ -1,16 +1,12 @@
-use rand::Rng;
-use rand::seq::SliceRandom;
-use rand::distributions::{Distribution, Uniform, WeightedIndex};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet, Exp};
-use statrs::function::{erf::*, beta::* };
+use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 use statrs::consts;
 use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
 use num_traits::Float;
-use log::warn;
 use serde::{Serialize, Deserialize};
 
 use std::f64;
-    use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
+
 //I apologize for this struct in advance, in particular, the FastT implementation.
 //It is an unholy combination of R's background C implementation of pt, modified 
 //and pared down for my use, and the statrs implementation of things like the gamma 
@@ -20,9 +16,6 @@ use std::f64;
 
 
 const LN_GAMMA_HALF: f64 = 0.5723649429247000870717136756;
-const LN_GAMMA_3_HALFS: f64 = -0.120782237635245222;
-const M_SQRT_PI: f64 = 1.772453850905516027298167483341;
-const NUM_BGRAT_TERMS: usize = 30;
 const M_LN_2: f64 = 0.693147180559945309417232121458176;
 
 const GAMMA_DK: [f64; 11] = [
@@ -204,10 +197,10 @@ impl Continuous<f64, f64> for FastT {
                 - 0.5 * (self.freedom * std::f64::consts::PI).ln()
                 - self.scale.ln()*/
 
-            (ln_gamma((self.freedom + 1.0) / 2.0) - 
+            ln_gamma((self.freedom + 1.0) / 2.0) - 
             (ln_gamma(self.freedom / 2.0) +self.scale.ln()+self.freedom.ln()/2.+std::f64::consts::PI.ln()/2.
              +((self.freedom + 1.0)/2.0) * (d.powi(2)/self.freedom).ln_1p())
-            )
+            
         }
     }
 
@@ -237,7 +230,7 @@ impl FastT {
     pub fn cd_and_sf(&self,x: f64) -> (f64, f64) {
 
         //let t = Instant::now();
-        let q = (x/self.scale);
+        let q = x/self.scale;
         let q2 = q.powi(2);
 
         
@@ -248,10 +241,10 @@ impl FastT {
 
         //let t = Instant::now();
         
-        let prew = bpser(a, inp, 1e-8).exp();
+        let prew = bpser(a, inp).exp();
 
         //println!("inp: {} bpser: {:?}", inp, t.elapsed());
-        if (x > 0.0) {
+        if x > 0.0 {
             (1.-prew/2., prew/2.)
         } else {
             (prew/2., 1.-prew/2.)
@@ -266,7 +259,7 @@ impl FastT {
     pub fn ln_cd_and_sf(&self,x: f64) -> (f64, f64) {
 
         //let t = Instant::now();
-        let q = (x/self.scale);
+        let q = x/self.scale;
         let q2 = q.powi(2);
 
         
@@ -277,10 +270,10 @@ impl FastT {
 
         //let t = Instant::now();
         
-        let prew = bpser(a, inp, 1e-8);
+        let prew = bpser(a, inp);
 
         //println!("inp: {} bpser: {:?}", inp, t.elapsed());
-        if (x > 0.0) {
+        if x > 0.0 {
             ((-0.5*(prew.exp())).ln_1p(), prew-M_LN_2)
         } else {
             (prew-M_LN_2, (-0.5*prew.exp()).ln_1p())
@@ -323,7 +316,7 @@ impl FastT {
 //the official R implementation: it's accurate up to about 6 bits at
 //the very end of our floats and takes ~60ns regardless of input
 
-fn bpser(a: f64, x: f64, eps: f64) -> f64 {
+fn bpser(a: f64, x: f64) -> f64 {
 
 
     //let t = Instant::now();
@@ -336,14 +329,12 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     /*		       COMPUTE THE SERIES */
     /* ----------------------------------------------------------------------- */
     //let t = Instant::now();
-    let tol: f64 = eps / a;
     let mut n: f64 = 0.;
     let mut sum: f64 = 0_f64;
     let mut c: f64 = 1.;
-    let mut w: f64 = f64::INFINITY;
+    let mut w: f64;
     //println!("time ass: {:?}", t.elapsed());
     //let t = Instant::now();
-    //while (n < 1e7 && w.abs() > tol) { // sum is alternating as long as n < b (<==> 1 - b/n < 0)
     while n < 50. { //This 50 was not theoretically derived, but numerically experimented for. Using a hard number lets the compiler unroll the loop
         n += 1.;
         c *= (0.5 - (0.5 / n)+0.5 ) * x;
@@ -352,7 +343,7 @@ fn bpser(a: f64, x: f64, eps: f64) -> f64 {
     }     
     //println!("fin n {}", n);
     //println!("time ser: {:?}", t.elapsed());
-    if (a*sum > -1.) {ans += (a * sum).ln_1p();}
+    if a*sum > -1. {ans += (a * sum).ln_1p();}
     else {
         ans = -f64::INFINITY;
     }
@@ -385,6 +376,7 @@ fn ln_gamma(x: f64) -> f64 {
 
 }
 
+#[allow(dead_code)]
 fn ln_beta(a: f64, b:f64) -> f64 {
     ln_gamma(a+1.)+ln_gamma(b+1.)-ln_gamma(a+b+1.)
 }
@@ -396,19 +388,7 @@ fn ln_beta_half(a: f64) -> f64 {
     LN_GAMMA_HALF+ln_gamma(a)-ln_gamma(a+0.5)
 }
 
-fn grat_r(x: f64, log_r: f64) -> f64{
-    let sx = x.sqrt();
-    if x < 0.25 {
-        (1.0-erf(sx))*(-log_r).exp()
-    } else {
-        erfc(sx) * M_SQRT_PI * x.exp()/sx
-    }
 
-}
-
-fn logspace_add(lnx: f64, lny: f64) -> f64 {
-    lnx.max(lny)+(-(lnx-lny).abs()).exp().ln_1p()
-}
 
 #[derive(Debug)]
 pub enum BackgroundDistDef {
