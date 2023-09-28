@@ -1,61 +1,34 @@
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
+use std::cmp::{max, min};
 
-
-use std::ops::{Add, AddAssign};
-use std::ops::{Sub, SubAssign};
-use std::ops::Mul;
-use std::cmp::max;
-use std::cmp::min;
-use std::collections::HashMap;
+//use std::time::{Duration, Instant};
 
 use core::f64::consts::PI;
-
-use crate::sequence::Sequence;
-use crate::sequence::BP_PER_U8;
-use crate::base::{MIN_HEIGHT, MAX_HEIGHT};
-use crate::modified_t::*;
-use statrs::distribution::StudentsT;
-use statrs::distribution::{Continuous, ContinuousCDF};
-
-use statrs::Result as otherResult;
-
-
-use aberth::aberth;
-use num_complex::Complex;
-use num_complex::ComplexFloat;
-const EPSILON: f64 = 1e-8;
-use once_cell::sync::Lazy;
-use num_traits::cast;
-use num_traits::float::Float;
-use num_traits::float::FloatConst;
-use num_traits::identities::{One, Zero};
-use num_traits::MulAdd;
 use core::iter::zip;
 
-use std::thread;
-use std::sync::Arc;
+use crate::sequence::{Sequence, BP_PER_U8};
+use crate::modified_t::*;
+
+use statrs::distribution::{StudentsT, Continuous, ContinuousCDF};
+
+
+use aberth;
+use num_complex::{Complex, ComplexFloat};
+const EPSILON: f64 = 1e-8;
+
+use num_traits::float::{Float, FloatConst};
+use num_traits::MulAdd;
+
+
 use rayon::prelude::*;
 
 use assume::assume;
 
-use std::time::{Duration, Instant};
 
-use serde::{ser, Serialize,Serializer, Deserialize};
-use serde::de::{
-    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
-    VariantAccess, Visitor,
-};
-//use serde_with::serde_as;
-use serde_big_array::BigArray;
+use serde::{Serialize, Deserialize};
+
 pub const WIDE: f64 = 3.0;
 
-//These are based on using floats with a maximum of 8 binary sigfigs
-//after the abscissa and exponents ranging from -12 to 3, inclusive
-const MIN_DT_FLOAT: f64 = 0.000244140625;
-const MAX_DT_FLOAT: f64 = 15.96875;
-
-
-
-const EXP_OFFSET: u64 = (1023_u64-12) << 52;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -84,9 +57,8 @@ impl Mul<f64> for &Kernel {
 
 impl Kernel {
     
-    pub fn new(peak_width: f64, spacer: usize, peak_height: f64) -> Kernel {
+    pub fn new(peak_width: f64, peak_height: f64) -> Kernel {
 
-        let data_width = peak_width/(spacer as f64);
         let span = (peak_width*WIDE) as isize;
 
         let domain: Vec<isize> = (-span..(span+1)).collect();
@@ -157,8 +129,6 @@ impl<'a> Waveform<'a> {
 
 
 
-        let tot_L: usize = point_lens.iter().sum();
-
         Waveform {
             wave: start_data,
             spacer: spacer,
@@ -211,10 +181,10 @@ impl<'a> Waveform<'a> {
             size += point_lens[i];
         }
 
-        let tot_L: usize = point_lens.iter().sum();
+        let tot_l: usize = point_lens.iter().sum();
 
         Waveform {
-            wave: vec![0.0; tot_L],
+            wave: vec![0.0; tot_l],
             spacer: spacer,
             point_lens: point_lens,
             start_dats: start_dats,
@@ -224,11 +194,11 @@ impl<'a> Waveform<'a> {
 
     pub fn derive_zero(&self) -> Waveform {
 
-        let tot_L: usize = self.point_lens.iter().sum();
+        let tot_l: usize = self.point_lens.iter().sum();
 
         
         Waveform {
-            wave: vec![0.0; tot_L],
+            wave: vec![0.0; tot_l],
             spacer: self.spacer,
             point_lens: self.point_lens.clone(),
             start_dats: self.start_dats.clone(),
@@ -267,8 +237,6 @@ impl<'a> Waveform<'a> {
         let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
         let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
 
-        let w = self.wave.len();
-        
 
         let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
 
@@ -286,24 +254,13 @@ impl<'a> Waveform<'a> {
 
     pub fn kmer_propensities(&self, k: usize) -> Vec<f64> {
 
-
-    /*wave: Vec<f64>,
-    spacer: usize,
-    point_lens: Vec<usize>,
-    start_dats: Vec<usize>,
-    seq: &'a Sequence,*/
-
         let coded_sequence = self.seq.seq_blocks();
         let block_lens = self.seq.block_lens(); //bp space
         let block_starts = self.seq.block_u8_starts(); //stored index space
 
         let mut uncoded_seq: Vec<usize> = vec![0; self.seq.max_len()];
 
-        let mut ind = 0;
-
-        let mut store = Sequence::code_to_bases(coded_sequence[0]);
-
-        //let mut propensities: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+        let mut store: [usize ; BP_PER_U8];
 
         let mut propensities: Vec<f64> = vec![0.0; self.seq.number_unique_kmers(k)];
 
@@ -325,7 +282,6 @@ impl<'a> Waveform<'a> {
                 for j in 0..((block_lens[i])-k) {
 
                     let center = j + ((k-1)/2);
-                    //ind = BP_PER_U8*block_starts[i]+(j as usize);
 
                     let lower_data_ind = center/self.spacer; 
 
@@ -340,15 +296,13 @@ impl<'a> Waveform<'a> {
                         /*#[cfg(test)]{
                             println!("block {} j {} kmer {} amount {}", i, j,u64_mot, self.wave[self.start_dats[i]+lower_data_ind]); 
                         }*/
-                        //propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]).powi(-2);
-                        (self.wave[self.start_dats[i]+lower_data_ind])
+                        self.wave[self.start_dats[i]+lower_data_ind]
                     } else {
                         let weight = (between as f64)/(self.spacer as f64);
                         /*#[cfg(test)]{
                             println!("block {} j {} kmer {} amount {}", i, j, u64_mot, self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight);
                         }*/
-                        //propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight).powi(-2);
-                        (self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight)
+                        self.wave[self.start_dats[i]+lower_data_ind]*(1.-weight)+self.wave[self.start_dats[i]+lower_data_ind+1]*weight
                     };
 
                     //A motif should never be proposed unless there's a place in the signal that
@@ -714,8 +668,14 @@ impl Background {
     //and raw f64 bit manipulation to derive array indices.
     //They're mainly still here because they're so terrifying that
     //I love them and I can't bear to part with them.
+    #[allow(dead_code)]
     fn get_near_u64(calc: f64) -> u64 {
 
+        //These are based on using floats with a maximum of 8 binary sigfigs
+        //after the abscissa and exponents ranging from -12 to 3, inclusive
+        const MIN_DT_FLOAT: f64 = 0.000244140625;
+        const MAX_DT_FLOAT: f64 = 15.96875;
+        const EXP_OFFSET: u64 = (1023_u64-12) << 52;
         let mut bit_check: u64 = calc.to_bits();
        
         if calc.abs() < MIN_DT_FLOAT {
@@ -728,12 +688,13 @@ impl Background {
 
 
     }
-
+    
+    #[allow(dead_code)]
     fn get_near_f64(calc: f64) -> f64 {
         f64::from_bits(Self::get_near_u64(calc))
     }
 
-
+    #[allow(dead_code)]
     fn get_lookup_index(calc: f64) -> usize {
 
         let bitprep = Self::get_near_u64(calc);
@@ -827,14 +788,14 @@ impl<'a> Noise<'a> {
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let n = forward.len();
-        let mut Ad = -(n as f64);
+        let mut a_d = -(n as f64);
         for i in 0..n {
 
             let cdf = self.background.ln_cdf(forward[i]);
             let rev_sf = self.background.ln_sf(forward[n-1-i]);
-            Ad -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
+            a_d -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
         }
-        Ad
+        a_d
     }
 
     
@@ -867,19 +828,10 @@ impl<'a> Noise<'a> {
 
     //My low approximation is screwed up. It's derived from the low tail approximation of the
     //marsaglia (2004) paper
-    fn low_val(lA: f64) -> f64 {
+    fn low_val(la: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        /*const C: f64 = PI*PI/8.0;
-        let cfs = [2.00012,0.247105,-0.0649821, 0.0347962,-0.0116720,0.00168691];
-
-        let expo = (0..6).map(|a| 2.0*(a as f64)-1.0).collect::<Vec<f64>>();
-
-        let p: f64 = cfs.iter().zip(expo)
-                        .map(|(&c, e)| c*e*lA.sqrt().powf(e-2.0)/2.0 + C*c*lA.sqrt().powf(e-4.0)).sum();
-*/
-        -C/lA-2.5*lA.ln()+Self::polynomial_sqrt_la(lA).ln()
-
+        -C/la-2.5*la.ln()+Self::polynomial_sqrt_la(la).ln()
     }
 
     fn deriv_low_val(la: f64) -> f64 {
@@ -892,13 +844,12 @@ impl<'a> Noise<'a> {
     fn polynomial_sqrt_la(la: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        const cfs: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
-        const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
+        const CFS: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
 
-        let mut p: f64 = C*cfs[0]+(C*cfs[1]-cfs[0]/2.)*la.powi(1)+4.5*cfs[5]*la.powi(6);
+        let mut p: f64 = C*CFS[0]+(C*CFS[1]-CFS[0]/2.)*la.powi(1)+4.5*CFS[5]*la.powi(6);
 
-        for i in 2..cfs.len() {
-            p += (-1_f64).powi((i+1) as i32)*(C*cfs[i]-((2*i-3) as f64)*cfs[i-1]/2.)*la.powi(i as i32);
+        for i in 2..CFS.len() {
+            p += (-1_f64).powi((i+1) as i32)*(C*CFS[i]-((2*i-3) as f64)*CFS[i-1]/2.)*la.powi(i as i32);
         }
         return p
 
@@ -907,22 +858,21 @@ impl<'a> Noise<'a> {
     fn deriv_polynomial_sqrt_la(la:f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
-        const cfs: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
-        const expo: [f64; 6] = [-1., 1., 3., 5., 7., 9.];
+        const CFS: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
 
-        let mut p: f64 = (C*cfs[1]-cfs[0]/2.)+27.*cfs[5]*la.powi(5);
+        let mut p: f64 = (C*CFS[1]-CFS[0]/2.)+27.*CFS[5]*la.powi(5);
 
-        for i in 2..cfs.len() {
-            p+= (-1_f64).powi((i+1) as i32)*(i as f64)*(C*cfs[i]-((2*i-3) as f64)*cfs[i-1]/2.)*la.powi((i-1) as i32);
+        for i in 2..CFS.len() {
+            p+= (-1_f64).powi((i+1) as i32)*(i as f64)*(C*CFS[i]-((2*i-3) as f64)*CFS[i-1]/2.)*la.powi((i-1) as i32);
         }
 
         return p
 
     }
 
-    fn high_val(hA: f64) -> f64 {
+    fn high_val(ha: f64) -> f64 {
 
-        (3.0/(hA*PI)).ln()/2.0-hA
+        (3.0/(ha*PI)).ln()/2.0-ha
 
     }
 
@@ -932,40 +882,36 @@ impl<'a> Noise<'a> {
 
     fn weight_fn(a: f64) -> f64 {
         const A0: f64 = 2.0;
-        const k: f64 = 16.0;
-        1.0/(1.0+(a/A0).powf(k))
+        const K: f64 = 16.0;
+        1.0/(1.0+(a/A0).powf(K))
     }
 
     fn deriv_weight_fn(a: f64) -> f64 {
         const A0: f64 = 2.0;
-        const k: f64 = 16.0;
+        const K: f64 = 16.0;
         let aa = a/A0;
-        -(k/A0)*((k-1.)*aa.ln()-2.*(aa.powf(k)).ln_1p()).exp()
+        -(K/A0)*(aa.powf(K-1.)/(1.+aa.powf(K)).powi(2))
     }
 
-    pub fn ad_like(A: f64) -> f64 {
+    pub fn ad_like(a: f64) -> f64 {
 
-        const A0: f64 = 2.64;
-        const k: f64 = 84.44556;
 
         //This has to exist because of numerical issues causing NANs otherwise
         //This is basically caused by cdf implementations that return 0.0.
         //My FastT implementation can't, but the statrs normal DOES. 
-        if A == f64::INFINITY { return -f64::INFINITY;} 
+        if a == f64::INFINITY { return -f64::INFINITY;} 
 
-        let lo = Self::low_val(A);
-        let hi = Self::high_val(A);
-
-        let w = 1.0/(1.0+(A/A0).powf(k));
+        let lo = Self::low_val(a);
+        let hi = Self::high_val(a);
+        let w = Self::weight_fn(a);
 
         w*lo+(1.0-w)*hi
     }
 
-    pub fn ad_diff(A: f64) -> f64 {
+    pub fn ad_diff(a: f64) -> f64 {
 
-        const h: f64 = 0.0000001;
-        (Self::ad_like(A+h)-Self::ad_like(A))/h
-
+        const H: f64 = 0.0000001;
+        (Self::ad_like(a+H)-Self::ad_like(a))/H
     }
 
     pub fn ad_deriv(a: f64) -> f64 {
@@ -976,15 +922,16 @@ impl<'a> Noise<'a> {
 
         let w = Self::weight_fn(a);
         let dl = Self::deriv_low_val(a);
-        let hl = Self::deriv_high_val(a);
+        let dh = Self::deriv_high_val(a);
         let dw = Self::deriv_weight_fn(a);
         let lv = Self::low_val(a);
         let hv = Self::high_val(a);
 
 
         //println!("a: {}, w: {}, dl: {}, hl: {}, dw: {}, lv: {}, hv: {}", a, w, dl, hl, dw, lv, hv);
-        w*Self::deriv_low_val(a)+(1.-w)*Self::deriv_high_val(a)
-            +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
+        //w*Self::deriv_low_val(a)+(1.-w)*Self::deriv_high_val(a)
+          //  +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
+        w*dl+(1.-w)*dh + dw*(lv-hv)
        
     }
 
@@ -1213,7 +1160,7 @@ mod tests{
         let sd = 5;
         let height = 2.0;
         let spacer = 5;
-        let k = Kernel::new(sd as f64, spacer, height);
+        let k = Kernel::new(sd as f64, height);
 
         let kern = k.get_curve();
         let kernb = &k*4.0;
@@ -1229,7 +1176,7 @@ mod tests{
 
     #[test]
     fn real_wave_check(){
-        let k = Kernel::new(5.0, 5, 2.0);
+        let k = Kernel::new(5.0, 2.0);
         //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
         let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
