@@ -1,13 +1,8 @@
 
-use serde::{ser, Serialize,Serializer, Deserialize};
-use serde::de::{
-    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
-    VariantAccess, Visitor,
-};
+use serde::{Serialize,Deserialize};
 
-use std::mem::size_of_val;
 use std::collections::HashMap;
-use itertools::{all, Itertools};
+use itertools::{Itertools};
 use rand::Rng;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a loop of use statements
@@ -279,21 +274,22 @@ impl Sequence {
     }
 
 
-    //SAFETY: THIS function is safe. But unsafe code relies on it always producing values < BASE_L
+    //SAFETY: THIS function is safe. But unsafe code relies on it always producing usizes < BASE_L
+    //        which it will since BASE_L = 4 and we always extract usizes two bits at a time (00, 01, 10, 11)
     pub fn code_to_bases(coded: u8) -> [usize ; BP_PER_U8] {
 
-        let mut V: [usize; BP_PER_U8] = [0; BP_PER_U8];
+        let mut v: [usize; BP_PER_U8] = [0; BP_PER_U8];
 
         let mut reference: u8 = coded;
 
         for i in 0..BP_PER_U8 { 
 
-            V[i] = (U8_BITMASK & reference) as usize;
+            v[i] = (U8_BITMASK & reference) as usize;
             reference = reference >> 2; 
 
         }
 
-        V
+        v
 
     }
 

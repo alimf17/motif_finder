@@ -2925,7 +2925,7 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, &corrs);
+        let background = Background::new(0.25, 2.64, Some(&corrs));
         let mut motif_set = MotifSet::rand_with_one_height(13.2, &wave, &background, 350, &mut rng);
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq(), wave.spacer(), &mut rng));
@@ -3101,7 +3101,7 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, &corrs);
+        let background = Background::new(0.25, 2.64, Some(&corrs));
         let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, 350, &mut rng);
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq(), wave.spacer(), &mut rng));
@@ -3239,7 +3239,7 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, &corrs);
+        let background = Background::new(0.25, 2.64, Some(&corrs));
         let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, 350, &mut rng);
 
         let check_set = motif_set.clone();
@@ -3652,7 +3652,7 @@ mod tester{
         let waveform2 = &waveform + &(motif2.generate_waveform(&wave));
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, &corrs);
+        let background = Background::new(0.25, 2.64, Some(&corrs));
         let noise: Noise = waveform.produce_noise(&waveform2, &background);
 
         let d_ad_stat_d_noise = noise.ad_grad();

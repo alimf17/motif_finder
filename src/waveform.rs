@@ -394,6 +394,10 @@ impl<'a> Waveform<'a> {
        
         let residual = self;
 
+        if !(background.is_ar()){
+            return Noise::new(self.wave.clone(), background);
+        }
+
         let mut end_dats = residual.start_dats()[1..residual.start_dats.len()].to_vec();
 
         let resid = &residual.wave;
@@ -403,12 +407,12 @@ impl<'a> Waveform<'a> {
         let mut len_penalties = vec![0usize; end_dats.len()];
 
         for k in 0..end_dats.len() {
-            len_penalties[k] = (k+1)*background.ar_corrs.len();
+            len_penalties[k] = (k+1)*background.ar_corrs.as_ref().expect("We short circuited if this was None.").len();
         }
 
         let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
 
-        let l_c = background.ar_corrs.len();
+        let l_c = background.ar_corrs.as_ref().expect("We short circuited if this was None.").len();
 
         let mut fin_noise: Vec<f64> = vec![0.0; filt_lens.iter().sum()];
 
@@ -421,7 +425,7 @@ impl<'a> Waveform<'a> {
             
             for i in 0..l_c {
                 for j in 0..block.len() {
-                    block[j] -= background.ar_corrs[i]*resid[sind+l_c+j-(i+1)];
+                    block[j] -= background.ar_corrs.as_ref().expect("We short circuited if this was None.")[i]*resid[sind+l_c+j-(i+1)];
                 }
             }
 
@@ -670,28 +674,37 @@ impl From<StudentsTDef> for StudentsT {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Background {
     pub dist: BackgroundDist,
-    pub ar_corrs: Vec<f64>,
+    pub ar_corrs: Option<Vec<f64>>,
 }
 
 impl Background {
 
-    pub fn new(sigma_background : f64, df : f64, ar_corrs: &Vec<f64>) -> Background {
-
-        let mut poly = ar_corrs.iter().map(|a| -1.0*a).collect::<Vec<f64>>();
-        poly.splice(0..0, [1.0]);
-        
-        let roots = aberth_vec(&poly, EPSILON).unwrap();
-
-        for root in roots {
-            if root.abs() <= 1.0+EPSILON { //Technically, the +EPSILON means that we might rule out some stationary models
-                panic!("AR model is not stationary!")
-            }
-        }
+    pub fn new(sigma_background : f64, df : f64, poss_ar_corrs: Option<&Vec<f64>>) -> Background {
 
         let dist = BackgroundDist::new(sigma_background, df);
+        
+        match poss_ar_corrs {
+            
+            Some(ar_corrs) => {
+                let mut poly = ar_corrs.iter().map(|a| -1.0*a).collect::<Vec<f64>>();
+                poly.splice(0..0, [1.0]);
 
+                let roots = aberth_vec(&poly, EPSILON).unwrap();
 
-        Background{dist: dist, ar_corrs:ar_corrs.clone()}
+                for root in roots {
+                    if root.abs() <= 1.0+EPSILON { //Technically, the +EPSILON means that we might rule out some stationary models
+                        panic!("AR model is not stationary!")
+                    }
+                }
+                
+                Background{dist: dist, ar_corrs:Some(ar_corrs.clone())}
+            }, 
+            None => Background{dist: dist, ar_corrs: None},
+        }
+    }
+
+    pub fn is_ar(&self) -> bool {
+        self.ar_corrs.is_some()
     }
 
 
@@ -1265,7 +1278,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
 
-        let background: Background = Background::new(0.25, 2.64, &ar);
+        let background: Background = Background::new(0.25, 2.64, Some(&ar));
 
         let noise: Noise = signal.produce_noise(&base_w, &background);
 
@@ -1321,7 +1334,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, &ar);
+        let background: Background = Background::new(0.25, 2.64, Some(&ar));
 
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], &background);
@@ -1419,7 +1432,7 @@ mod tests{
     fn panic_noise() {
         let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, &ar);
+        let background: Background = Background::new(0.25, 2.64, Some(&ar));
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], &background);
 
@@ -1433,7 +1446,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![1.5, 1.0];
         
-        let background: Background = Background::new(0.25, 2.64, &ar);
+        let background: Background = Background::new(0.25, 2.64, Some(&ar));
     }
 
 
