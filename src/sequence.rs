@@ -319,17 +319,17 @@ impl Sequence {
     //        in your sequence. If it's too short, it will truncate the kmer
     pub fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
 
-        let mut V: Vec<usize> = vec![0; len];
+        let mut v: Vec<usize> = vec![0; len];
 
         let mut reference: u64 = coded_kmer;
 
         for i in 0..len {
 
-            V[i] = (U64_BITMASK & reference) as usize;
+            v[i] = (U64_BITMASK & reference) as usize;
             reference = reference >> 2;
         }
 
-        V
+        v
 
     }
 
