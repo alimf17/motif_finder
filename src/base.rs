@@ -3597,7 +3597,7 @@ mod tester{
 
         println!("Random motif\n{}", random_motif);
 
-        assert!(random_motif.raw_kern().len() == 25);
+        assert!(random_motif.raw_kern().len() == 121);
 
         assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
 
