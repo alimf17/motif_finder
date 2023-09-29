@@ -437,7 +437,7 @@ mod tests{
 
     use rand::Rng;
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use statrs::function::gamma;
     #[test]
     fn background_attempt() {

@@ -1137,7 +1137,7 @@ mod tests{
     use super::*;
     use crate::sequence::Sequence;
     use rand::Rng;
-    use statrs::distribution::ContinuousCDF;
+    use std::time::Instant;
 
     fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
 
@@ -1232,10 +1232,11 @@ mod tests{
         let noi: Vec<f64> = noise.resids();
 
 
-        let raw_resid = &base_w-&signal;
+        let raw_resid = &signal-&base_w;
 
         let w = raw_resid.raw_wave();
 
+        println!("Noi {:?}", noi);
         for i in 0..raw_resid.raw_wave().len(){
 
 
@@ -1257,6 +1258,7 @@ mod tests{
 
                 let sst = ar.iter().zip(piece.clone()).map(|(a, r)| a*r).sum::<f64>() as f64;
 
+                println!("i {} noi raw res {}",i, ((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)));
                 assert!(((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)).abs() < 1e-6);
 
             }
@@ -1304,7 +1306,7 @@ mod tests{
             let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
 
             
-            ad_try -= (mult*(ln_cdf+ln_sf));
+            ad_try -= mult*(ln_cdf+ln_sf);
         }
 
         println!("calc v try {} {}", n1.ad_calc(), ad_try);

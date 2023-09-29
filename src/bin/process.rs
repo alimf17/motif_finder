@@ -1,19 +1,22 @@
-use log::warn;
-use kmedoids;
-use ndarray::prelude::*;
-use rayon::prelude::*;
-use rand::*;
-use statrs::statistics::Statistics;
-use std::{path, fs}; 
+use std::fs; 
+
 use motif_finder::base::*;
+use motif_finder::base::{SQRT_2, SQRT_3};
+
+use log::warn;
+
+use kmedoids;
+
+use ndarray::prelude::*;
+
 use regex::Regex;
+
 use poloto;
-use std::fs::File;
 use plotters::prelude::*;
 use plotters::prelude::full_palette::*;
 
-use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
-use motif_finder::base::{SQRT_2, SQRT_3};
+//use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+
 
 const INTERVAL_CELL_LENGTH: f64 = 0.01;
 
@@ -63,11 +66,11 @@ pub fn main() {
 
 
     //This is the code that actually sets up our independent chain reading
-    let mut SetTraceCollections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
+    let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
         let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.json")).unwrap();
-        let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
+        let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
         
         let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
 
@@ -76,36 +79,36 @@ pub fn main() {
         let mut iter_files = chain_files.iter();
 
 
-        SetTraceCollections.push(serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
+        set_trace_collections.push(serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
                                                                           .expect("File must exist or wouldn't appear"))
                                                                           .expect("All read in files must be correct json!"));
 
         for file_name in iter_files {
-            let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
-            SetTraceCollections[chain].append(interim);
+            let interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+            set_trace_collections[chain].append(interim);
         }
 
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
             let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}d{{7}}.json", bead, '\\').as_str())).unwrap();
-            let mut directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
+            let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
             let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
 
             chain_files.sort();
 
-            let mut iter_files = chain_files.iter();
+            let iter_files = chain_files.iter();
 
             for file_name in iter_files {
-                let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+                let interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
                 
                 /*if interim.len() >= 5 {
                     println!("{} {:?} inter", file_name, interim.index_into(0..5));
                 } else{
                     println!("{} {:?} inter", file_name, interim.index_into(0..1));
                 }*/
-                SetTraceCollections[chain].append(interim);
+                set_trace_collections[chain].append(interim);
             }
 
 
@@ -114,18 +117,16 @@ pub fn main() {
         }}
     }
 
-    //SetTraceCollections is now the chains we want
+    //set_trace_collections is now the chains we want
 
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
-    let mut plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in SetTraceCollections.iter().enumerate() {
+    let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         let tracey = trace.ln_posterior_trace();
-        let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
-        let mut samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
-        let pow_samples = samples.len().ilog2() + 1;
-        let trace_min = samples.iter().min_by(|a, b| a.total_cmp(b));
+        //let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
+        //let samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
         /*let res = samples_fft_to_spectrum(
         &samples[0..16384],
         samples.len() as u32,
@@ -138,16 +139,16 @@ pub fn main() {
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
     let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
-    let mut plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in SetTraceCollections.iter().enumerate() {
+    let plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
     
     let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
-    let mut plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in SetTraceCollections.iter().enumerate() {
+    let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
@@ -159,33 +160,33 @@ pub fn main() {
     
     let ref_per_chain: usize = 5;
 
-    let num_ref_PWM = ref_per_chain*SetTraceCollections.len();
+    let num_ref_pwm = ref_per_chain*set_trace_collections.len();
 
-    let mut ref_pwms: Vec<Motif> = Vec::with_capacity(num_ref_PWM);
+    let mut ref_pwms: Vec<Motif> = Vec::with_capacity(num_ref_pwm);
 
     let mut min_len: usize = usize::MAX;
-    for trace in SetTraceCollections.iter() {
+    for trace in set_trace_collections.iter() {
         min_len = min_len.min(trace.len());
         ref_pwms.append(&mut (trace.ret_rand_motifs(ref_per_chain, &mut rng)));
     }
 
     let cluster_per_chain: usize = min_len.min(10000);
 
-    let motif_num_traces = SetTraceCollections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
+    let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
     //TODO: generate motif_num_traces plot here
     println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
 
-    let total_sets = min_len*SetTraceCollections.len();
+    let total_sets = min_len*set_trace_collections.len();
     let tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
 
-    let num_sort_mots: usize = cluster_per_chain*SetTraceCollections.len();
+    let num_sort_mots: usize = cluster_per_chain*set_trace_collections.len();
     
     let mut clustering_motifs: Vec<Motif> = Vec::with_capacity(num_sort_mots);
 
 
 
-    for trace in SetTraceCollections.iter() {
+    for trace in set_trace_collections.iter() {
         clustering_motifs.append(&mut (trace.ret_rand_motifs(cluster_per_chain, &mut rng)));
     }
 
@@ -194,19 +195,19 @@ pub fn main() {
    
     println!("clust {:?}", &clustering_motifs[0..5]);
     let dist_array = establish_dist_array(&clustering_motifs);
-    let (loss, assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
+    let (_loss, _assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
 
     println!("iter {} swap {}", n_iter, n_swap);
     println!("min {}", min_len);
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
-        println!("Rhat medoid {}: {}", i, rhat(&SetTraceCollections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
+        println!("Rhat medoid {}: {}", i, rhat(&set_trace_collections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
-        let mot_size = SetTraceCollections[0].len() as f64;
+        let mot_size = set_trace_collections[0].len() as f64;
         let distance_cutoff = mot_size*0.5753378-0.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
-        let trace_scoop = SetTraceCollections.iter().enumerate().map(|(m, a)| {
-            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, 3.0);
+        let trace_scoop = set_trace_collections.iter().map(|a| {
+            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
             num_good_motifs+= set_extracts.len();
             good_motifs_count.push(num_good_motifs);
             set_extracts
@@ -330,9 +331,9 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Ar
 
 pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, credible: f64, file_name: &str){
 
-    let (num_samples, num_bases, _) = samples.dim();
+    let (_ , num_bases, _) = samples.dim();
 
-    let num_rows = if (num_bases & 3 == 0) {(num_bases/4)} else{ num_bases/4 +1 } as u32; 
+    let num_rows = if (num_bases & 3) == 0 {num_bases/4} else{ num_bases/4 +1 } as u32; 
 
     let plot = BitMapBackend::new(file_name, (2600, num_rows*600)).into_drawing_area();
 
@@ -340,8 +341,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
     let panels = plot.split_evenly((num_rows as usize, 4));
 
-
-    //let cis = create_credible_intervals(samples, credible, good_motifs_count);
+    //let cis = create_credible_intervals(samples, credible);
 
     for j in 0..num_bases {
         
@@ -360,17 +360,17 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         }
 
         //Draws the three vertices that show up once
-        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[0]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::RED).filled(), &|coord, size, style| {
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[0]].iter().map(|a| turn_to_no_t(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::RED).filled(), &|coord, size, style| {
             EmptyElement::at(coord)
                 + Circle::new((0, 0), size, style)
                 + Text::new(format!("A"), (0, 15), ("sans-serif", 15))
         })).unwrap();
-        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[1]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&YELLOW_700).filled(), &|coord, size, style| {
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[1]].iter().map(|a| turn_to_no_t(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&YELLOW_700).filled(), &|coord, size, style| {
             EmptyElement::at(coord)
                 + Circle::new((0, 0), size, style)
                 + Text::new(format!("C"), (0, 15), ("sans-serif", 15))
         })).unwrap();
-        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[2]].iter().map(|a| turn_to_no_T(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::GREEN).filled(), &|coord, size, style| {
+        chart.draw_series(PointSeries::of_element([SIMPLEX_VERTICES_POINTS[2]].iter().map(|a| turn_to_no_t(&(a[0], a[1], a[2]))), 5, ShapeStyle::from(&full_palette::GREEN).filled(), &|coord, size, style| {
             EmptyElement::at(coord)
                 + Circle::new((0, 0), size, style)
                 + Text::new(format!("G"), (0, 15), ("sans-serif", 15))
@@ -399,6 +399,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
 
+        println!("Creating credible region at {} samples", credible);
         //This draws the credible region
        
         //let ci_color = &ORANGE.mix(0.1);
@@ -408,10 +409,10 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
         //let ci_hi_react = create_tetrahedral_traces(&ci_up);
 
-        for b in 0..BASE_L {
+        //for b in 0..BASE_L {
             //chart.draw_series(ci_low_rect[b].iter().zip(ci_hi_react[b].iter()).map(|(&a, &b)| Rectangle::new([a,b], &ci_color))).unwrap();
           //  chart.draw_series(ci_low_rect[b].iter().map(|a| Rectangle::new([a,(a.0+INTERVAL_CELL_LENGTH, a.1+INTERVAL_CELL_LENGTH)], &ci_color))).unwrap();
-        }
+        //}
 
 
     }
@@ -421,7 +422,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
 //need anymore as much as humanly possible.
-pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_motifs_count: &Vec<usize>) -> Vec<Vec<(f64, f64, f64)>>{
+pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<Vec<(f64, f64, f64)>>{
 
     if credible <= 0.0 {
         panic!("Can't make credible intervals of literally at most zero length!");
@@ -429,7 +430,9 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_moti
         warn!("Will make credible intervals out of literally all of the data!");
     }
 
-    let (num_samples, num_bases, _) = samples.dim();
+    //I haven't removed num_bases entirely because I might need it if I uncomment
+    //some currently commented code
+    let (num_samples, _num_bases, _) = samples.dim();
     let credible = credible.min(1.0);
     let num_interval = ((num_samples as f64)*credible).floor() as u32;
 
@@ -490,9 +493,9 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_moti
             let x_ind = ((base_vector[0]-(-SQRT_2/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
             let y_ind = ((base_vector[1]-(-SQRT_2/SQRT_3))/INTERVAL_CELL_LENGTH).floor() as usize;
             let z_ind = ((base_vector[2]-(-1.0/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
-            if (x_ind > x_steps) { println!("about to break x {} {}", x_ind, x_steps);}
-            if (y_ind > y_steps) { println!("about to break y {} {}", y_ind, y_steps);}
-            if (z_ind > z_steps) { println!("about to break z {} {}", z_ind, z_steps);}
+            if x_ind > x_steps { println!("about to break x {} {}", x_ind, x_steps);}
+            if y_ind > y_steps { println!("about to break y {} {}", y_ind, y_steps);}
+            if z_ind > z_steps { println!("about to break z {} {}", z_ind, z_steps);}
             cell_counts[[x_ind, y_ind, z_ind]] += 1;
 
         }
@@ -563,22 +566,22 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64, good_moti
 //think you're smarter than me about my own project.
 fn create_tetrahedral_traces(tetra_bases: &Vec<(f64, f64, f64)>) -> [Vec<(f64, f64)>; BASE_L] {
  
-    [tetra_bases.iter().map(|b| turn_to_no_A(b)).collect(), 
-     tetra_bases.iter().map(|b| turn_to_no_C(b)).collect(),
-     tetra_bases.iter().map(|b| turn_to_no_G(b)).collect(),
-     tetra_bases.iter().map(|b| turn_to_no_T(b)).collect()]
+    [tetra_bases.iter().map(|b| turn_to_no_a(b)).collect(), 
+     tetra_bases.iter().map(|b| turn_to_no_c(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_g(b)).collect(),
+     tetra_bases.iter().map(|b| turn_to_no_t(b)).collect()]
 }
 
-fn turn_to_no_A(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+fn turn_to_no_a(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
     (-tetra_base.0/3.-2.*SQRT_2*tetra_base.2/3.-2.*SQRT_2/3., tetra_base.1)
 }
-fn turn_to_no_C(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+fn turn_to_no_c(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
     (2.*tetra_base.0/3.+tetra_base.1/SQRT_3+SQRT_2*tetra_base.2/3.+SQRT_2/3.,  tetra_base.0/SQRT_3-SQRT_2*tetra_base.2/SQRT_3-SQRT_2/SQRT_3)
 }
-fn turn_to_no_G(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+fn turn_to_no_g(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
     (2.*tetra_base.0/3.-tetra_base.1/SQRT_3+SQRT_2*tetra_base.2/3.+SQRT_2/3., -tetra_base.0/SQRT_3+SQRT_2*tetra_base.2/SQRT_3+SQRT_2/SQRT_3)
 }
-fn turn_to_no_T(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
+fn turn_to_no_t(tetra_base: &(f64, f64, f64)) -> (f64, f64) {
     (tetra_base.0, tetra_base.1)
 }
 

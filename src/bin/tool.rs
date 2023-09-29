@@ -1,101 +1,13 @@
-#[allow(unused_parens)]
-/*mod base;
-mod sequence;
-mod waveform;
-mod data_struct;
-mod modified_t;*/
-/*use super::base;
-use super::sequence;
-use super::waveform;
-use super::data_struct;
-use super::modified_t;*/
-/*
- error[E0425]: cannot find value `NULL_CHAR` in this scope
-   --> src/bin/tool.rs:107:163
-    |
-107 |     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR);
-    |                                                                                                                                                                   ^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_CHECKPOINT_FILES` in this scope
-   --> src/bin/tool.rs:113:37
-    |
-113 |     let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
-    |                                     ^^^^^^^^^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_RJ_STEPS` in this scope
-   --> src/bin/tool.rs:114:38
-    |
-114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
-    |                                      ^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `NUM_HMC_STEPS` in this scope
-   --> src/bin/tool.rs:114:51
-    |
-114 |     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
-    |                                                   ^^^^^^^^^^^^^ not found in this scope
-
-error[E0425]: cannot find value `MAX_E_VAL` in this scope
-   --> src/bin/tool.rs:124:149
-    |
-124 |         Some("meme") => current_trace.trace_from_meme(args.get(10).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, fragment_length, &mut rng),
- */
-
 
 use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
 use motif_finder::base::*;
-use motif_finder::sequence::Sequence;
 use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, StudentsT};
-use statrs::statistics::{Min, Max};
-use statrs::function::gamma;
-use rand::Rng;
-use std::collections::VecDeque;
-use rand::distributions::{Distribution, Uniform};
-use aberth::aberth;
-use num_complex::Complex;
-const EPSILON: f64 = 1e-8;
-use once_cell::sync::Lazy;
-use num_traits::cast;
-use num_traits::float::Float;
-use num_traits::float::FloatConst;
-use num_traits::identities::{One, Zero};
-use num_traits::MulAdd;
-use core::iter::zip;
-use std::time::{Duration, Instant};
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::ParallelIterator;
+
+//use std::time::{Duration, Instant};
+
 use std::env;
 
-use serde_json::value::Serializer as Json_Serializer;
-
-use serde::{ser, Serialize,Serializer, Deserialize};
-use serde::de::{
-    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
-    VariantAccess, Visitor,
-};
-/*
-
-const NULL_CHAR: Option<char> = None;
- 
-const MOMENTUM_SD: f64 = 1.0;
-static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
-
-const NUM_CHECKPOINT_FILES: usize = 25;
-
-const NUM_RJ_STEPS: usize = 1;
-const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
-const NUM_BASE_LEAP_STEPS: usize = 1;
-const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
-const NUM_HMC_STEPS: usize = 50;
-const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
-
-const HMC_TRACE_STEPS: usize = 5; 
-const HMC_EPSILON: f64 = 1.0/16.0; 
-
-//This only matters when taking in a meme file
-const MAX_E_VAL: f64 = 0.01;
-*/
 fn main() {
 
     //Must have the following arguments:
@@ -157,7 +69,7 @@ fn main() {
             //If you're picking up from a JSON, you have the right to tell the motif finder to trust your motif set and minimize recalculation.
             //Note that it doesn't COMPLETELY trust you: it will validate on making sure your motif set signal is compatible with your processed ChIP data regardless. 
             //The default behavior is that it doesn't trust you.
-            let (validate, mut maybe_rng) = match (args.get(10).map(|x| x.parse::<bool>().ok()).flatten()) { 
+            let (validate, mut maybe_rng) = match args.get(10).map(|x| x.parse::<bool>().ok()).flatten() { 
                 None | Some(false) => (true, Some(&mut rng)),
                 Some(true) => (false, None),
             };
@@ -173,7 +85,7 @@ fn main() {
     let mut trials: [usize;6] = [0;6];
     let mut rates: [f64; 6] = [0.;6];
 
-    let mut trackHMC: usize = 0;
+    let mut track_hmc: usize = 0;
 
     for step in 0..num_advances {
  
@@ -185,11 +97,11 @@ fn main() {
 
         if step % 10 == 0 {
             println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
-            if (acceptances[5]-trackHMC) == 0 {
+            if (acceptances[5]-track_hmc) == 0 {
                 println!("Not really changing motif???");
                 println!("{:?}", current_trace.current_set_to_print());
             }
-            trackHMC=acceptances[5];
+            track_hmc=acceptances[5];
         }
         if step % save_step == 0 {
             

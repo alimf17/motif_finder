@@ -997,13 +997,6 @@ impl AllData {
 mod tests{
 
     use super::*;
-    use serde::ser::Error as SerdeError;
-    use serde::{ser::*, Serialize,Serializer, Deserialize};
-    use serde::de::{
-        self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
-        VariantAccess, Visitor,
-    };
-
 
     #[test]
     fn test_t_fit() {

@@ -473,9 +473,7 @@ impl Sequence {
 #[cfg(test)]
 mod tests {
     use super::*; 
-    use std::time::{Duration, Instant};
-    use rand::Rng;
-    use rand::distributions::{Distribution, Uniform};
+    use std::time::Instant;
 
     use crate::base::*;
    

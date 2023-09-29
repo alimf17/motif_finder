@@ -1,39 +1,11 @@
-#[allow(unused_parens)]
-
-
-use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
+use motif_finder::{NULL_CHAR, MAX_E_VAL};
 use motif_finder::base::*;
-use motif_finder::sequence::Sequence;
 use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, StudentsT};
-use statrs::statistics::{Min, Max};
-use statrs::function::gamma;
-use rand::Rng;
-use std::collections::VecDeque;
-use rand::distributions::{Distribution, Uniform};
-use aberth::aberth;
-use num_complex::Complex;
-const EPSILON: f64 = 1e-8;
-use once_cell::sync::Lazy;
-use num_traits::cast;
-use num_traits::float::Float;
-use num_traits::float::FloatConst;
-use num_traits::identities::{One, Zero};
-use num_traits::MulAdd;
-use core::iter::zip;
-use std::time::{Duration, Instant};
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::ParallelIterator;
+
+//use std::time::{Duration, Instant};
 use std::env;
 
-use serde_json::value::Serializer as Json_Serializer;
-
-use serde::{ser, Serialize,Serializer, Deserialize};
-use serde::de::{
-    self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
-    VariantAccess, Visitor,
-};
 
 fn main() {
 
@@ -91,7 +63,7 @@ fn main() {
             //If you're picking up from a JSON, you have the right to tell the motif finder to trust your motif set and minimize recalculation.
             //Note that it doesn't COMPLETELY trust you: it will validate on making sure your motif set signal is compatible with your processed ChIP data regardless. 
             //The default behavior is that it doesn't trust you.
-            let (validate, mut maybe_rng) = match (args.get(10).map(|x| x.parse::<bool>().ok()).flatten()) { 
+            let (validate, mut maybe_rng) = match args.get(10).map(|x| x.parse::<bool>().ok()).flatten() { 
                 None | Some(false) => (true, Some(&mut rng)),
                 Some(true) => (false, None),
             };

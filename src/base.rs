@@ -1439,6 +1439,16 @@ impl<'a> MotifSet<'a> {
 
         mot_set
     }
+    
+    #[cfg(test)]
+    fn recalced_signal(&self) -> Waveform {
+        let mut signal = self.data.derive_zero();
+        for mot in self.set.iter() {
+            signal += &(mot.generate_waveform(self.data));
+        }
+
+        signal
+    }
 
     fn recalc_signal(&mut self) {
         self.signal = self.data.derive_zero();
@@ -2699,16 +2709,13 @@ mod tester{
     use crate::base::bases::TruncatedLogNormal;
     use crate::base::bases::{Motif, THRESH};*/
     use super::*;
-    use crate::sequence::{Sequence, BP_PER_U8};
+    use crate::sequence::{Sequence};
     use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
     use statrs::statistics::{Min, Max};
-    use statrs::function::gamma;
+    use statrs::function::gamma::{gamma, ln_gamma};
     use rand::Rng;
-    use std::ptr;
-    use std::collections::VecDeque;
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
-
 
     fn produce_bps_and_pos(seq_motif: &Vec<usize>) -> (Vec<usize>, Vec<usize>) {
 
@@ -2905,7 +2912,7 @@ mod tester{
             let mut ana: f64 = wc[i];
             println!("Wave checking {} in pos {}", BPS[bp], p);
             println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, 1.0);
-            let ratio = ((prop_bp2-prop_bp)/h);
+            let ratio = (prop_bp2-prop_bp)/h;
             println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
                                           unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
             while (i < (w2.len()-2)) && ((calc == 0.) || (ana == 0.)) {
@@ -2933,7 +2940,7 @@ mod tester{
         for i in 0..analytical_grad.len() {
             if i == 0 || i == ((BASE_L-1)*mot.len()+1) {
                 println!("height!");
-                let mot_ref = if (i == 0) { &mot } else {&mot_a};
+                let mot_ref = if i == 0 { &mot } else {&mot_a};
                 println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], mot_ref.d_height_prior_d_hmc());
             } else if i < ((BASE_L-1)*mot.len()+1) {
                 println!("{} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
@@ -3032,11 +3039,11 @@ mod tester{
             for bp in 0..BASE_L {
 
                 if bp == best_old {
-                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)});
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)};
                 } else if bp == best_new {
-                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)});
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)};
                 } else {
-                    all_scramble_correct &= (unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)});
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)};
                 }
                     
             }
@@ -3068,11 +3075,11 @@ mod tester{
             let best_new = leap_kmer[base];
             for bp in 0..BASE_L {
                 if bp == best_old {
-                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)});
+                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)};
                 } else if bp == best_new {
-                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)});
+                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)};
                 } else {
-                    all_scramble_correct &= (unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)});
+                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)};
                 }
                     
             }
@@ -3087,11 +3094,11 @@ mod tester{
             let best_new = leap1_kmer[base];
             for bp in 0..BASE_L {
                 if bp == best_old {
-                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_new)});
+                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_new)};
                 } else if bp == best_new {
-                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_old)});
+                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_old)};
                 } else {
-                    all_scramble_correct &= (unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(bp)});
+                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(bp)};
                 }
                     
             }
