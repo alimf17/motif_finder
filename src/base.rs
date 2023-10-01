@@ -1461,7 +1461,7 @@ impl<'a> MotifSet<'a> {
 
         let diff_ln_like = new-old;
 
-        println!("accept ln prob {}", diff_ln_like);
+        //println!("accept ln prob {}", diff_ln_like);
         //Always accept if new likelihood is better
         if diff_ln_like > 0.0 {
             true
@@ -1588,12 +1588,12 @@ impl<'a> MotifSet<'a> {
         let remaining = self.data-&self.signal;
         let attempt = Motif::rand_propensity_mot(self.width, &remaining, rng); //There may not always be a place with decent propensities
         match attempt {
-            None => {println!("No good propensities"); None},
+            None => {/*println!("No good propensities");*/ None},
             Some((new_mot, pick_prob)) => {
                 let ln_gen_prob = new_mot.height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
-                let h_prior = new_mot.height_prior();
+                //let h_prior = new_mot.height_prior();
                 let ln_post = new_set.add_motif(new_mot);
-                println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+                //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
                 Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
             }
         }
@@ -1618,7 +1618,7 @@ impl<'a> MotifSet<'a> {
             let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))]/sum_propensities;
             let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
             let ln_post = new_set.remove_motif(rem_id);
-            println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+            //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
@@ -1708,8 +1708,9 @@ impl<'a> MotifSet<'a> {
                 (self.clone(), which_rj, false)
             },
             Some((new_mot, modded_ln_like)) => {
-                println!("old ln P {}, modded ln P {}", self.ln_post.unwrap(), modded_ln_like);
-                if Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng) {
+                let accepted = Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng);
+                println!("old ln P {}, modded ln P {}, move {:?}, accepted: {}", self.ln_post.unwrap(), modded_ln_like, RJ_MOVE_NAMES[which_rj], accepted);
+                if accepted {
                     (new_mot, which_rj, true)
                 } else { 
                     (self.clone(), which_rj, false)
@@ -1770,10 +1771,10 @@ impl<'a> MotifSet<'a> {
                panic!("No states being selected from!");
            }*/
 
-           println!("base leap sel {:?}", selection_probs);
+           //println!("base leap sel {:?}", selection_probs);
 
-           let likes = (0..likes_and_mots.len()).map(|i| likes_and_mots[i].0).collect::<Vec<_>>();
-           println!("likes base leap {:?}", likes);
+           //let likes = (0..likes_and_mots.len()).map(|i| likes_and_mots[i].0).collect::<Vec<_>>();
+           //println!("likes base leap {:?}", likes);
 
            let dist = WeightedIndex::new(&selection_probs).unwrap();
            current_set = likes_and_mots[dist.sample(rng)].1.clone();
