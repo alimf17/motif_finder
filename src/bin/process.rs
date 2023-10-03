@@ -161,7 +161,7 @@ pub fn main() {
     
     let mut rng = rand::thread_rng();
     
-    let ref_per_chain: usize = 5;
+    //let ref_per_chain: usize = 5;
 
     //let num_ref_pwm = ref_per_chain*set_trace_collections.len();
 
