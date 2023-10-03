@@ -53,7 +53,7 @@ fn main() {
 
     let background = total_data.background();
 
-    let save_step = 1+(num_advances/NUM_CHECKPOINT_FILES);
+    let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
     //Initialize trace

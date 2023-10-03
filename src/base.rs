@@ -12,7 +12,7 @@ use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEP
 use crate::data_struct::AllData;
 
 use rand::Rng;
-use rand::prelude::IteratorRandom;
+//use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, WeightedIndex};
 
@@ -120,7 +120,7 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
-const NECESSARY_MOTIF_IMPROVEMENT: f64 = 1.0_f64;
+const NECESSARY_MOTIF_IMPROVEMENT: f64 = 5.0_f64;
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
@@ -1704,12 +1704,12 @@ impl<'a> MotifSet<'a> {
         match proposal {
 
             None => {
-                println!("Failed move {}", which_rj);
+                //println!("Failed move {}", which_rj);
                 (self.clone(), which_rj, false)
             },
             Some((new_mot, modded_ln_like)) => {
                 let accepted = Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng);
-                println!("old ln P {}, modded ln P {}, move {:?}, accepted: {}", self.ln_post.unwrap(), modded_ln_like, RJ_MOVE_NAMES[which_rj], accepted);
+                //println!("old ln P {}, modded ln P {}, move {:?}, accepted: {}", self.ln_post.unwrap(), modded_ln_like, RJ_MOVE_NAMES[which_rj], accepted);
                 if accepted {
                     (new_mot, which_rj, true)
                 } else { 
@@ -1776,7 +1776,13 @@ impl<'a> MotifSet<'a> {
            //let likes = (0..likes_and_mots.len()).map(|i| likes_and_mots[i].0).collect::<Vec<_>>();
            //println!("likes base leap {:?}", likes);
 
-           let dist = WeightedIndex::new(&selection_probs).unwrap();
+           let dist = match WeightedIndex::new(&selection_probs) {
+
+               Ok(weights) => weights, 
+               Err(_) => {warn!("Issue with base leap weights in this step. Randomly selecting. Discard inference before this point {:?}", selection_probs);
+                   WeightedIndex::new(&(vec![1.0; likes_and_mots.len()])).expect("This is statically valid")},
+           };
+
            current_set = likes_and_mots[dist.sample(rng)].1.clone();
        }
 
@@ -2031,11 +2037,12 @@ impl<'a> AnyMotifSet<'a> {
 }
 
 impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
-    fn from(other: &'a MotifSet) -> Self {
-        Self {
+    fn from(other: &'a MotifSet) -> StrippedMotifSet {
+        let ln_post: f64 = other.calc_ln_post();
+        StrippedMotifSet {
             set: other.set.clone(),
             width: other.width,
-            ln_post: other.calc_ln_post(),
+            ln_post: ln_post,
         }
     }
 }
@@ -2303,7 +2310,7 @@ impl<'a> SetTrace<'a> {
         let len_trace = self.trace.len();
 
         //We want to keep the last element in the SetTrace, so that the markov chain can proceed
-        let trace = self.trace.drain(0..(len_trace-1)).map(|a| a.give_stored()).collect();
+        let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).map(|a| a.give_stored()).collect();
 
 
         let history = SetTraceDef {
@@ -2518,8 +2525,12 @@ impl SetTraceDef {
 
     //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
     pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {
- 
-        let set_picks: Vec<&StrippedMotifSet> = self.trace.iter().choose_multiple(rng, num_motifs);
+
+        let spacing = self.trace.len()/num_motifs;
+        
+        let picks = (0..(self.trace.len()/spacing)).map(|a| a*spacing); 
+
+        let set_picks: Vec<&StrippedMotifSet> = picks.map(|a| &(self.trace[a])).collect();
 
         let pwms: Vec<Motif> = set_picks.iter().map(|a| a.set.choose(rng).expect("No motif set should be empty").clone()).collect();
 

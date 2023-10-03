@@ -78,8 +78,11 @@ pub fn main() {
 
         let mut iter_files = chain_files.iter();
 
+        let file_y = iter_files.next();
 
-        set_trace_collections.push(serde_json::from_str(&fs::read_to_string(iter_files.next().expect("Must have matches to proceed"))
+        println!("file {:?} ", file_y);
+
+        set_trace_collections.push(serde_json::from_str(&fs::read_to_string(file_y.expect("Must have matches to proceed"))
                                                                           .expect("File must exist or wouldn't appear"))
                                                                           .expect("All read in files must be correct json!"));
 
@@ -160,17 +163,14 @@ pub fn main() {
     
     let ref_per_chain: usize = 5;
 
-    let num_ref_pwm = ref_per_chain*set_trace_collections.len();
-
-    let mut ref_pwms: Vec<Motif> = Vec::with_capacity(num_ref_pwm);
+    //let num_ref_pwm = ref_per_chain*set_trace_collections.len();
 
     let mut min_len: usize = usize::MAX;
     for trace in set_trace_collections.iter() {
         min_len = min_len.min(trace.len());
-        ref_pwms.append(&mut (trace.ret_rand_motifs(ref_per_chain, &mut rng)));
     }
 
-    let cluster_per_chain: usize = min_len.min(10000);
+    let cluster_per_chain: usize = min_len.min(2000);
 
     let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 

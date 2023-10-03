@@ -285,13 +285,16 @@ impl<'a> Waveform<'a> {
 
                     let lower_data_ind = center/self.spacer; 
 
-                    //Center cannot possibly beyond the data because of how I take j: I stop before j+k runs 
+                    //Center cannot possibly beyond the bases because of how I take j: I stop before j+k runs 
                     //into the sequence end, which will always make lower_data_ind hit, at most the largest
                     //location. BUT, I CAN be over any ability to check the next location
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let u64_mot = Sequence::kmer_to_u64(&(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
                     let between = center % self.spacer;
+                    //The second statement in the OR seems bizarre, until you remember that we stop
+                    //including DATA before we stop including BASES. This is our check to make sure
+                    //that if we're in that intermediate, then we include such overrun bases
                     let to_add = if (between == 0) || (lower_data_ind + 1 >= self.point_lens[i]) {
                         /*#[cfg(test)]{
                             println!("block {} j {} kmer {} amount {}", i, j,u64_mot, self.wave[self.start_dats[i]+lower_data_ind]); 
