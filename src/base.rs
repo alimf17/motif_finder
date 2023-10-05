@@ -1399,14 +1399,20 @@ impl<'a> MotifSet<'a> {
 
         let width = (fragment_length as f64)/6.0;
 
-        let set = vec![Motif::rand_mot(width, data.seq(), rng)];
+        let mut valid = false;
 
-        let signal = set[0].generate_waveform(data);
+        let mot_set = while !valid { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
-        let mut mot_set = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+            let set = vec![Motif::rand_mot(width, data.seq(), rng)];
 
-        let _ = mot_set.ln_posterior();
+            let signal = set[0].generate_waveform(data);
 
+            let mut mot_set_try = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+
+            let like = mot_set_try.ln_posterior();
+
+            valid = like.is_finite();
+        }
         mot_set
     }
 
