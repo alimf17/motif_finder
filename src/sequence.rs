@@ -9,12 +9,12 @@ use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a
 
 pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole
                                   //Don't try to get cute and set this > 8.
-pub const BP_PER_U8: usize = 8/BITS_PER_BP; 
+pub const BP_PER_U8: usize = 4; 
 const PLACE_VALS: [u8; BP_PER_U8] = [1, 4, 16, 64]; //NOTICE: this only works when BASE_L == 4. 
                                             //Because a u8 contains 8 bits of information (duh)
                                             //And it requires exactly two bits disabmiguate 4 things. 
-const U8_BITMASK: u8 = (1_u8 << BITS_PER_BP) - 1; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
-pub const U64_BITMASK: u64 = (1_u64  << BITS_PER_BP)-1;
+const U8_BITMASK: u8 = 3; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
+pub const U64_BITMASK: u64 = 3;
 
 //I promise you, you only every want to use the constructors we have provided you
 //You do NOT want to try to initialize this manually. 

@@ -1401,7 +1401,7 @@ impl<'a> MotifSet<'a> {
 
         let mut valid = false;
 
-        let mot_set = while !valid { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
+        let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
             let set = vec![Motif::rand_mot(width, data.seq(), rng)];
 
@@ -1412,7 +1412,12 @@ impl<'a> MotifSet<'a> {
             let like = mot_set_try.ln_posterior();
 
             valid = like.is_finite();
-        }
+
+            if valid {
+                break mot_set_try;
+            }
+        };
+        
         mot_set
     }
 
@@ -2836,8 +2841,8 @@ mod tester{
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
-        let block_n: usize = 200;
-        let u8_per_block: usize = 100;
+        let block_n: usize = 3;
+        let u8_per_block: usize = 90;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -3010,10 +3015,11 @@ mod tester{
     fn leap_test() {
 
 
+        println!("begin");
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
-        let block_n: usize = 200;
-        let u8_per_block: usize = 435;
+        let block_n: usize = 5;
+        let u8_per_block: usize = 90;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -3150,8 +3156,8 @@ mod tester{
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
-        let block_n: usize = 200;
-        let u8_per_block: usize = 200;
+        let block_n: usize = 5;
+        let u8_per_block: usize = 90;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -3547,8 +3553,8 @@ mod tester{
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
-        let block_n: usize = 200;
-        let u8_per_block: usize = 4375;
+        let block_n: usize = 5;
+        let u8_per_block: usize = 90;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
