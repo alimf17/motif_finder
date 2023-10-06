@@ -663,7 +663,7 @@ impl AllData {
 
             
             while no_null_base && (bp_ind < target_bp){ 
-                match pre_sequence[(bp_ind % sequence_len)] { //I don't need to explicitly check for circularity: process_data handled this for me already
+                match pre_sequence[bp_ind % sequence_len] { //I don't need to explicitly check for circularity: process_data handled this for me already
                     Some(bp) => bases_batch.push(bp),
                     None => no_null_base = false,
                 };

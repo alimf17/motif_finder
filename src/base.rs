@@ -1399,7 +1399,7 @@ impl<'a> MotifSet<'a> {
 
         let width = (fragment_length as f64)/6.0;
 
-        let mut valid = false;
+        let mut valid: bool;
 
         let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
