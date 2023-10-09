@@ -133,7 +133,7 @@ pub struct Base {
 
 impl PartialEq for Base {
     fn eq(&self, other: &Self) -> bool {
-        self.dist(Some(other)) < CLOSE    
+        self.dist_sq(Some(other)) < CLOSE    
     }
 } 
 
@@ -245,15 +245,15 @@ impl Base {
         Self::argmax(&self.props)
     }
 
-    pub fn dist(&self, base: Option<&Base>) -> f64 {
+    pub fn dist_sq(&self, base: Option<&Base>) -> f64 {
 
         let as_simplex: [f64; BASE_L-1] = self.as_simplex();
         match base {
 
-            None => as_simplex.iter().map(|a| a.powi(2)).sum::<f64>().sqrt(),
+            None => as_simplex.iter().map(|a| a.powi(2)).sum::<f64>(),
             Some(other) => {
                 let other_simplex = other.as_simplex();
-                as_simplex.iter().zip(other_simplex).map(|(a, b)| (a-b).powi(2)).sum::<f64>().sqrt()
+                as_simplex.iter().zip(other_simplex).map(|(a, b)| (a-b).powi(2)).sum::<f64>()
             }
         }
 
@@ -1296,9 +1296,9 @@ impl Motif {
             let b2 = if (ind < mod_len_b) || (ind >= (pwm_2.len()+mod_len_b)) {None} else {Some(&pwm_2[ind-mod_len_b])};
 
             distance += match b1 {
-                Some(b) => b.dist(b2),
+                Some(b) => b.dist_sq(b2),
                 None => match b2{
-                    Some(bb) => bb.dist(None),
+                    Some(bb) => bb.dist_sq(None),
                     None => { warn!("PWM alignment in distance is causing a complete miss!"); 0.0},
                 },
             };
@@ -1306,7 +1306,7 @@ impl Motif {
         }
 
 
-        distance
+        distance.sqrt()
 
     }
 
@@ -2766,7 +2766,7 @@ mod tester{
         
         let mod_b = Base::simplex_to_base(&simplex);
 
-        println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist(None), b.dist(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
+        println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
         let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , 20., &mut rng);
 
@@ -3498,11 +3498,11 @@ mod tester{
         assert!(b == b.clone());
 
         let b_mag: f64 = b.show().iter().sum();
-        let supposed_default_dist = (b.as_simplex()).iter().map(|a| a.powi(2)).sum::<f64>().sqrt();
+        let supposed_default_dist = (b.as_simplex()).iter().map(|a| a.powi(2)).sum::<f64>();
 
-        assert!(supposed_default_dist == b.dist(None));
+        assert!(supposed_default_dist == b.dist_sq(None));
       
-        //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist(Some(&b.to_gbase().to_base())));
+        //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist_sq(Some(&b.to_gbase().to_base())));
         //assert!(b == b.to_gbase().to_base());
 
 
