@@ -170,7 +170,7 @@ pub fn main() {
         min_len = min_len.min(trace.len());
     }
 
-    let cluster_per_chain: usize = min_len.min(2000);
+    let cluster_per_chain: usize = min_len.min(500);
 
     let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
