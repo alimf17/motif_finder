@@ -619,9 +619,9 @@ impl AllData {
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
 
-        let background_dist = if is_ar {Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30))} else { 
+        let background_dist = if is_ar {Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30), fragment_length)} else { 
             let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
-            Background::new(sd, df, None)
+            Background::new(sd, df, (fragment_length as f64)/6.0, None)
         } ;
         println!("inferred background dist");
 
@@ -710,7 +710,7 @@ impl AllData {
     //coefficients in general, and I solve the Yule-Walker equations with Cholesky decomposition, not Levinson recursion
     //I use Cholesky decomposition because I usually have a clear cap on the order size--capping computational cost--
     //and it was what I saw first saw
-    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>, max_order: usize) -> Background {
+    fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>, max_order: usize, fragment_length: usize) -> Background {
 
 
 
@@ -753,7 +753,7 @@ impl AllData {
 
         //let correlations = Self::compute_autocorrelation_coeffs(raw_data_blocks);
         
-        Background::new(*sd, *df, Some(coeffs))
+        Background::new(*sd, *df, (fragment_length as f64)/6.0, Some(coeffs))
 
 
     }

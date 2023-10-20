@@ -90,6 +90,9 @@ impl Kernel {
     pub fn get_height(&self) -> f64 {
         self.peak_height
     }
+    pub fn scaled_kernel(&self, scale_by: f64) -> Kernel {
+        self*scale_by
+    }
 
 
 }
@@ -631,15 +634,18 @@ impl From<StudentsTDef> for StudentsT {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Background {
     pub dist: BackgroundDist,
+    pub kernel: Kernel,
     pub ar_corrs: Option<Vec<f64>>,
 }
 
 impl Background {
 
-    pub fn new(sigma_background : f64, df : f64, poss_ar_corrs: Option<&Vec<f64>>) -> Background {
+    pub fn new(sigma_background : f64, df : f64, peak_width: f64, poss_ar_corrs: Option<&Vec<f64>>) -> Background {
 
         let dist = BackgroundDist::new(sigma_background, df);
         
+        let kernel = Kernel::new(peak_width, 1.0);
+
         match poss_ar_corrs {
             
             Some(ar_corrs) => {
@@ -654,9 +660,9 @@ impl Background {
                     }
                 }
                 
-                Background{dist: dist, ar_corrs:Some(ar_corrs.clone())}
+                Background{dist: dist, kernel: kernel, ar_corrs:Some(ar_corrs.clone())}
             }, 
-            None => Background{dist: dist, ar_corrs: None},
+            None => Background{dist: dist, kernel: kernel, ar_corrs: None},
         }
     }
 
@@ -727,6 +733,9 @@ impl Background {
     }
     pub fn ln_pdf(&self, calc: f64) -> f64{
         self.dist.ln_pdf(calc)
+    }
+    pub fn kernel_ref(&self) -> &Kernel {
+        &self.kernel
     }
 
 
@@ -1228,7 +1237,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
 
-        let background: Background = Background::new(0.25, 2.64, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
 
         let noise: Noise = signal.produce_noise(&base_w, &background);
 
@@ -1286,7 +1295,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
 
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], &background);
@@ -1384,7 +1393,7 @@ mod tests{
     fn panic_noise() {
         let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], &background);
 
@@ -1398,7 +1407,7 @@ mod tests{
 
         let ar: Vec<f64> = vec![1.5, 1.0];
         
-        let background: Background = Background::new(0.25, 2.64, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64,5.0, Some(&ar));
     }
 
 

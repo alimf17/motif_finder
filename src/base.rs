@@ -5,7 +5,7 @@ use std::error::Error;
 
 use core::fmt::{Debug, Formatter};
 
-use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background, WIDE};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::ContinuousLnCDF;
 use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
@@ -556,7 +556,6 @@ fn add_mult_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1], lambda: f64) -> [f64; B
 pub struct Motif {
 
     peak_height: f64,
-    kernel: Kernel,
     pwm: Vec<Base>,
 
 }
@@ -567,21 +566,19 @@ impl Motif {
     //PANIC: if any proposed PWM is made with a capacity greater than MAX_BASE, the program will panic
     //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, peak_width: f64) -> Motif {
-        let kernel = Kernel::new(peak_width, peak_height);
+    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64) -> Motif {
 
         pwm.reserve_exact(MAX_BASE-pwm.len());
         
         let m = Motif {
             peak_height: peak_height,
-            kernel: kernel,
             pwm: pwm,
         };
 
         m
     }
 
-    pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, peak_width: f64, rng: &mut R) -> Motif {
+    pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, rng: &mut R) -> Motif {
 
         //let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
@@ -590,12 +587,12 @@ impl Motif {
 
         let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
 
-        Self::raw_pwm(pwm, peak_height, peak_width)
+        Self::raw_pwm(pwm, peak_height)
     }
 
 
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<usize>, peak_width: f64, rng: &mut R) -> Motif {
+    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<usize>, rng: &mut R) -> Motif {
         
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -608,18 +605,16 @@ impl Motif {
 
         let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
 
-        let kernel = Kernel::new(peak_width, peak_height);
 
         Motif {
             peak_height: peak_height,
-            kernel: kernel,
             pwm: pwm,
         }
 
 
     }
 
-    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<usize>, peak_width: f64, rng: &mut R) -> Motif {
+    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<usize>, rng: &mut R) -> Motif {
         
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -632,11 +627,9 @@ impl Motif {
 
         let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
 
-        let kernel = Kernel::new(peak_width, peak_height);
 
         Motif {
             peak_height: peak_height,
-            kernel: kernel,
             pwm: pwm,
         }
 
@@ -645,7 +638,7 @@ impl Motif {
 
 
     
-    pub fn rand_mot<R: Rng + ?Sized>(peak_width: f64, seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
@@ -653,12 +646,12 @@ impl Motif {
         let mot = seq.random_valid_motif(num_bases);
 
         
-        Self::from_motif(mot, peak_width,  rng)
+        Self::from_motif(mot,  rng)
         
 
     }
 
-    pub fn rand_propensity_mot<R: Rng + ?Sized>(peak_width: f64, wave: &Waveform, rng: &mut R) -> Option<(Motif, f64)> {
+    pub fn rand_propensity_mot<R: Rng + ?Sized>(wave: &Waveform, rng: &mut R) -> Option<(Motif, f64)> {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
@@ -678,10 +671,10 @@ impl Motif {
 
         let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
 
-        Some((Self::from_motif_uniform(mot, peak_width, rng), propensities[selection]/sum_prop))
+        Some((Self::from_motif_uniform(mot, rng), propensities[selection]/sum_prop))
     }
 
-    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, peak_width: f64, seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence, rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
@@ -691,11 +684,8 @@ impl Motif {
         let mut pwm: Vec<Base> =  mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-pwm.len());
 
-        let kernel = Kernel::new(peak_width, peak_height);
-
         Motif {
             peak_height: peak_height,
-            kernel: kernel,
             pwm: pwm,
         }
 
@@ -704,7 +694,7 @@ impl Motif {
     }
     
     //Panics: if num_bases < MIN_BASE or num_bases > MAX_BASE
-    pub fn rand_mot_with_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, peak_width: f64, seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_with_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
 
         assert!((num_bases >= MIN_BASE) && (num_bases <= MAX_BASE), 
                 "Only motif lengths with a length between {MIN_BASE} and {MAX_BASE}, inclusive, are allowed. You tried to make a {num_bases} Base long motif.");
@@ -714,11 +704,9 @@ impl Motif {
         let mut pwm: Vec<Base> = mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-pwm.len());
 
-        let kernel = Kernel::new(peak_width, peak_height);
 
         Motif {
             peak_height: peak_height,
-            kernel: kernel,
             pwm: pwm,
         }
 
@@ -732,7 +720,6 @@ impl Motif {
         let mut opposite = self.clone();
 
         opposite.peak_height = -self.peak_height;
-        opposite.kernel = &(self.kernel)*(-1.0); 
         opposite
 
     }
@@ -793,7 +780,6 @@ impl Motif {
             new_mot.peak_height = self.peak_height.signum()*h;
 
         //}
-        new_mot.kernel = &(self.kernel)*(new_mot.peak_height/self.peak_height);
 
         for i in 0..self.len() {
             
@@ -827,17 +813,6 @@ impl Motif {
         self.peak_height
     }
 
-    pub fn kernel(&self) -> Kernel {
-        self.kernel.clone()
-    }
-
-    pub fn raw_kern(&self) -> &Vec<f64> {
-        self.kernel.get_curve()
-    }
-
-    pub fn peak_width(&self) -> f64 {
-        self.kernel.get_sd()
-    }
 
     pub fn len(&self) -> usize {
         self.pwm.len()
@@ -1018,7 +993,7 @@ impl Motif {
 
 
     //NOTE: if data does not point to the same sequence that self does, this will break. HARD. 
-    pub fn generate_waveform<'a>(&self, data: &'a Waveform) -> Waveform<'a> {
+    pub fn generate_waveform<'a>(&self, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1033,7 +1008,7 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
-                    actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]) ;
+                    actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -1049,7 +1024,7 @@ impl Motif {
 
     }
 
-    pub fn no_height_waveform<'a>(&self, data: &'a Waveform) -> Waveform<'a> {
+    pub fn no_height_waveform<'a>(&self, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1067,7 +1042,7 @@ impl Motif {
             for j in 0..(lens[i]-self.len()) {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
                     //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
-                    actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/self.peak_height);
+                    actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
                 }
             }
@@ -1077,7 +1052,7 @@ impl Motif {
 
     }
     
-    pub fn only_pos_waveform<'a>(&self,bp: usize, motif_pos: usize, data: &'a Waveform) -> Waveform<'a> {
+    pub fn only_pos_waveform<'a>(&self,bp: usize, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1096,7 +1071,7 @@ impl Motif {
             for j in 0..(lens[i]-self.len()) {
                 if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
                     //println!("safe binding at {}", starts[i]*BP_PER_U8+j);
-                    actual_kernel = &self.kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]/bind);
+                    actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height/bind);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
                                                                                          //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
                                                                                          //has zeros where we can be going over the motif length. Because THRESH forbids trying
@@ -1112,7 +1087,7 @@ impl Motif {
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
     #[allow(dead_code)]
-    unsafe fn generate_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data: &'a Waveform) -> Waveform<'a> {
+    unsafe fn generate_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1127,7 +1102,7 @@ impl Motif {
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
                 if binds.0[starts[i]*BP_PER_U8+j] > THRESH {
-                    actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]) ;
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]*self.peak_height) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
                                                                                          //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
@@ -1144,11 +1119,10 @@ impl Motif {
     }
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-    unsafe fn no_height_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data: &'a Waveform) -> Waveform<'a> {
+    unsafe fn no_height_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
-        let base_kernel = &self.kernel*(1.0/self.peak_height);
         let mut actual_kernel: Kernel;
         //let mut actual_kernel: Kernel = &self.kernel*1.0;
 
@@ -1162,7 +1136,7 @@ impl Motif {
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
                 if  binds.0[starts[i]*BP_PER_U8+j] > THRESH {
                     //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
-                    actual_kernel = &base_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
                 }
             }
@@ -1176,7 +1150,7 @@ impl Motif {
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
     //        You must also ensure that bp < BASE_L, and that motif_pos < self.len()
-    unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, data: &'a Waveform) -> Waveform<'a> {
+    unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1194,7 +1168,7 @@ impl Motif {
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
                 if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
                     //println!("unsafe binding at {}", starts[i]*BP_PER_U8+j);
-                    actual_kernel = &self.kernel*((binds.0[starts[i]*BP_PER_U8+j])/bind);
+                    actual_kernel = unit_kernel*((binds.0[starts[i]*BP_PER_U8+j]*self.peak_height)/bind);
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
                 }
             }
@@ -1217,7 +1191,7 @@ impl Motif {
 
         let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
             if i == 0 {
-                let d_noise_d_h = self.no_height_waveform_from_binds(&binds, data)
+                let d_noise_d_h = self.no_height_waveform_from_binds(&binds, data, background.kernel_ref())
                                                .account_auto(background);
                 (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise))) + self.d_height_prior_d_hmc()
             } else {
@@ -1229,7 +1203,7 @@ impl Motif {
                                                                            //This is important, because statically guarentees the safety of using rel_bind
 
                 let result =
-                      (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, data)
+                      (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, data, background.kernel_ref())
                                .account_auto(background))
                       * d_ad_stat_d_noise) * d_ad_like_d_ad_stat
                       ;
@@ -1318,7 +1292,7 @@ impl fmt::Display for Motif {
         const DIGITS: usize = 10;
         
         //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
-        write!(f, "Peak height: {:.DIGITS$}. Total peak width (bp): {}\n", self.peak_height, self.kernel.len())?;
+        write!(f, "Peak height: {:.DIGITS$}. \n", self.peak_height)?;
 
         //I want people to be free to define their own bases, if they like
         //But they will have to change it in the code for formatting: it's not my problem
@@ -1349,7 +1323,7 @@ impl fmt::Debug for Motif {
         const DIGITS: usize = 10;
         
         //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
-        write!(f, "Peak height: {:.DIGITS$}. Total peak width (bp): {}\n", self.peak_height, self.kernel.len())?;
+        write!(f, "Peak height: {:.DIGITS$}.\n", self.peak_height)?;
        
         //I want people to be free to define their own bases, if they like
         //But they will have to change it in the code for formatting: it's not my problem
@@ -1386,7 +1360,6 @@ impl fmt::Debug for Motif {
 pub struct MotifSet<'a> {
 
     set: Vec<Motif>, 
-    width: f64, 
     signal: Waveform<'a>,
     ln_post: Option<f64>,
     data: &'a Waveform<'a>, 
@@ -1395,19 +1368,18 @@ pub struct MotifSet<'a> {
 
 impl<'a> MotifSet<'a> {
    
-    pub fn rand_with_one<R: Rng + ?Sized>(data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize, rng: &mut R) -> Self {
+    pub fn rand_with_one<R: Rng + ?Sized>(data: &'a Waveform<'a>, background: &'a Background, rng: &mut R) -> Self {
 
-        let width = (fragment_length as f64)/6.0;
 
         let mut valid: bool;
 
         let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
-            let set = vec![Motif::rand_mot(width, data.seq(), rng)];
+            let set = vec![Motif::rand_mot(data.seq(), rng)];
 
-            let signal = set[0].generate_waveform(data);
+            let signal = set[0].generate_waveform(data, background.kernel_ref());
 
-            let mut mot_set_try = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+            let mut mot_set_try = MotifSet{ set: set, signal: signal, ln_post: None, data: data, background: background};
 
             let like = mot_set_try.ln_posterior();
 
@@ -1421,30 +1393,27 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
 
-    pub fn rand_with_one_height<R: Rng + ?Sized>(peak_height: f64, data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize, rng: &mut R) -> Self {
+    pub fn rand_with_one_height<R: Rng + ?Sized>(peak_height: f64, data: &'a Waveform<'a>, background: &'a Background, rng: &mut R) -> Self {
 
-        let width = (fragment_length as f64)/6.0;
+        let set = vec![Motif::rand_mot_with_height(peak_height, data.seq(), rng)];
 
-        let set = vec![Motif::rand_mot_with_height(peak_height, width, data.seq(), rng)];
+        let signal = set[0].generate_waveform(data, background.kernel_ref());
 
-        let signal = set[0].generate_waveform(data);
-
-        let mut mot_set = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+        let mut mot_set = MotifSet{ set: set,  signal: signal, ln_post: None, data: data, background: background};
 
         let _ = mot_set.ln_posterior();
 
         mot_set
     }
     
-    pub fn rand_with_one_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, motif_len: usize, data: &'a Waveform<'a>, background: &'a Background, fragment_length: usize, rng: &mut R) -> Self {
+    pub fn rand_with_one_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, motif_len: usize, data: &'a Waveform<'a>, background: &'a Background, rng: &mut R) -> Self {
 
-        let width = (fragment_length as f64)/6.0;
 
-        let set = vec![Motif::rand_mot_with_height_and_motif_len(peak_height, motif_len, width, data.seq(), rng)];
+        let set = vec![Motif::rand_mot_with_height_and_motif_len(peak_height, motif_len, data.seq(), rng)];
 
-        let signal = set[0].generate_waveform(data);
+        let signal = set[0].generate_waveform(data, background.kernel_ref());
 
-        let mut mot_set = MotifSet{ set: set, width: width, signal: signal, ln_post: None, data: data, background: background};
+        let mut mot_set = MotifSet{ set: set, signal: signal, ln_post: None, data: data, background: background};
 
         let _ = mot_set.ln_posterior();
 
@@ -1455,7 +1424,7 @@ impl<'a> MotifSet<'a> {
     fn recalced_signal(&self) -> Waveform {
         let mut signal = self.data.derive_zero();
         for mot in self.set.iter() {
-            signal += &(mot.generate_waveform(self.data));
+            signal += &(mot.generate_waveform(self.data, self.background.kernel_ref()));
         }
 
         signal
@@ -1464,7 +1433,7 @@ impl<'a> MotifSet<'a> {
     fn recalc_signal(&mut self) {
         self.signal = self.data.derive_zero();
         for mot in self.set.iter() {
-            self.signal += &(mot.generate_waveform(self.data));
+            self.signal += &(mot.generate_waveform(self.data, self.background.kernel_ref()));
         }
     }
 
@@ -1487,7 +1456,6 @@ impl<'a> MotifSet<'a> {
 
         MotifSet {
             set: self.set.clone(),
-            width: self.width, 
             signal: self.signal.clone(),
             ln_post: None,
             data: self.data, //pointer
@@ -1549,7 +1517,7 @@ impl<'a> MotifSet<'a> {
 
     fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
-        self.signal += &new_mot.generate_waveform(self.data) ;
+        self.signal += &new_mot.generate_waveform(self.data, self.background.kernel_ref()) ;
         self.set.push(new_mot);
         self.ln_post = None;
         self.ln_posterior()
@@ -1558,7 +1526,7 @@ impl<'a> MotifSet<'a> {
     
     fn insert_motif(&mut self, new_mot: Motif, position: usize) -> f64 {
 
-        self.signal += &new_mot.generate_waveform(self.data) ;
+        self.signal += &new_mot.generate_waveform(self.data, self.background.kernel_ref()) ;
         self.set.insert(position, new_mot);
         self.ln_post = None;
         self.ln_posterior()
@@ -1569,7 +1537,7 @@ impl<'a> MotifSet<'a> {
         assert!(rem_id < self.set.len());
 
         let rem_mot = self.set.swap_remove(rem_id);
-        self.signal -= &rem_mot.generate_waveform(self.data);
+        self.signal -= &rem_mot.generate_waveform(self.data, self.background.kernel_ref());
         self.ln_post = None;
         self.ln_posterior()
 
@@ -1579,15 +1547,15 @@ impl<'a> MotifSet<'a> {
 
         assert!(rem_id < self.set.len());
         let rem_mot = self.set.swap_remove(rem_id);
-        self.signal -= &rem_mot.generate_waveform(self.data);
+        self.signal -= &rem_mot.generate_waveform(self.data, self.background.kernel_ref());
         self.ln_post = None;
 
     }
 
     fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.set[rem_id].clone();
-        self.signal -= &rem_mot.generate_waveform(self.data);
-        self.signal += &new_mot.generate_waveform(self.data) ;
+        self.signal -= &rem_mot.generate_waveform(self.data, self.background.kernel_ref());
+        self.signal += &new_mot.generate_waveform(self.data, self.background.kernel_ref()) ;
         self.set[rem_id] = new_mot;
         self.ln_post = None;
         self.ln_posterior()
@@ -1597,7 +1565,7 @@ impl<'a> MotifSet<'a> {
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
         let remaining = self.data-&self.signal;
-        let attempt = Motif::rand_propensity_mot(self.width, &remaining, rng); //There may not always be a place with decent propensities
+        let attempt = Motif::rand_propensity_mot(&remaining, rng); //There may not always be a place with decent propensities
         match attempt {
             None => {/*println!("No good propensities");*/ None},
             Some((new_mot, pick_prob)) => {
@@ -1619,7 +1587,7 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
-            let mod_signal = &(self.signal)-&(self.set[rem_id].generate_waveform(self.data));
+            let mod_signal = &(self.signal)-&(self.set[rem_id].generate_waveform(self.data, self.background.kernel_ref()));
             let remaining = self.data-&mod_signal;
             let propensities = remaining.kmer_propensities(self.set[rem_id].len());
             let sum_propensities = propensities.iter().sum::<f64>();
@@ -1967,14 +1935,13 @@ impl<'a> MotifSet<'a> {
 
 impl Debug for MotifSet<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "width:{}, ln_post: {:?}, background: {:?} \n set: {:#?}", self.width, self.ln_post, self.background, self.set)
+        write!(f, " ln_post: {:?}, background: {:?} \n set: {:#?}", self.ln_post, self.background, self.set)
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrippedMotifSet {
     set: Vec<Motif>,
-    width: f64,
     ln_post: f64,
 }
 
@@ -1986,7 +1953,6 @@ impl StrippedMotifSet {
         let mut revived = MotifSet {
 
             set: self.set.clone(),
-            width: self.width,
             signal: data.derive_zero(),
             ln_post: None,
             data: data,
@@ -2052,7 +2018,6 @@ impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
         let ln_post: f64 = other.calc_ln_post();
         StrippedMotifSet {
             set: other.set.clone(),
-            width: other.width,
             ln_post: ln_post,
         }
     }
@@ -2062,7 +2027,6 @@ impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
 pub struct MotifSetDef {
 
     set: Vec<Motif>,
-    width: f64,
     signal: WaveformDef,
     ln_post: f64,
 
@@ -2075,7 +2039,6 @@ impl<'a> From<&'a MotifSet<'a>> for MotifSetDef {
 
         Self {
             set: other.set.clone(), 
-            width: other.width,
             signal: signal,
             ln_post: other.calc_ln_post(),
         }
@@ -2094,16 +2057,8 @@ impl MotifSetDef {
         let mut set = self.set.clone();
 
         //We fix up any kernels that don't match the width defined in our MotifSet
-        let mut changed_kernels = false;
         let mut scrambled_motifs = false;
         for mot in set.iter_mut() {
-            let same_sd = (mot.kernel.get_sd() - self.width).abs() < 1e-6;
-            let same_len = (WIDE*mot.kernel.get_sd() - (mot.kernel.len() as f64)).abs() < 1e-6;
-
-            if !(same_sd && same_len) {
-                changed_kernels = true;
-                mot.kernel = Kernel::new(self.width, mot.kernel.get_height());
-            }
 
             if validate_motifs && mot.pwm_prior(data.seq()) == f64::NEG_INFINITY {
                 scrambled_motifs = true;
@@ -2114,7 +2069,7 @@ impl MotifSetDef {
 
         //We check to see if we need to recalculate the wave signal.
         let signal_will_make_ub =  (self.signal.len() != data.read_wave().len()) || (self.signal.spacer() != data.spacer());
-        let redo_signal = recalculate || changed_kernels || scrambled_motifs || signal_will_make_ub;
+        let redo_signal = recalculate || scrambled_motifs || signal_will_make_ub;
 
         let signal = if !redo_signal { //Notice how we carefully checked to make sure that signal follows our safety guarentees
             unsafe {self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq())}
@@ -2124,7 +2079,6 @@ impl MotifSetDef {
         
         let mut pre_set = MotifSet {
             set: set,
-            width: self.width,
             signal: signal,
             ln_post: None,
             data: data, 
@@ -2136,7 +2090,6 @@ impl MotifSetDef {
         } else {
             if !recalculate {
                 warn!("Had to adjust your motif set and recalculate its occupancy trace because:");
-                if changed_kernels { warn!("-Some of your Gaussian kernels are incompatible with your reported experimental fragment width and have been rederived.");}
                 if scrambled_motifs { warn!("-Some of your motifs' best binding kmers were unrepresented in your sequence, and you wanted them validated. They've been scrambled to have a best kmer that is compatible with your sequence while remaining as close to the unrepresented kmers as possible.");}
                 if signal_will_make_ub { warn!("The occupancy trace you reported for your motif set is incompatible with your ChIP data. We calculated the signal to prevent segfaults.");}
             }
@@ -2247,7 +2200,7 @@ impl<'a> SetTrace<'a> {
         if recalc_ln_post {
             repoint_set.signal = self.data.derive_zero();
             for i in 0..repoint_set.set.len() {
-                repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data);
+                repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data, self.background.kernel_ref());
             }
             repoint_set.ln_post = None;
             repoint_set.ln_posterior();
@@ -2368,7 +2321,7 @@ impl<'a> SetTrace<'a> {
 
         for i in 0..max_draw {
 
-            let occupancy = current_active.set[i].generate_waveform(current_active.data);
+            let occupancy = current_active.set[i].generate_waveform(current_active.data, current_active.background.kernel_ref());
             chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
 
         }
@@ -2377,23 +2330,8 @@ impl<'a> SetTrace<'a> {
 
     }
 
-    /*
 
-   pub struct MotifSet<'a> {
-
-    set: Vec<Motif>,
-    width: f64,
-    signal: Waveform<'a>,
-    ln_post: Option<f64>,
-    data: &'a Waveform<'a>,
-    background: &'a Background,
-}
-
-       */
-
-    pub fn trace_from_meme<R: Rng + ?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64, fragment_length: usize, rng: &mut R) {
-
-        let width: f64 = (fragment_length as f64)/6.0;
+    pub fn trace_from_meme<R: Rng + ?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64,  rng: &mut R) {
 
         let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -2437,7 +2375,7 @@ impl<'a> SetTrace<'a> {
                 base_vec.push(Base::new(props));
             }
 
-            let mut motif = Motif::rand_height_pwm(base_vec, width, rng);
+            let mut motif = Motif::rand_height_pwm(base_vec, rng);
            
             let poss_hamming = motif.scramble_to_close_random_valid(seq, &mut Some(rng));
 
@@ -2455,12 +2393,11 @@ impl<'a> SetTrace<'a> {
         let mut signal = self.data.derive_zero();
 
         for mot in &set {
-            signal += &(mot.generate_waveform(self.data));
+            signal += &(mot.generate_waveform(self.data, self.background.kernel_ref()));
         }
 
         let mut full_set = MotifSet {
             set: set,
-            width: width, 
             signal: signal, 
             ln_post: None, 
             data: self.data, 
@@ -2768,7 +2705,7 @@ mod tester{
 
         println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
-        let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , 20., &mut rng);
+        let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , &mut rng);
 
         
         let jacob = b.d_base_d_simplex();
@@ -2862,10 +2799,10 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, Some(&corrs));
-        let mut motif_set = MotifSet::rand_with_one_height(13.2, &wave, &background, 350, &mut rng);
+        let background = Background::new(0.25, 2.64, 350./6.0, Some(&corrs));
+        let mut motif_set = MotifSet::rand_with_one_height(13.2, &wave, &background, &mut rng);
 
-        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq(), &mut rng));
+        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
      
 
         println!("CV");
@@ -2888,7 +2825,7 @@ mod tester{
         let mot_a = motif_set.get_nth_motif(1);
         let (bps_a, pos_a) = produce_bps_and_pos(&(mot_a.best_motif()));
         let bind1 = mot.return_bind_score(&wave.seq());
-        let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave)};
+        let wave1 = unsafe{mot.generate_waveform_from_binds(&bind1, &wave, background.kernel_ref())};
         let mom = vec![0.0_f64; 1+(mot.len()*(BASE_L-1))];
 
         let h = 1e-6;
@@ -2897,7 +2834,7 @@ mod tester{
         println!("Mot_a \n {}", mot_a);
         for (j, (&bp, &p)) in bps.iter().zip(pos.iter()).enumerate() {
         
-            let wave_check = unsafe{mot.only_pos_waveform_from_binds( &bind1, bp, p, &wave)};
+            let wave_check = unsafe{mot.only_pos_waveform_from_binds( &bind1, bp, p, &wave, background.kernel_ref())};
             
             let n1 = wave_check.produce_noise(&wave, &background);
             let mut add_vec = wave_check.derive_zero().raw_wave();
@@ -2918,7 +2855,7 @@ mod tester{
         
             let mot2 = unsafe{mot.add_momentum(1.0, &mommy, false)};
        
-            let wave2 = mot2.generate_waveform(&wave);
+            let wave2 = mot2.generate_waveform(&wave, background.kernel_ref());
 
             let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
             let n_diff: Vec<f64> = wave2.produce_noise(&wave, &background).resids().iter()
@@ -3039,10 +2976,10 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, Some(&corrs));
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, 350, &mut rng);
+        let background = Background::new(0.25, 2.64, 350./6.,Some(&corrs));
+        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, &mut rng);
 
-        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2,motif_set.width, wave.seq(), &mut rng));
+        _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
      
         let mot = motif_set.get_nth_motif(0);
         let mot1 = motif_set.get_nth_motif(1);
@@ -3177,14 +3114,14 @@ mod tester{
         println!("grad gen {} bp {:?}", bp, duration);
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, Some(&corrs));
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, 350, &mut rng);
+        let background = Background::new(0.25, 2.64, 350./6., Some(&corrs));
+        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, &mut rng);
 
         let check_set = motif_set.clone();
 
         let mid_mot = (MIN_BASE+MAX_BASE)/2;
         //TESTING THE MANIPULATOR FUNCTIONS: these should simply mutate the motif set to conform and usually output the new ln posterior
-        let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot,motif_set.width, wave.seq(), &mut rng);
+        let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, wave.seq(), &mut rng);
         
         //Testing: fn add_motif(&mut self, new_mot: Motif) -> f64 
         let new_like = motif_set.add_motif(add_mot.clone());
@@ -3194,7 +3131,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
+        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
 
         let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3211,7 +3148,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        //let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
+        //let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
 
         let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3243,7 +3180,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data);
+        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
 
         let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3257,13 +3194,13 @@ mod tester{
 
         //Testing fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64
 
-        let add_mot2 = Motif::rand_mot_with_height(-6.2,motif_set.width, wave.seq(), &mut rng);
+        let add_mot2 = Motif::rand_mot_with_height(-6.2, wave.seq(), &mut rng);
         
         let new_like = motif_set.replace_motif(add_mot2.clone(), 0);
 
         assert!(motif_set.ln_post == Some(new_like));
 
-        let bring_wave_back = &motif_set.signal -&add_mot2.generate_waveform(motif_set.data);
+        let bring_wave_back = &motif_set.signal -&add_mot2.generate_waveform(motif_set.data, background.kernel_ref());
 
         let check_diff = &bring_wave_back-&check_set.signal;
 
@@ -3395,7 +3332,7 @@ mod tester{
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
-        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MAX_BASE, &wave, &background, 350, &mut rng);
+        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MAX_BASE, &wave, &background, &mut rng);
 
         assert!(cant_extend_set.propose_extend_motif(&mut rng).is_none(), "Can extend PWM beyond allowed limits!");
 
@@ -3440,7 +3377,7 @@ mod tester{
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
-        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MIN_BASE, &wave, &background, 350, &mut rng);
+        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MIN_BASE, &wave, &background, &mut rng);
 
         assert!(cant_contract_set.propose_contract_motif(&mut rng).is_none(), "Can contract PWM beyond allowed limits!");
 
@@ -3448,7 +3385,7 @@ mod tester{
 
         //Testing full RJ move
         for _ in 0..3{
-            let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot,motif_set.width, wave.seq(), &mut rng);
+            let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, wave.seq(), &mut rng);
             _ = motif_set.add_motif(add_mot);
         }
         for i in 0..100 {
@@ -3571,6 +3508,8 @@ mod tester{
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
+        let corrs: Vec<f64> = vec![0.9, -0.1];
+        let background = Background::new(0.25, 2.64, 20., Some(&corrs));
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -3578,19 +3517,17 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), 20., &mut rng); //sequence
+        let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
 
-        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), 20., &mut rng); //sequence
+        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), &mut rng); //sequence
 
         let start = Instant::now();
 
-        let waveform = motif.generate_waveform(&wave);
+        let waveform = motif.generate_waveform(&wave, background.kernel_ref());
         let duration = start.elapsed();
         
-        let waveform2 = &waveform + &(motif2.generate_waveform(&wave));
+        let waveform2 = &waveform + &(motif2.generate_waveform(&wave, background.kernel_ref()));
 
-        let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, Some(&corrs));
         let noise: Noise = waveform.produce_noise(&waveform2, &background);
 
         let d_ad_stat_d_noise = noise.ad_grad();
@@ -3604,7 +3541,7 @@ mod tester{
         let binds = motif.return_bind_score(&sequence);
 
         let start_b = Instant::now();
-        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &wave) };
+        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &wave, background.kernel_ref()) };
         let duration_b = start_b.elapsed();
 
         let unsafe_raw = unsafe_waveform.raw_wave();
@@ -3617,11 +3554,11 @@ mod tester{
 
         println!("{}", motif);
 
-        let random_motif = Motif::rand_mot(20., &sequence, &mut rng);
+        let random_motif = Motif::rand_mot(&sequence, &mut rng);
 
         println!("Random motif\n{}", random_motif);
 
-        assert!(random_motif.raw_kern().len() == 121);
+        assert!(background.kernel_ref().len() == 121);
 
         assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
 
@@ -3649,7 +3586,7 @@ mod tester{
         assert!((motif.pwm_prior(&sequence)+(sequence.number_unique_kmers(motif.len()) as f64).ln()
                  -(motif.len() as f64)*BASE_PRIOR_DENS.ln()).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![1usize;20], 10.,&mut rng);//Sequence
+        let un_mot: Motif = Motif::from_motif(vec![1usize;20],&mut rng);//Sequence
 
         assert!(un_mot.pwm_prior(&sequence) < 0.0 && un_mot.pwm_prior(&sequence).is_infinite());
 
@@ -3707,6 +3644,7 @@ mod tester{
         let wave_lens: Vec<usize> = vec![36, 40];
         let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
+        let wave_background = Background::new(0.25, 2.64, 1.0, Some(&corrs));
 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
@@ -3714,10 +3652,10 @@ mod tester{
 
 
         println!("DF");
-        let little_motif: Motif = Motif::raw_pwm(mat, 10.0, 1.0); //wave_seq
+        let little_motif: Motif = Motif::raw_pwm(mat, 10.0); //wave_seq
 
         print!("{}", little_motif);
-        println!("{:?}",little_motif.generate_waveform(&wave_wave).raw_wave());
+        println!("{:?}",little_motif.generate_waveform(&wave_wave, wave_background.kernel_ref()).raw_wave());
 
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
@@ -3726,7 +3664,7 @@ mod tester{
         let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
-        let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, 1.0); //small
+        let wave_motif: Motif = Motif::raw_pwm(mat, 10.0); //small
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.gen::<bool>()).collect();
 
@@ -3797,9 +3735,9 @@ mod tester{
         let pwm_bp: usize = 3;
         let pwm_pos: usize = 6;
         let prop_bp = unsafe{motif.pwm[pwm_pos].rel_bind(pwm_bp)};
-        let wave_main = motif.generate_waveform(&wave);
+        let wave_main = motif.generate_waveform(&wave, background.kernel_ref());
         let start0 = Instant::now();
-        let wave_noh = motif.no_height_waveform(&wave);
+        let wave_noh = motif.no_height_waveform(&wave, background.kernel_ref());
         let duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let wave_sho: Vec<f64> = wave_noh.raw_wave();
@@ -3807,7 +3745,7 @@ mod tester{
         let checked = motif.base_check(&sequence, &binds.1, 3, 6);
 
         let start = Instant::now();
-        let wave_filter = motif.only_pos_waveform(3, 6, &wave);
+        let wave_filter = motif.only_pos_waveform(3, 6, &wave, background.kernel_ref());
         let duration = start.elapsed();
 
         let raw_filter: Vec<f64> = wave_filter.raw_wave();
@@ -3819,18 +3757,18 @@ mod tester{
 
         let half_len: usize = (motif.len()-1)/2;
         
-        let kernel_check = motif.raw_kern();
+        let kernel_check = (background.kernel_ref()*motif.peak_height()).get_curve().clone();
 
         let kernel_mid = (kernel_check.len()-1)/2;
 
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
         let start2 = Instant::now();
-        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, 3, 6, &wave)};
+        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, 3, 6, &wave, background.kernel_ref())};
         let duration2 = start2.elapsed();
 
         let start3 = Instant::now();
-        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &wave)};
+        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &wave, background.kernel_ref())};
         let duration3 = start3.elapsed();
 
         let unsafe_sho = just_divide.raw_wave();
