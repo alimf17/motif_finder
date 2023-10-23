@@ -454,6 +454,9 @@ impl Base {
     pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
         *self.props.get_unchecked(bp)
     }
+    pub fn safe_bind(&self, bp: usize) -> f64 {
+        self.props[bp]
+    }
 
     pub fn to_unit_sum(&self) -> [f64; BASE_L] {
         let summed = self.props.iter().sum::<f64>();
@@ -2766,6 +2769,51 @@ mod tester{
             }
         }
         (bps, pos)
+    }
+
+
+    #[test]
+    fn extract_bp_test() {
+
+        let mut rng = rand::thread_rng();
+
+        let base: Base = Base::rand_new(&mut rng);
+
+
+        let u64_vec: Vec<u64> = (0..10000).map(|_| rng.gen()).collect();
+        let usize_vec: Vec<usize> = u64_vec.iter().map(|&a| {
+            let mut b = a;
+            let mut v: Vec<usize> = vec![0;32];
+                
+            for i in 0..32{
+                v[i] = (b&3) as usize;
+                b = b >> 2;
+            }
+            v
+
+        }).flatten().collect();
+        let bp_vec: Vec<Bp> = u64_vec.iter().map(|&a| Sequence::u64_to_kmer(a, 32)).flatten().collect();
+        
+
+        println!("{:?} {:?}", bp_vec, usize_vec);
+
+        let bad_safe_access = Instant::now();
+        let accessed_c: Vec<f64> = usize_vec.iter().map(|&b| base.props[b]).collect();
+        let bad_safe_time = bad_safe_access.elapsed();
+        
+        let safe_access = Instant::now();
+        let accessed: Vec<f64> = bp_vec.iter().map(|&b| base[b]).collect();
+        let safe_time = safe_access.elapsed();
+        
+        let unsafe_access = Instant::now();
+        let accessed_b: Vec<f64> = usize_vec.iter().map(|&b| unsafe{base.rel_bind(b)}).collect();
+        let unsafe_time = unsafe_access.elapsed();
+
+
+        println!("{:?}", accessed);
+        println!("{:?}", accessed_b);
+        println!("{:?}", accessed_c);
+        println!("safe {:?} unsafe {:?} bad_safe: {:?}", safe_time, unsafe_time, bad_safe_time);
     }
 
     #[test]
