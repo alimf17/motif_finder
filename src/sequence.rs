@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use itertools::{Itertools};
 use rand::Rng;
 
-use crate::base::{BASE_L, MIN_BASE, MAX_BASE}; //I don't want to get caught in a loop of use statements
+use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
 pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole
                                   //Don't try to get cute and set this > 8.
@@ -88,7 +88,8 @@ impl Sequence {
             let num_entries = block.len()/BP_PER_U8;
             
             for i in 0..num_entries {
-                let precoded = &block[(BP_PER_U8*i)..(BP_PER_U8*i+BP_PER_U8)].try_into().expect("slice with incorrect length");
+                //SAFETY: the check on the block having the right number of BPs guarentees that this is sound
+                let precoded = &block[(BP_PER_U8*i)..(BP_PER_U8*i+BP_PER_U8)].iter().map(|&a| unsafe{Bp::usize_to_bp(a)}).collect::<Vec<_>>().try_into().expect("slice with incorrect length");
                 seq_bls.push(Self::bases_to_code(precoded));
             }
 
@@ -267,24 +268,25 @@ impl Sequence {
 
 
 
-    pub fn bases_to_code(bases: &[usize ; BP_PER_U8]) -> u8 {
+    pub fn bases_to_code(bases: &[Bp ; BP_PER_U8]) -> u8 {
 
-        bases.iter().zip(PLACE_VALS).map(|(&a, b)| a*b as usize).sum::<usize>() as u8
+        bases.iter().zip(PLACE_VALS).map(|(&a, b)| (a as usize)*(b as usize)).sum::<usize>() as u8
     
     }
 
 
     //SAFETY: THIS function is safe. But unsafe code relies on it always producing usizes < BASE_L
     //        which it will since BASE_L = 4 and we always extract usizes two bits at a time (00, 01, 10, 11)
-    pub fn code_to_bases(coded: u8) -> [usize ; BP_PER_U8] {
+    pub fn code_to_bases(coded: u8) -> [Bp ; BP_PER_U8] {
 
-        let mut v: [usize; BP_PER_U8] = [0; BP_PER_U8];
+        let mut v: [Bp; BP_PER_U8] = [Bp::A; BP_PER_U8];
 
         let mut reference: u8 = coded;
 
         for i in 0..BP_PER_U8 { 
 
-            v[i] = (U8_BITMASK & reference) as usize;
+            //SAFETY: U8_BITMASK always chops the last two bits from the u8, leaving a usize < BASE_L (4)
+            v[i] = unsafe{Bp::usize_to_bp((U8_BITMASK & reference) as usize)};
             reference = reference >> 2; 
 
         }
@@ -295,7 +297,7 @@ impl Sequence {
 
 
     
-    pub fn kmer_to_u64(bases: &Vec<usize>) -> u64 {
+    pub fn kmer_to_u64(bases: &Vec<Bp>) -> u64 {
 
         /*
         let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (2u64.pow((a*BITS_PER_BP) as u32)) as u64).collect();
@@ -305,7 +307,7 @@ impl Sequence {
         let mut mot : u64 = 0;
 
         for i in 0..bases.len() {
-            mot += (bases[i] as u64) << (i*BITS_PER_BP);
+            mot += (bases[i] as usize as u64) << (i*BITS_PER_BP);
         }
 
         mot
@@ -317,15 +319,16 @@ impl Sequence {
     //        silently give you an incorrect result: if len is too long, then
     //        it will append your 0th base (A in DNA), which may not exist in
     //        in your sequence. If it's too short, it will truncate the kmer
-    pub fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<usize> {
+    pub fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<Bp> {
 
-        let mut v: Vec<usize> = vec![0; len];
+        let mut v: Vec<Bp> = vec![Bp::A; len];
 
         let mut reference: u64 = coded_kmer;
 
         for i in 0..len {
 
-            v[i] = (U64_BITMASK & reference) as usize;
+            //SAFETY: U8_BITMASK always chops the last two bits from the u8, leaving a usize < BASE_L (4)
+            v[i] = unsafe{Bp::usize_to_bp((U64_BITMASK & reference) as usize)} ;
             reference = reference >> 2;
         }
 
@@ -334,7 +337,7 @@ impl Sequence {
     }
 
 
-    pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<usize> {
+    pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<Bp> {
 
         let start_dec = self.block_u8_starts[block_id]+(start_id/BP_PER_U8);
         let end_dec = self.block_u8_starts[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
@@ -347,7 +350,7 @@ impl Sequence {
 
         let new_s = start_id % BP_PER_U8;
 
-        let ret: Vec<usize> = all_bases[new_s..(new_s+num_bases)].to_vec();
+        let ret: Vec<Bp> = all_bases[new_s..(new_s+num_bases)].to_vec();
 
         ret
 
@@ -356,7 +359,7 @@ impl Sequence {
 
 
     //We exploit the ordering of the u64 versions of kmer to binary search
-    pub fn kmer_in_seq(&self, kmer: &Vec<usize>) -> bool {
+    pub fn kmer_in_seq(&self, kmer: &Vec<Bp>) -> bool {
 
         let look_for = Self::kmer_to_u64(kmer);
 
@@ -444,7 +447,7 @@ impl Sequence {
     }
 
     //This gives the id of the kmers in the HashMap vector that are under the hamming distance threshold
-    pub fn all_kmers_within_hamming(&self, kmer: &Vec<usize>, threshold: usize) -> Vec<usize> {
+    pub fn all_kmers_within_hamming(&self, kmer: &Vec<Bp>, threshold: usize) -> Vec<usize> {
 
         let u64_kmer: u64 = Self::kmer_to_u64(kmer);
 
@@ -457,7 +460,7 @@ impl Sequence {
     }
 
 
-    pub fn random_valid_motif(&self, len: usize) -> Vec<usize>{
+    pub fn random_valid_motif(&self, len: usize) -> Vec<Bp>{
 
         let mut rng = rand::thread_rng();
 
@@ -486,7 +489,7 @@ mod tests {
 
         let mut press = Sequence::new(blocked);
 
-        let bases = [0,1,2,3];
+        let bases = BP_ARRAY;
 
         let rebases = Sequence::code_to_bases(Sequence::bases_to_code(&bases));
 
@@ -496,7 +499,7 @@ mod tests {
 
         let supp = [0,0,0,0,3];
 
-        assert!(arr.iter().zip(supp).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+        assert!(arr.iter().zip(supp).map(|(&a, b)| (a as usize) == b).fold(true, |acc, mk| acc && mk));
 
         let arr2 = press.return_bases(1, 1, 7);
 
@@ -504,7 +507,7 @@ mod tests {
 
 
 
-        assert!(arr2.iter().zip(supp2).map(|(&a, b)| a == b).fold(true, |acc, mk| acc && mk));
+        assert!(arr2.iter().zip(supp2).map(|(&a, b)| (a as usize) == b).fold(true, |acc, mk| acc && mk));
 
         let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
 
@@ -514,7 +517,7 @@ mod tests {
 
         assert!(atemers.len() == 1);
 
-        let sup2 = Sequence::kmer_to_u64(&vec![2,2,2,2,2,2,2,2]);
+        let sup2 = Sequence::kmer_to_u64(&vec![Bp::G; 8]);
 
         assert!(atemers[0] == sup2);
         println!("sup2 {:?}", atemers);
@@ -524,12 +527,12 @@ mod tests {
 
 
 
-        println!("{} {} kmer test", press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]), press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
+        println!("{} {} kmer test", press2.kmer_in_seq(&vec![Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G, Bp::G, Bp::G]), press2.kmer_in_seq(&vec![Bp::G,Bp::C,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G, Bp::G, Bp::G]));
 
         println!(" {:?}", press2.unique_kmers(10).iter().map(|&a| Sequence::u64_to_kmer(a, 10)).collect::<Vec<_>>() );
         println!(" {:?}", press2.unique_kmers(10));
-        assert!(press2.kmer_in_seq(&vec![2,2,2,2,2,2,2,2, 2, 2]));
-        assert!(!press2.kmer_in_seq(&vec![2,1,2,2,2,2,2,2, 2, 2]));
+        assert!(press2.kmer_in_seq(&vec![Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G, Bp::G, Bp::G]));
+        assert!(!press2.kmer_in_seq(&vec![Bp::G,Bp::C,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G,Bp::G, Bp::G, Bp::G]));
 
 
     }
@@ -558,7 +561,7 @@ mod tests {
         let start = Instant::now();
 
 
-        let in_it = sequence.kmer_in_seq(&vec![1usize;20]);
+        let in_it = sequence.kmer_in_seq(&vec![Bp::C;20]);
 
         let duration = start.elapsed();
         println!("Done search {} bp {:?}", bp, duration);

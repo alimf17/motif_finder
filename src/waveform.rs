@@ -6,6 +6,7 @@ use std::cmp::{max, min};
 use core::f64::consts::PI;
 use core::iter::zip;
 
+use crate::base::Bp;
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
 
@@ -261,9 +262,9 @@ impl<'a> Waveform<'a> {
         let block_lens = self.seq.block_lens(); //bp space
         let block_starts = self.seq.block_u8_starts(); //stored index space
 
-        let mut uncoded_seq: Vec<usize> = vec![0; self.seq.max_len()];
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; self.seq.max_len()];
 
-        let mut store: [usize ; BP_PER_U8];
+        let mut store: [Bp ; BP_PER_U8];
 
         let mut propensities: Vec<f64> = vec![0.0; self.seq.number_unique_kmers(k)];
 

@@ -1,6 +1,7 @@
 //pub mod bases {
 use std::{f64, fmt, fs};
 use std::error::Error;
+use std::ops::{Index, IndexMut};
 //use std::time::{Duration, Instant};
 
 use core::fmt::{Debug, Formatter};
@@ -124,7 +125,60 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 5.0_f64;
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
+pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
+
 //BEGIN BASE
+
+#[repr(usize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Bp {
+    A = 0,
+    C = 1, 
+    G = 2, 
+    T = 3,
+}
+
+
+
+impl From<Bp> for usize {
+    fn from(bp: Bp) -> Self {
+        //SAFETY: Bp always corresponds to a valid usize
+        unsafe{std::mem::transmute::<Bp, usize>(bp)}
+    }
+}
+
+impl TryFrom<usize> for Bp {
+    type Error = &'static str;
+    fn try_from(bp: usize) -> Result<Self, Self::Error> {
+        if bp < BASE_L {
+            Ok(unsafe{std::mem::transmute::<usize, Bp>(bp)})
+        } else {
+            Err("usize not a valid base pair!")
+        }
+    }
+
+}
+
+
+impl Bp {
+    pub fn complement(&self) -> Bp {
+        match self {
+            Bp::A => Bp::T,
+            Bp::C => Bp::G,
+            Bp::G => Bp::C,
+            Bp::T => Bp::A, 
+        }
+
+        //Compiler recognized this optimization at high enough optimization
+        //SAFETY: enum never returns incorrect variant
+        //unsafe{std::mem::transmute::<usize, Bp>((*self as usize) ^ 3)}
+    }
+
+    //Safety: must be ABSOLUTELY sure that usize is < BASE_L (4)
+    pub unsafe fn usize_to_bp(bp: usize) -> Bp {
+        std::mem::transmute::<usize, Bp>(bp)
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Base {
@@ -137,6 +191,22 @@ impl PartialEq for Base {
     }
 } 
 
+impl Index<Bp> for Base {
+type Output = f64;
+
+    fn index(&self, bp: Bp) -> &f64 {
+        &self.props[bp as usize]
+    }
+
+}
+
+impl IndexMut<Bp> for Base {
+
+    fn index_mut(&mut self, bp: Bp) -> &mut f64 {
+        &mut self.props[bp as usize]
+    }
+
+}
 
 impl Base {
 
@@ -201,18 +271,18 @@ impl Base {
 
     }
 
-    pub fn from_bp<R: Rng + ?Sized>(best: usize, rng: &mut R) -> Base {
+    pub fn from_bp<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
         Base::rand_new(rng).make_best(best)
 
     }
 
-    pub fn from_bp_with_uniforms<R: Rng + ?Sized>(best: usize, rng: &mut R) -> Base {
+    pub fn from_bp_with_uniforms<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
         let mut props: [f64; BASE_L] = [0.; BASE_L];
         
         for i in 0..BASE_L{
-            if i == best {
+            if i == (best as usize) {
                 props[i] = 1.0;
             } else {
                 props[i] = rng.gen();
@@ -224,11 +294,11 @@ impl Base {
     }
 
 
-    pub fn make_best(&self, best: usize) -> Base {
+    pub fn make_best(&self, best: Bp) -> Base {
 
-        let mut base2 = self.props.clone();
+        let mut base2 = self.clone();
 
-        let which_b = Self::argmax(&base2);
+        let which_b = base2.best_base();
 
         if best != which_b {
 
@@ -238,11 +308,12 @@ impl Base {
         }
 
 
-        Base{ props: base2 }
+        base2
     }
 
-    pub fn best_base(&self) -> usize {
-        Self::argmax(&self.props)
+    pub fn best_base(&self) -> Bp {
+        //Safety: self.props has a size of BASE_L, so this always produces a valid result
+        unsafe{ std::mem::transmute::<usize, Bp>(Self::argmax(&self.props))}
     }
 
     pub fn dist_sq(&self, base: Option<&Base>) -> f64 {
@@ -309,11 +380,11 @@ impl Base {
 
         let prob_base = self.as_probabilities();
         let best_bp = self.best_base();
-        let mut bp_inds: Vec<usize> = (0..BASE_L).collect();
+        let mut bp_inds: Vec<Bp> = BP_ARRAY.to_vec();
         bp_inds.retain(|&b| b != best_bp);
-        let pmax: f64 = prob_base[best_bp];
+        let pmax: f64 = prob_base[best_bp as usize];
         let pmax_sq: f64 = pmax.powi(2);
-        let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
+        let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a as usize]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
 
         let mut jacobian = [[0_f64; (BASE_L-1)]; (BASE_L-1)];
         for k in 0..(BASE_L-1) {
@@ -321,7 +392,7 @@ impl Base {
             pstar[k] += pmax;
             
             for ti in 0..(BASE_L-1) {
-                let m_inv_vec = (0..BASE_L-1).map(|m| COL_PRIMARY_INVERT_SIMPLEX[ti][bp_inds[m]]);
+                let m_inv_vec = (0..BASE_L-1).map(|m| COL_PRIMARY_INVERT_SIMPLEX[ti][bp_inds[m] as usize]);
                 jacobian[ti][k] = m_inv_vec.zip(pstar).map(|(a, b)| a*b).sum::<f64>()/pmax_sq;
             }
         }
@@ -592,7 +663,7 @@ impl Motif {
 
 
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<usize>, rng: &mut R) -> Motif {
+    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
         
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -614,7 +685,7 @@ impl Motif {
 
     }
 
-    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<usize>, rng: &mut R) -> Motif {
+    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
         
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -754,11 +825,12 @@ impl Motif {
 
         for i in 0..self.len() {
 
-            let old_base: usize = ((old_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i)) as usize;
-            let new_base: usize = ((new_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i)) as usize;
+            let old_base: u64 = ((old_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i));
+            let new_base: u64 = ((new_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i));
 
             if new_base != old_base {
-                new_mot.pwm[i] = new_mot.pwm[i].make_best(new_base);
+                //SAFETY: new_base is always constrained to be less than BASE_L (4)
+                new_mot.pwm[i] = new_mot.pwm[i].make_best(unsafe{Bp::usize_to_bp(new_base as usize)});
             }
 
         }
@@ -801,7 +873,7 @@ impl Motif {
         &self.pwm
     }
 
-    pub fn best_motif(&self) -> Vec<usize> {
+    pub fn best_motif(&self) -> Vec<Bp> {
         self.pwm.iter().map(|a| a.best_base()).collect()
     }
 
@@ -874,7 +946,7 @@ impl Motif {
 
     //SAFETY: If kmer is not the same length as the pwm, or if it doesn't use
     //        all values < BASE_L, this will produce undefined behavior
-    unsafe fn prop_binding(&self, kmer: &[usize]) -> (f64, bool) { 
+    unsafe fn prop_binding(&self, kmer: &[Bp]) -> (f64, bool) { 
         
 
         //let kmer: Vec<usize> = kmer_slice.to_vec();
@@ -884,8 +956,9 @@ impl Motif {
 
         unsafe{
         for i in 0..self.len() {
-            bind_forward *= self.pwm[i].rel_bind(*kmer.get_unchecked(i));
-            bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
+            bind_forward *= self.pwm[i][*kmer.get_unchecked(i)];
+            //bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
+            bind_reverse *= self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
         }
         }
 
@@ -907,12 +980,12 @@ impl Motif {
         let mut bind_scores: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
         let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
-        let mut uncoded_seq: Vec<usize> = vec![0; seq.max_len()];
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
 
         let mut ind: usize;
 
-        let mut store: [usize; BP_PER_U8];
+        let mut store: [Bp; BP_PER_U8];
 
 
         {
@@ -961,14 +1034,14 @@ impl Motif {
     //NOTE: this will technically mark a base as present if it's simply close enough to the beginning of the next sequence block
     //      This is technically WRONG, but it's faster and shouldn't have an effect because any positions marked incorrectly
     //      as true will have binding scores of 0
-    pub fn base_check(&self, seq: &Sequence, rev_comp: &Vec<bool>, bp: usize, motif_pos: usize) -> Vec<bool> {
+    pub fn base_check(&self, seq: &Sequence, rev_comp: &Vec<bool>, bp: Bp, motif_pos: usize) -> Vec<bool> {
             
         let coded_sequence = seq.seq_blocks();
 
         let rev_pos = self.len()-1-motif_pos;
 
-        let forward_bp = bp as u8;
-        let comp_bp = (BASE_L-1-bp) as u8;
+        let forward_bp = bp as usize as u8;
+        let comp_bp = bp.complement() as usize as u8;
 
         let bp_to_look_for: Vec<u8> = rev_comp.iter().map(|&a| if a {comp_bp} else {forward_bp}).collect();
 
@@ -1052,7 +1125,7 @@ impl Motif {
 
     }
     
-    pub fn only_pos_waveform<'a>(&self,bp: usize, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
+    pub fn only_pos_waveform<'a>(&self,bp: Bp, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1064,7 +1137,7 @@ impl Motif {
 
         let (bind_score_floats, bind_score_revs) = self.return_bind_score(data.seq());
 
-        let bind = unsafe{self.pwm()[motif_pos].rel_bind(bp)};
+        let bind = self.pwm()[motif_pos][bp];
 
         let checked = self.base_check( data.seq(), &bind_score_revs, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
@@ -1150,7 +1223,7 @@ impl Motif {
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
     //        You must also ensure that bp < BASE_L, and that motif_pos < self.len()
-    unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: usize, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
+    unsafe fn only_pos_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), bp: Bp, motif_pos: usize, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -1160,7 +1233,7 @@ impl Motif {
 
         let lens = data.seq().block_lens();
 
-        let bind = self.pwm()[motif_pos].rel_bind(bp);    
+        let bind = self.pwm()[motif_pos][bp];    
 
         let checked = self.base_check( data.seq(), &binds.1, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
@@ -1197,11 +1270,12 @@ impl Motif {
             } else {
                 let index = i-1;
                 let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
-                let mut bp = index % (BASE_L-1);
-                bp += if bp >= self.pwm[base_id].best_base() {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
+                let mut bp_usize = index % (BASE_L-1);
+                bp_usize += if bp_usize >= (self.pwm[base_id].best_base() as usize) {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
                                                                            //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
                                                                            //This is important, because statically guarentees the safety of using rel_bind
 
+                let bp = Bp::usize_to_bp(bp_usize); //SAFETY: constraints on bp_usize ensure that this is always safe
                 let result =
                       (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, data, background.kernel_ref())
                                .account_auto(background))
@@ -1220,7 +1294,7 @@ impl Motif {
             let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
             
             let best_bp = self.pwm[i].best_base();
-            let mut bp_inds: Vec<usize> = (0..BASE_L).collect();
+            let mut bp_inds: Vec<Bp> = BP_ARRAY.to_vec(); 
             bp_inds.retain(|&b| b != best_bp);
             
             let ln_like_grads: [f64; BASE_L-1] = index_into.iter().map(|&k| *grad_chunk.get_unchecked(k)).collect::<Vec<_>>().try_into().unwrap();
@@ -2677,18 +2751,18 @@ mod tester{
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
 
-    fn produce_bps_and_pos(seq_motif: &Vec<usize>) -> (Vec<usize>, Vec<usize>) {
+    fn produce_bps_and_pos(seq_motif: &Vec<Bp>) -> (Vec<Bp>, Vec<usize>) {
 
-        let mut bps: Vec<usize> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
+        let mut bps: Vec<Bp> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
         let mut pos: Vec<usize> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
         
         for i in 0..seq_motif.len() {
-            let mut b = 0;
-            for j in 0..(BASE_L-1) {
-                if seq_motif[i] == b { b+=1;}
+            let mut b = Bp::A;
+            let mut bp_vec = BP_ARRAY.to_vec();
+            bp_vec.retain(|&b| b != seq_motif[i]);
+            for b in bp_vec {
                 bps.push(b);
                 pos.push(i);
-                b+=1;
             }
         }
         (bps, pos)
@@ -2705,7 +2779,7 @@ mod tester{
 
         println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
-        let mot = Motif::from_motif(vec![0,1, 3, 2, 1,3, 3, 0, 1] , &mut rng);
+        let mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
 
         
         let jacob = b.d_base_d_simplex();
@@ -2748,7 +2822,7 @@ mod tester{
   
         let b_b = b.add_in_hmc([10.0, -10.0, 1./3.], true);
 
-        println!("best o {} best nr {} best r {}", BPS[b.best_base()],BPS[b_a.best_base()], BPS[b_b.best_base()]);
+        println!("best o {:?} best nr {:?} best r {:?}",b.best_base(),b_a.best_base(),b_b.best_base());
 
         println!("b {:?}, nr {:?}, r {:?}", b, b_a, b_b);
 
@@ -2849,6 +2923,7 @@ mod tester{
             let resid_care: Vec<f64> = n1.resids()[0..3].iter().zip(n2.resids()[0..3].iter()).map(|(&a, &b)| (b-a)/h).collect();
             let prop_resid = dwave.account_auto(&background);
 
+            println!("j: {} pos: {} bp: {:?}", j, p, bp);
             println!("Resid change: {:?} {:?}", resid_care, prop_resid.resids()[0..3].iter().map(|&a| a/h).collect::<Vec<_>>());
             let mut mommy = mom.clone();
             mommy[j+1] = h;
@@ -2857,7 +2932,7 @@ mod tester{
        
             let wave2 = mot2.generate_waveform(&wave, background.kernel_ref());
 
-            let prop_bp = unsafe{mot.pwm()[p].rel_bind(bp)};
+            let prop_bp = unsafe{mot.pwm()[p][bp]};
             let n_diff: Vec<f64> = wave2.produce_noise(&wave, &background).resids().iter()
                               .zip(wave1.produce_noise(&wave, &background).resids().iter())
                               .map(|(&a, &b)| (a-b)/h).collect();
@@ -2866,15 +2941,15 @@ mod tester{
             let w2 = wave2.raw_wave();
             let wc = wave_check.raw_wave();
 
-            let prop_bp2 = unsafe{mot2.pwm()[p].rel_bind(bp)};
+            let prop_bp2 = unsafe{mot2.pwm()[p][bp]};
             let mut i = 0;
             let mut calc: f64 = (w2[i]-w1[i])/h;
             let mut ana: f64 = wc[i];
-            println!("Wave checking {} in pos {}", BPS[bp], p);
+            println!("Wave checking {:?} in pos {}", bp, p);
             println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, 1.0);
             let ratio = (prop_bp2-prop_bp)/h;
-            println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p].rel_bind(0)-mot.pwm()[p].rel_bind(0)}, unsafe{mot2.pwm()[p].rel_bind(1)-mot.pwm()[p].rel_bind(1)},
-                                          unsafe{mot2.pwm()[p].rel_bind(2)-mot.pwm()[p].rel_bind(2)}, unsafe{mot2.pwm()[p].rel_bind(3)-mot.pwm()[p].rel_bind(3)});       
+            println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p][Bp::A]-mot.pwm()[p][Bp::A]}, unsafe{mot2.pwm()[p][Bp::C]-mot.pwm()[p][Bp::C]},
+                                          unsafe{mot2.pwm()[p][Bp::G]-mot.pwm()[p][Bp::G]}, unsafe{mot2.pwm()[p][Bp::T]-mot.pwm()[p][Bp::T]});       
             while (i < (w2.len()-2)) && ((calc == 0.) || (ana == 0.)) {
                 calc = (w2[i]-w1[i])/h;
                 ana = wc[i];
@@ -2905,7 +2980,7 @@ mod tester{
             } else if i < ((BASE_L-1)*mot.len()+1) {
                 println!("{} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
             } else {
-                println!("{} {}", pos_a[i-((BASE_L-1)*mot.len()+2)], bps_a[i-((BASE_L-1)*mot.len()+2)]);
+                println!("{} {:?}", pos_a[i-((BASE_L-1)*mot.len()+2)], bps_a[i-((BASE_L-1)*mot.len()+2)]);
                 println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
             }
             //let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
@@ -2920,7 +2995,7 @@ mod tester{
                 let loc_message = if ind == 0 { "height".to_owned() } else {
                     let bp = if zeroth_mot {bps[ind-1]} else {bps_a[ind-1]};
                     let po = if zeroth_mot {pos[ind-1]} else {pos_a[ind-1]};
-                    format!("binding at position {} of base {}", po, BPS[bp])};
+                    format!("binding at position {} of base {:?}", po, bp)};
 
                 grad_reses.push(Err(format!("In motif {}, the {} yields a bad gradient. Absolute difference {}, relative difference {}", mot_num, loc_message, numerical_grad[i]-analytical_grad[i], (numerical_grad[i]-analytical_grad[i])/numerical_grad[i])));
             }
@@ -2994,17 +3069,17 @@ mod tester{
         let mut all_base_correct = true;
         let mut all_scramble_correct = true;
         for base in 0..mot.len() {
-            all_base_correct &= (unsafe{mot_scram.pwm[base].rel_bind(scram_kmer[base])} == 1.0);
+            all_base_correct &= (mot_scram.pwm[base][scram_kmer[base]] == 1.0);
             let best_old = mot_kmer[base];
             let best_new = scram_kmer[base];
-            for bp in 0..BASE_L {
+            for bp in BP_ARRAY {
 
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)};
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][best_new]};
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)};
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][best_old]};
                 } else {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)};
+                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][bp]};
                 }
                     
             }
@@ -3034,13 +3109,13 @@ mod tester{
         for base in 0..mot.len() {
             let best_old = mot_kmer[base];
             let best_new = leap_kmer[base];
-            for bp in 0..BASE_L {
+            for bp in BP_ARRAY {
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_new)};
+                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][best_new]};
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(best_old)};
+                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][best_old]};
                 } else {
-                    all_scramble_correct &= unsafe{leap.pwm[base].rel_bind(bp) == mot.pwm[base].rel_bind(bp)};
+                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][bp]};
                 }
                     
             }
@@ -3053,13 +3128,13 @@ mod tester{
         for base in 0..mot1.len() {
             let best_old = mot1_kmer[base];
             let best_new = leap1_kmer[base];
-            for bp in 0..BASE_L {
+            for bp in BP_ARRAY {
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_new)};
+                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][best_new]};
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(best_old)};
+                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][best_old]};
                 } else {
-                    all_scramble_correct &= unsafe{leap1.pwm[base].rel_bind(bp) == mot1.pwm[base].rel_bind(bp)};
+                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][bp]};
                 }
                     
             }
@@ -3418,18 +3493,18 @@ mod tester{
     #[test]
     fn it_works() {
         let mut rng = rand::thread_rng();
-        let base = 3;
+        let base = Bp::T;
         let try_base: Base = Base::rand_new(&mut rng);
         let b = try_base.make_best(base);
         assert_eq!(base, b.best_base());
 
         let bc: Base = b.rev();
 
-        assert_eq!(bc.best_base(), 3-base);
+        assert_eq!(bc.best_base(), base.complement());
 
         let tc: Base = try_base.rev();
 
-        assert_eq!(tc.best_base(), 3-try_base.best_base());
+        assert_eq!(tc.best_base(), try_base.best_base().complement());
 
         assert!(!(tc == try_base));
         assert!(b == b.clone());
@@ -3445,8 +3520,8 @@ mod tester{
 
         //let td: Base = Base::new([0.1, 0.2, 0.4, 0.3]);
 
-        //assert!((td.rel_bind(1)-0.5_f64).abs() < 1e-6);
-        //assert!((td.rel_bind(2)-1_f64).abs() < 1e-6);
+        //assert!((td[Bp::C]-0.5_f64).abs() < 1e-6);
+        //assert!((td[Bp::G]-1_f64).abs() < 1e-6);
 
         //let tg: GBase = GBase::new([0.82094531732, 0.41047265866, 0.17036154577], 2);
 
@@ -3586,7 +3661,7 @@ mod tester{
         assert!((motif.pwm_prior(&sequence)+(sequence.number_unique_kmers(motif.len()) as f64).ln()
                  -(motif.len() as f64)*BASE_PRIOR_DENS.ln()).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![1usize;20],&mut rng);//Sequence
+        let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],&mut rng);//Sequence
 
         assert!(un_mot.pwm_prior(&sequence) < 0.0 && un_mot.pwm_prior(&sequence).is_infinite());
 
@@ -3609,7 +3684,7 @@ mod tester{
 
         assert!(((bindy.0-1.0).abs() < 1e-6) && !bindy.1);
 
-        let rev_best = best_mot.iter().rev().map(|a| BASE_L-1-a).collect::<Vec<usize>>();
+        let rev_best = best_mot.iter().rev().map(|a| a.complement()).collect::<Vec<Bp>>();
 
         let bindy = unsafe {motif.prop_binding(&rev_best) };
         
@@ -3618,14 +3693,14 @@ mod tester{
         let pwm = motif.pwm();
 
         for i in 0..motif.len() {
-            for j in 0..BASE_L {
+            for j in BP_ARRAY {
 
                 let mut for_mot = best_mot.clone();
                 for_mot[i] = j;
                 let mut rev_mot = rev_best.clone();
-                rev_mot[motif.len()-1-i] = BASE_L-1-j;
+                rev_mot[motif.len()-1-i] = j.complement();
 
-                let defect: f64 = unsafe{ pwm[i].rel_bind(j)} ;
+                let defect: f64 = unsafe{ pwm[i][j]} ;
 
                 
                 let bindy = unsafe{ motif.prop_binding(&for_mot)};
@@ -3668,7 +3743,7 @@ mod tester{
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.gen::<bool>()).collect();
 
-        let checked = wave_motif.base_check( &small, &rev_comp, 0, 4);
+        let checked = wave_motif.base_check( &small, &rev_comp, Bp::A, 4);
 
         let forward: Vec<bool> = vec![true, false, false, true, true, false, false, false, true, true, false, false, true, false, false, false, true, true, true, false, true, false, true, false, true, true, false, false, true, false, true, false, true, false, false, false, true, false, true, false, true, true, false, false, false, false, false, false];
 
@@ -3692,8 +3767,8 @@ mod tester{
                 if ind < 24 {
                     let bp = small.return_bases(i, ind, 1)[0];
                     let bp2 = small.return_bases(i, ind, 1)[0];
-                    let matcher = if rev_comp[24*i+j] { bp == 3 } else { bp == 0};
-                    println!("start loc: {}, bp: {}, bp2: {}, ind: {}, rev: {}, matcher: {}, checked: {}, correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, checked[24*i+j], correct[24*i+j]);
+                    let matcher = if rev_comp[24*i+j] { bp == Bp::T } else { bp == Bp::A};
+                    println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {}, checked: {}, correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, checked[24*i+j], correct[24*i+j]);
                     assert!(checked[24*i+j] == matcher);
                 }
             }
@@ -3710,7 +3785,7 @@ mod tester{
         println!("Time elapsed in bind_score() is: {:?}", duration);
 
         let start = Instant::now();
-        let checked = motif.base_check(&sequence, &binds.1, 2, 4);
+        let checked = motif.base_check(&sequence, &binds.1, Bp::G, 4);
         //let checked = motif.base_check(&binds.1, 2, 4, &sequence);
         let duration = start.elapsed();
         println!("Time elapsed in check is: {:?}", duration);
@@ -3732,9 +3807,9 @@ mod tester{
         //TESTING generate_waveform() 
 
 
-        let pwm_bp: usize = 3;
+        let pwm_bp: Bp = Bp::T;
         let pwm_pos: usize = 6;
-        let prop_bp = unsafe{motif.pwm[pwm_pos].rel_bind(pwm_bp)};
+        let prop_bp = motif.pwm[pwm_pos][pwm_bp];
         let wave_main = motif.generate_waveform(&wave, background.kernel_ref());
         let start0 = Instant::now();
         let wave_noh = motif.no_height_waveform(&wave, background.kernel_ref());
@@ -3742,10 +3817,10 @@ mod tester{
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let wave_sho: Vec<f64> = wave_noh.raw_wave();
 
-        let checked = motif.base_check(&sequence, &binds.1, 3, 6);
+        let checked = motif.base_check(&sequence, &binds.1, Bp::T, 6);
 
         let start = Instant::now();
-        let wave_filter = motif.only_pos_waveform(3, 6, &wave, background.kernel_ref());
+        let wave_filter = motif.only_pos_waveform(Bp::T, 6, &wave, background.kernel_ref());
         let duration = start.elapsed();
 
         let raw_filter: Vec<f64> = wave_filter.raw_wave();
@@ -3764,7 +3839,7 @@ mod tester{
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
         let start2 = Instant::now();
-        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, 3, 6, &wave, background.kernel_ref())};
+        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, Bp::T, 6, &wave, background.kernel_ref())};
         let duration2 = start2.elapsed();
 
         let start3 = Instant::now();
