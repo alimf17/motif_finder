@@ -162,16 +162,16 @@ impl TryFrom<usize> for Bp {
 
 impl Bp {
     pub fn complement(&self) -> Bp {
-        match self {
+        /*match self {
             Bp::A => Bp::T,
             Bp::C => Bp::G,
             Bp::G => Bp::C,
             Bp::T => Bp::A, 
-        }
+        }*/
 
         //Compiler recognized this optimization at high enough optimization
-        //SAFETY: enum never returns incorrect variant
-        //unsafe{std::mem::transmute::<usize, Bp>((*self as usize) ^ 3)}
+        //SAFETY: enum never returns incorrect variant, which is always in bounds
+        unsafe{std::mem::transmute::<usize, Bp>((*self as usize) ^ 3)}
     }
 
     //Safety: must be ABSOLUTELY sure that usize is < BASE_L (4)
