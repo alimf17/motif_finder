@@ -168,9 +168,10 @@ pub fn main() {
     let mut min_len: usize = usize::MAX;
     for trace in set_trace_collections.iter() {
         min_len = min_len.min(trace.len());
+        println!("Min len {}", min_len);
     }
 
-    let cluster_per_chain: usize = min_len.min(500);
+    let cluster_per_chain: usize = min_len.min(10000);
 
     let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
@@ -205,7 +206,7 @@ pub fn main() {
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let mot_size = set_trace_collections[0].len() as f64;
-        let distance_cutoff = mot_size*0.5753378-0.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
+        let distance_cutoff = mot_size*0.5753378-1.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
         let trace_scoop = set_trace_collections.iter().map(|a| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
             num_good_motifs+= set_extracts.len();
@@ -253,10 +254,12 @@ pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
 
     }).collect();
 
+    println!("chain_pars len {} chain_means {:?}, big_mean {}", chain_pars.len(), chain_means, big_mean);
     let b: f64 = ((real_length as f64)/((chain_pars.len()-1) as f64))*chain_means.iter().map(|a| (a-big_mean).powi(2)).sum::<f64>();
 
     let w: f64 = chain_vars.iter().sum::<f64>()/(chain_pars.len() as f64);
 
+    println!("b {} w {} rl {}", b, w, real_length);
     (1.0+((b/w)-1.0)/(real_length as f64)).sqrt()
 
 }

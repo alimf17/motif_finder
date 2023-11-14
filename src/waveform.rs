@@ -414,8 +414,8 @@ impl<'a> Waveform<'a> {
 
         let mut locations: Vec<usize> = Vec::with_capacity(length);
 
-        println!("starts {:?}", self.start_dats);
-        println!("lens {:?}", self.point_lens);
+        //println!("starts {:?}", self.start_dats);
+        //println!("lens {:?}", self.point_lens);
         for i in 0..(self.start_dats.len()){
 
             for j in 0..(self.point_lens[i]){

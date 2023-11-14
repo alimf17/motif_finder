@@ -121,7 +121,7 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
-const NECESSARY_MOTIF_IMPROVEMENT: f64 = 5.0_f64;
+const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
