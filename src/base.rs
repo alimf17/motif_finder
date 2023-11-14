@@ -8,7 +8,7 @@ use core::fmt::{Debug, Formatter};
 
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
-use crate::modified_t::ContinuousLnCDF;
+use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
 use crate::data_struct::AllData;
 
@@ -113,7 +113,9 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
-static PROPOSE_EXTEND: Lazy<Dirichlet> = Lazy::new(|| Dirichlet::new(vec![10.0_f64; BASE_L]).unwrap());
+static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
+
+static DIRICHLET_PWM: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap()); 
 
 const PROB_POS_PEAK: f64 = 0.9;
 
@@ -264,10 +266,13 @@ impl Base {
         Base { props: att}
     }
 
+    pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
+        DIRICHLET_PWM.sample(rng)
+    }
+
     pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
-        let props: [f64; BASE_L] = (*PROPOSE_EXTEND.sample(rng).data.as_vec()).clone().try_into().expect("We constructed PROPOSE_EXTEND based on BASE_L");
-        Base::new(props)
+        PROPOSE_EXTEND.sample(rng)
 
     }
 
@@ -291,6 +296,10 @@ impl Base {
         
         Base{ props: props }
 
+    }
+
+    pub fn from_bp_with_dirichlet<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
+        Base::rand_dirichlet_new(rng).make_best(best)
     }
 
 
@@ -710,6 +719,28 @@ impl Motif {
 
     }
 
+    pub fn from_motif_dirichlet<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+        
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_dirichlet(*a, rng)).collect();
+        pwm.reserve_exact(MAX_BASE-best_bases.len());
+
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+
+        let sign: f64 = rng.gen();
+        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
+
+        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+
+
+        Motif {
+            peak_height: peak_height,
+            pwm: pwm,
+        }
+
+
+    }
+
 
     
     pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
@@ -745,7 +776,11 @@ impl Motif {
 
         let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
 
-        Some((Self::from_motif_uniform(mot, rng), propensities[selection]/sum_prop))
+        let motif = Self::from_motif_uniform(mot, rng);
+
+        let dirichlet_like = motif.pwm.iter().map(|a| DIRICHLET_PWM.ln_pdf(a)).sum::<f64>();
+
+        Some((motif, dirichlet_like+propensities[selection].ln()-sum_prop.ln()))
     }
 
     pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence, rng: &mut R) -> Motif {
@@ -1646,7 +1681,7 @@ impl<'a> MotifSet<'a> {
         match attempt {
             None => {/*println!("No good propensities");*/ None},
             Some((new_mot, pick_prob)) => {
-                let ln_gen_prob = new_mot.height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+                let ln_gen_prob = new_mot.height_prior()+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln();
                 //let h_prior = new_mot.height_prior();
                 let ln_post = new_set.add_motif(new_mot);
                 //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -1671,8 +1706,8 @@ impl<'a> MotifSet<'a> {
             if sum_propensities <= 0.0 {
                 return None;
             }
-            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))]/sum_propensities;
-            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))].ln()-sum_propensities.ln()+self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.ln_pdf(a)).sum::<f64>();
+            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln();
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
@@ -1703,7 +1738,7 @@ impl<'a> MotifSet<'a> {
 
             let mut new_mot = self.set[extend_id].clone();
             let new_base = Base::propose_safe_new(rng);
-            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(new_base.as_probabilities().to_vec().try_into().unwrap()));
+            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&new_base);
             new_mot.pwm.push(new_base);
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             if self.data.seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
@@ -1728,7 +1763,7 @@ impl<'a> MotifSet<'a> {
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(old_base.expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
+            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(old_base.expect("We know this is bigger than 0")));
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -3366,7 +3401,7 @@ mod tester{
 
         let remaining = motif_set.data-&motif_set.signal;
         let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
-        let pick_prob = propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
         let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
@@ -3403,13 +3438,13 @@ mod tester{
         
         let remaining = motif_set.data-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.set[l].len());
-        let pick_prob = propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
 
         let actual_prior = motif_set.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
 
-        println!("priors {} {} {} {}", motif_set.set[l].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
+        println!("priors {} {} {} {} {}", motif_set.set[l].height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
 
         //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
         assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
@@ -3451,7 +3486,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
+        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
@@ -3496,7 +3531,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0").as_probabilities().to_vec()).try_into().unwrap());
+        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 

@@ -1,6 +1,9 @@
-use statrs::distribution::{Continuous, ContinuousCDF, Normal};
+use crate::base::{BASE_L, Base};
+
+use rand::Rng;
+use statrs::distribution::{Continuous, ContinuousCDF, Normal, Gamma};
 use statrs::consts;
-use statrs::statistics::{Min, Max, Distribution as OtherDistribution};
+use statrs::statistics::{Min, Max, Distribution};
 use num_traits::Float;
 use serde::{Serialize, Deserialize};
 
@@ -430,6 +433,48 @@ impl Getter for Normal {
     fn get_mean(&self) -> f64 { self.mean().unwrap() }
     fn get_sd(&self) -> f64 { self.std_dev().unwrap() }
 }
+
+pub struct SymmetricBaseDirichlet {
+    alpha: f64,
+    ln_normalize: f64,
+    gamma_sample: Gamma,
+}
+
+impl SymmetricBaseDirichlet{
+
+    pub fn new(alpha: f64) -> Result<Self, String> {
+
+        if alpha <= 0.0 || alpha.is_infinite() || alpha.is_nan() { return Err("alpha must be well-defined, finite, and strictly positive".to_owned()); }
+
+        let ln_normalize = ln_gamma((BASE_L as f64)*alpha)-(BASE_L as f64)*ln_gamma(alpha); 
+
+        let gamma_sample = Gamma::new(alpha, 1.0).expect("We already errored out if alpha violated Gamma's invariants");
+        Ok(Self { alpha, ln_normalize, gamma_sample })
+    }
+
+}
+
+impl Continuous<&Base, f64> for SymmetricBaseDirichlet {
+
+    fn pdf(&self, x: &Base) -> f64{
+        self.ln_pdf(x).exp()
+    }
+    fn ln_pdf(&self, x: &Base) -> f64 {
+        self.ln_normalize+(self.alpha-1.0)*x.as_probabilities().iter().map(|&p| p.ln()).sum::<f64>()
+    }
+
+}
+
+impl ::rand::distributions::Distribution<Base> for SymmetricBaseDirichlet {
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
+        //Note a small optimization: we don't actually divide by the sum of the samples here. 
+        //This is because Base's implementation automatically regularizes its inputs for us
+        Base::new((0..BASE_L).into_iter().map(|_| self.gamma_sample.sample(rng)).collect::<Vec<_>>().try_into().expect("We know the type and amount of elements in this vec"))
+    }
+
+}
+
 
 
 #[cfg(test)]
