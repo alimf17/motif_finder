@@ -413,7 +413,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
  
         let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| Base::simplex_to_base(tetrahedral_mean).seqlogo_heights()).collect();
 
-        draw_pwm(&prep_pwm, &format!("PWM_{}", file_name));
+        draw_pwm(&prep_pwm, &format!("{}_pwm.png", file_name));
         //This draws the credible region
        
         //let ci_color = &ORANGE.mix(0.1);
