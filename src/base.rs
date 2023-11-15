@@ -18,7 +18,7 @@ use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, WeightedIndex};
 
 use statrs::{consts, StatsError};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Dirichlet};
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
 use statrs::statistics::{Min, Max};
 
 use once_cell::sync::Lazy;
@@ -356,10 +356,8 @@ impl Base {
         simplex
     }
 
-    //This should never be publicly exposed, because it assumes an invariant that simplex_coords
-    //will always be inside of the tetrahedron. Failing to uphold this invariant will produce
-    //nonsense
-    fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
+    //Panic: if given a point outside of the base terahedron, this function will panic 
+    pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
 
         let mut mod_simplex = simplex_coords.to_vec();
         mod_simplex.push(1.0);
@@ -473,6 +471,20 @@ impl Base {
         ret
     }
 
+    pub fn seqlogo_heights(&self) -> [(usize, f64); BASE_L] {
+        let probs = self.as_probabilities();
+        let information_content = 2.0_f64 + probs.iter().map(|&p| if p == 0.0 { 0.0_f64 } else { p*p.log2() } ).sum::<f64>();
+        let mut heights: [(usize, f64); BASE_L] = probs.iter().enumerate().map(|(i, &p)| (i, p*information_content)).collect::<Vec<_>>().try_into().expect("we know how big this is");
+        heights.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let mut cumulative_height: f64 = 0.0;
+        for i in 0..BASE_L {
+            heights[i].1 += cumulative_height;
+            cumulative_height = heights[i].1;
+        }
+
+        heights = heights.into_iter().rev().collect::<Vec<_>>().try_into().expect("it's always the same length");
+        heights
+    }
 
 }
 
@@ -863,8 +875,8 @@ impl Motif {
 
         for i in 0..self.len() {
 
-            let old_base: u64 = ((old_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i));
-            let new_base: u64 = ((new_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i));
+            let old_base: u64 = (old_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i);
+            let new_base: u64 = (new_best & (U64_BITMASK << (BITS_PER_BP*i))) >> (BITS_PER_BP*i);
 
             if new_base != old_base {
                 //SAFETY: new_base is always constrained to be less than BASE_L (4)
@@ -2443,6 +2455,7 @@ impl<'a> SetTrace<'a> {
     }
 
 
+
     pub fn trace_from_meme<R: Rng + ?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64,  rng: &mut R) {
 
         let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
@@ -2619,6 +2632,52 @@ impl SetTraceDef {
 
 
        }).filter(|(_, (b, _, _))| *b < cutoff).collect::<Vec<_>>()
+
+    }
+    
+    pub fn save_best_trace(&self, output_dir: &str, run_name: &str) {
+
+        let data_reconstructed: AllData = serde_json::from_str(fs::read_to_string(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file").as_str()).expect("Monte Carlo chain should always point to data in proper format for inference!");
+
+        let data = data_reconstructed.validated_data();
+        let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
+
+        let current_active = self.trace[index_best].clone().reactivate_set(&data, data_reconstructed.background());
+    
+        let locs = data.generate_all_locs();
+
+        let signal_file: String = format!("{}/{}_occupancy_signal_highest_posterior_density.png",output_dir,run_name);
+
+        let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
+       
+        plot.fill(&WHITE).unwrap();
+
+        let mut chart = ChartBuilder::on(&plot)
+            .set_label_area_size(LabelAreaPosition::Left, 40)
+            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .caption("Signal Comparison", ("sans-serif", 40))
+            .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
+
+
+        chart.configure_mesh().draw().unwrap();
+
+        chart.draw_series(current_active.data.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
+       
+        let current_resid = current_active.data-&current_active.signal;
+        chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
+
+        let max_draw = current_active.set.len().min(3);
+
+        let colors = [&RED, &GREEN, &CYAN];
+
+        for i in 0..max_draw {
+
+            let occupancy = current_active.set[i].generate_waveform(current_active.data, current_active.background.kernel_ref());
+            chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
+
+        }
+
+        chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
 
     }
 

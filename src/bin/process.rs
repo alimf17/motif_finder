@@ -36,6 +36,8 @@ const PALETTE: [&RGBColor; 26] = [
     &BROWN, &BLUEGREY_A700, &LIME_A700, &YELLOW_800, 
     &RED_A700, &BLUE_A700, &GREEN_A700, &YELLOW_A700, &GREY, &full_palette::BLACK];
 
+const BASE_COLORS: [&RGBColor; BASE_L] = [&full_palette::RED, &YELLOW_700, &full_palette::GREEN, &full_palette::BLUE];
+
 pub fn main() {
 
     let args: Vec<String> = std::env::args().collect();
@@ -122,6 +124,10 @@ pub fn main() {
 
     //set_trace_collections is now the chains we want
 
+    for (chain, collection) in set_trace_collections.iter().enumerate() {
+        let chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
+        collection.save_best_trace(&out_dir, &chain_name);//, data: &Waveform, background: &Background)
+    }
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
     let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
@@ -206,7 +212,7 @@ pub fn main() {
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let mot_size = set_trace_collections[0].len() as f64;
-        let distance_cutoff = mot_size*0.5753378-1.*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
+        let distance_cutoff = mot_size*0.5753378-0.0*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
         let trace_scoop = set_trace_collections.iter().map(|a| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
             num_good_motifs+= set_extracts.len();
@@ -344,7 +350,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
     let panels = plot.split_evenly((num_rows as usize, 4));
 
-    //let cis = create_credible_intervals(samples, credible);
+    let cis = create_credible_intervals(samples, credible);
 
     for j in 0..num_bases {
         
@@ -397,12 +403,17 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
             
                 for little_trace in tetra_traces.iter() {
-                    chart.draw_series(little_trace.iter().step_by(10).map(|&a| Circle::new(a,1_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
+                    chart.draw_series(little_trace.iter().step_by(10).map(|&a| Circle::new(a,2_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
                 }
             } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
         }
 
         println!("Creating credible region at {} samples", credible);
+        
+ 
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| Base::simplex_to_base(tetrahedral_mean).seqlogo_heights()).collect();
+
+        draw_pwm(&prep_pwm, &format!("PWM_{}", file_name));
         //This draws the credible region
        
         //let ci_color = &ORANGE.mix(0.1);
@@ -421,11 +432,42 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
     }
 }
 
+fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
+
+    let len = map_heights.len();
+    let plot = BitMapBackend::new(file_name, (600, (len as u32)*600)).into_drawing_area();
+
+    plot.fill(&full_palette::WHITE).unwrap();
+
+    let mut chart = ChartBuilder::on(&plot)
+            .set_label_area_size(LabelAreaPosition::Left, 40)
+            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .caption("PWM", ("sans-serif", 40))
+            .build_cartesian_2d(0..(len+1), (0_f64)..2_f64).unwrap();
+
+
+    chart.configure_mesh().draw().unwrap();
+
+    chart.draw_series(map_heights.iter().enumerate().map(|(i, hs)| {
+
+        println!("hs {:?}", hs);
+        let mut end_heights: [f64; BASE_L] = [0.0; BASE_L];
+
+        for j in 0..(BASE_L-1) { end_heights[j] = hs[j+1].1; }
+
+        let pos = i;
+        end_heights.into_iter().zip(hs.iter()).enumerate().map(move |(j, (e, h))| {
+            println!("{} {} {:?}", j, e, h);
+            Rectangle::new([(pos, h.1), (pos+1, e)],BASE_COLORS[h.0].filled())
+        }) 
+    }).flatten()).unwrap();
+
+}
 
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
 //need anymore as much as humanly possible.
-pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<Vec<(f64, f64, f64)>>{
+pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(Vec<(f64, f64, f64)>, [f64; BASE_L-1])>{
 
     if credible <= 0.0 {
         panic!("Can't make credible intervals of literally at most zero length!");
@@ -517,7 +559,12 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<Ve
             index += 1;
         }
 
-        cells_and_counts.drain(0..index).map(|(a, _)| (xs[a.0], ys[a.1], zs[a.2])).collect::<Vec<(f64, f64, f64)>>()
+        let region = cells_and_counts.drain(0..index).map(|(a, _)| (xs[a.0], ys[a.1], zs[a.2])).collect::<Vec<(f64, f64, f64)>>();
+
+        let posterior_sum = region.iter().fold((0.0, 0.0, 0.0), |acc, x| (acc.0+x.0, acc.1+x.1, acc.2+x.2));
+        let posterior_mean = [posterior_sum.0/(index as f64), posterior_sum.1/(index as f64), posterior_sum.2/(index as f64)];
+
+        (region, posterior_mean)
 
     }).collect::<Vec<_>>();
     /*
@@ -603,6 +650,13 @@ mod tests {
         let r2_hat = rhat(&chain_pars, 2);
         assert!((r2_hat-(19.0/2.0_f64).sqrt()).abs() < 1e-6);
 
+    }
+
+    #[test]
+    fn draw_test() {
+        let fake_pwm = vec![[0.1_f64, -0.1, -0.1], [-0.1, 0.1, -0.1], SIMPLEX_VERTICES_POINTS[2], [SQRT_2/3., 0., 1./3.], [0., 0., 0.]]; 
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = fake_pwm.iter().map(|tetrahedral_mean| Base::simplex_to_base(tetrahedral_mean).seqlogo_heights()).collect();
+        draw_pwm(&prep_pwm,"fake_pwm.png");
     }
 
 }
