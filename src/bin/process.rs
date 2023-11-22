@@ -3,6 +3,8 @@ use std::fs;
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3};
 
+use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT};
+
 use log::warn;
 
 use kmedoids;
@@ -53,6 +55,17 @@ pub fn main() {
     let burn_in: Option<usize> = args.get(5).map(|a| a.parse::<usize>().ok()).flatten();
 
     let mut min_chain: usize = burn_in.unwrap_or(0);
+
+    let potential_prior_change: Option<f64> = args.get(6).map(|a| a.parse::<f64>().ok()).flatten();
+
+    match potential_prior_change {
+        Some(credibility) => {
+            if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
+            let mut w = NECESSARY_MOTIF_IMPROVEMENT.write().expect("This should be the only thread writing or reading to this");
+            *w = credibility;
+        },
+        None => (),
+    };
 
     if max_chain < min_chain {
         warn!("Your upper bound id for beads in a single chain to consider for inference exceeds the minimum. We swap their roles, but make sure you didn't mess up.");

@@ -4,7 +4,11 @@ pub mod modified_t;
 pub mod base;
 pub mod data_struct;
 
-use once_cell::sync::Lazy;
+use crate::modified_t::SymmetricBaseDirichlet;
+
+use std::sync::RwLock;
+
+use once_cell::sync::{OnceCell,Lazy};
 use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;
@@ -26,4 +30,23 @@ const HMC_EPSILON: f64 = 1./(4096.*16.); //2^(-21)
 
 //This only matters when taking in a meme file
 pub const MAX_E_VAL: f64 = 0.01;
+
+
+//These are mutable statics ONLY at the beginning of the programming. They are never to change
+//after initialization. In particular, if they change in the middle of calculations, that's a data
+//race, IE UB. 
+
+//pub static PROPOSE_EXTEND: RwLock<Lazy<SymmetricBaseDirichlet>> = RwLock::new(Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap()));
+//pub static PROPOSE_EXTEND: RwLock<SymmetricBaseDirichlet> = RwLock::new(SymmetricBaseDirichlet::new(1.0_f64).unwrap());
+
+pub static PROPOSE_EXTEND: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
+
+
+//pub static DIRICHLET_PWM: RwLock<Lazy<SymmetricBaseDirichlet>> = RwLock::new(Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap()));
+
+pub static DIRICHLET_PWM: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
+
+pub static THRESH: RwLock<f64> = RwLock::new(1e-2);
+
+pub static NECESSARY_MOTIF_IMPROVEMENT: RwLock<f64> = RwLock::new(20.0_f64);
 

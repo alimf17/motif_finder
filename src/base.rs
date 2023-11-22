@@ -10,6 +10,7 @@ use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
+use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::AllData;
 
 use rand::Rng;
@@ -113,17 +114,19 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
+const PROB_POS_PEAK: f64 = 0.9;
+
+/*
 static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
 
 static DIRICHLET_PWM: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap()); 
-
-const PROB_POS_PEAK: f64 = 0.9;
 
 pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
 //This is roughly how much an additional motif should improve the ln posterior before it's taken seriously
 //The more you increase this, the fewer motifs you will get, on average
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
+*/
 
 pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
 
@@ -267,12 +270,12 @@ impl Base {
     }
 
     pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
-        DIRICHLET_PWM.sample(rng)
+        DIRICHLET_PWM.get().expect("no writes expected now").sample(rng)
     }
 
     pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
-        PROPOSE_EXTEND.sample(rng)
+        PROPOSE_EXTEND.get().expect("no writes expected now").sample(rng)
 
     }
 
@@ -790,7 +793,7 @@ impl Motif {
 
         let motif = Self::from_motif_uniform(mot, rng);
 
-        let dirichlet_like = motif.pwm.iter().map(|a| DIRICHLET_PWM.ln_pdf(a)).sum::<f64>();
+        let dirichlet_like = motif.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         Some((motif, dirichlet_like+propensities[selection].ln()-sum_prop.ln()))
     }
@@ -1130,7 +1133,7 @@ impl Motif {
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
-                if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
+                if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
                     actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
@@ -1163,7 +1166,7 @@ impl Motif {
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
-                if bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH {
+                if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
                     //actual_kernel = &base_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
@@ -1192,7 +1195,7 @@ impl Motif {
         let checked = self.base_check( data.seq(), &bind_score_revs, bp, motif_pos);
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
-                if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > THRESH) {
+                if checked[starts[i]*BP_PER_U8+j] && (bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now")) {
                     //println!("safe binding at {}", starts[i]*BP_PER_U8+j);
                     actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height/bind);
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2)}; //Note: this technically means that we round down if the motif length is even
@@ -1224,7 +1227,7 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                if binds.0[starts[i]*BP_PER_U8+j] > THRESH {
+                if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
                     actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]*self.peak_height) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
@@ -1257,7 +1260,7 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                if  binds.0[starts[i]*BP_PER_U8+j] > THRESH {
+                if  binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
                     //actual_kernel = &self.kernel*(binds.0[starts[i]*BP_PER_U8+j]/self.peak_height);
                     actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]);
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
@@ -1289,7 +1292,7 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > THRESH) {
+                if checked[starts[i]*BP_PER_U8+j] && (binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now")) {
                     //println!("unsafe binding at {}", starts[i]*BP_PER_U8+j);
                     actual_kernel = unit_kernel*((binds.0[starts[i]*BP_PER_U8+j]*self.peak_height)/bind);
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2); 
@@ -1601,7 +1604,7 @@ impl<'a> MotifSet<'a> {
     //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     //for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
-        -((self.set.len()-1) as f64)*NECESSARY_MOTIF_IMPROVEMENT
+        -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
     }
 
     pub fn ln_prior(&self) -> f64 {
@@ -1718,7 +1721,7 @@ impl<'a> MotifSet<'a> {
             if sum_propensities <= 0.0 {
                 return None;
             }
-            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))].ln()-sum_propensities.ln()+self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.ln_pdf(a)).sum::<f64>();
+            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))].ln()-sum_propensities.ln()+self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
             let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln();
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -1750,7 +1753,7 @@ impl<'a> MotifSet<'a> {
 
             let mut new_mot = self.set[extend_id].clone();
             let new_base = Base::propose_safe_new(rng);
-            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&new_base);
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base);
             new_mot.pwm.push(new_base);
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             if self.data.seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
@@ -1775,7 +1778,7 @@ impl<'a> MotifSet<'a> {
             let mut new_mot = self.set[contract_id].clone();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = PROPOSE_EXTEND.ln_pdf(&(old_base.expect("We know this is bigger than 0")));
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")));
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -2090,7 +2093,7 @@ impl StrippedMotifSet {
     }
     
     pub fn motif_num_prior(&self) -> f64 {
-        -((self.set.len()-1) as f64)*NECESSARY_MOTIF_IMPROVEMENT
+        -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
     }
 
     pub fn ln_prior(&self, seq: &Sequence) -> f64 {
@@ -3460,7 +3463,7 @@ mod tester{
 
         let remaining = motif_set.data-&motif_set.signal;
         let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
-        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| *DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
         let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
@@ -3497,7 +3500,7 @@ mod tester{
         
         let remaining = motif_set.data-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.set[l].len());
-        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = motif_set.set[l].pwm.iter().map(|a| *DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
 
@@ -3545,7 +3548,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
@@ -3590,7 +3593,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
@@ -4010,9 +4013,9 @@ mod tester{
 
                 let cut_low = if space*j >= kernel_mid+half_len {start_bases[i]+space*j-(kernel_mid+half_len)} else {start_bases[i]} ;
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
-                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > THRESH).collect::<Vec<_>>();
+                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > *THRESH.read().expect("no writes expected now")).collect::<Vec<_>>();
 
-                let relevant_filt = (cut_low..cut_high).filter(|&a| (binds.0[a] > THRESH) & checked[a]).collect::<Vec<_>>();
+                let relevant_filt = (cut_low..cut_high).filter(|&a| (binds.0[a] > *THRESH.read().expect("no writes expected now")) & checked[a]).collect::<Vec<_>>();
 
                 if relevant_binds.len() > 0 {
 

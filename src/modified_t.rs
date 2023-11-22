@@ -434,6 +434,7 @@ impl Getter for Normal {
     fn get_sd(&self) -> f64 { self.std_dev().unwrap() }
 }
 
+#[derive(Debug)]
 pub struct SymmetricBaseDirichlet {
     alpha: f64,
     ln_normalize: f64,
