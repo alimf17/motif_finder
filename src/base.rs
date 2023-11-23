@@ -2,9 +2,11 @@
 use std::{f64, fmt, fs};
 use std::error::Error;
 use std::ops::{Index, IndexMut};
+use std::hint::unreachable_unchecked;
 //use std::time::{Duration, Instant};
 
 use core::fmt::{Debug, Formatter};
+use core::slice::{Iter, IterMut};
 
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
@@ -893,7 +895,7 @@ impl Motif {
     }
 
     //Safety: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
-    unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
+    pub unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
 
         let mut new_mot = self.clone();
         
@@ -2100,6 +2102,14 @@ impl StrippedMotifSet {
         self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
     }
 
+    pub fn set_iter(&self) -> Iter<'_, Motif> {
+        self.set.iter()
+    }
+    //If you use this, the ln posterior that we save is no longer valid
+    pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
+        self.set.iter_mut()
+    }
+
 }
 
 enum AnyMotifSet<'a> {
@@ -2364,6 +2374,29 @@ impl<'a> SetTrace<'a> {
         }
     }
 
+    pub fn try_replace_or_create_last<R: Rng + ?Sized>(&mut self, set: StrippedMotifSet) -> Result<(), String>{
+
+        let active_set = set.reactivate_set(self.data, self.background);
+
+        //SAFETY: reactivate_set ALWAYS initializes the posterior
+        let Some(posterior) = active_set.ln_post else { unsafe {unreachable_unchecked()} };
+
+        if !(posterior > -f64::INFINITY) {
+            return Err("This motif set is impossible to have, and thus we reject it. The motif trace that called this is unchanged.".to_string());
+        }
+
+        if self.trace.len() == 0 {
+            self.trace.push(AnyMotifSet::Active(active_set));
+        } else {
+
+            //SAFETY: we only hit this branch if the trace has a last position with an element
+            let Some(last_pos) = self.trace.last_mut() else { unsafe {unreachable_unchecked()} };
+            *last_pos = AnyMotifSet::Active(active_set);
+        }
+
+        Ok(())
+    }
+
 
     pub fn current_set(&self) -> MotifSet<'a> {
         self.trace[self.trace.len()-1].give_activated(self.data, self.background)
@@ -2393,6 +2426,23 @@ impl<'a> SetTrace<'a> {
             },
             AnyMotifSet::Passive(set) => {fs::write(savestate_file.as_str(), 
                                                     serde_json::to_string(&set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");},
+        };
+    }
+    
+    pub fn save_final_state(&self, output_dir: &str, run_name: &str) {
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
+        
+        match self.trace.last() {
+        
+            Some(AnyMotifSet::Active(set)) => {
+                let init_set: MotifSetDef = MotifSetDef::from(set);
+                fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
+            },
+            Some(AnyMotifSet::Passive(set)) => {fs::write(savestate_file.as_str(), 
+                                                    serde_json::to_string(&set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
+            },
+            None => warn!("trace is empty!"),
         };
     }
        

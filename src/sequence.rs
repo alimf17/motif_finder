@@ -432,6 +432,33 @@ impl Sequence {
         found
     }
 
+    fn u64_kmers_have_hamming(kmer_a: u64, kmer_b: u64, distance: usize) -> bool {
+
+        let mut check: u64 =  kmer_a ^ kmer_b;
+
+        let mut hamming: usize = 0;
+
+        while (check > 0) && (hamming <= distance) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
+            hamming += ((check & U64_BITMASK) > 0) as usize;
+            check = check >> 2;
+        }
+
+        hamming == distance
+
+    }
+    pub fn all_kmers_with_exact_hamming(&self, kmer: &Vec<Bp>, distance: usize) -> Vec<usize> {
+
+        let u64_kmer: u64 = Self::kmer_to_u64(kmer);
+
+        let len: usize = kmer.len();
+
+        self.kmer_dict[&len].iter().enumerate()
+                           .filter(|(_, &b)| Self::u64_kmers_have_hamming(u64_kmer, b, distance))
+                           .map(|(a, _)| a).collect::<Vec<usize>>()
+
+    }
+
+
     fn u64_kmers_within_hamming(kmer_a: u64, kmer_b: u64, threshold: usize) -> bool {
 
         let mut check: u64 =  kmer_a ^ kmer_b; //^ is the XOR operator in rust
