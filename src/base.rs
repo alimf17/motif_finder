@@ -2088,6 +2088,9 @@ impl StrippedMotifSet {
             background: background,
         };
 
+       
+        revived.recalc_signal();
+
         _ = revived.ln_posterior(); //I don't believe these ln posteriors if I'm going to be using them for inference. 
                                     //I only have this struct save a ln posterior because I want to record it for post processing
 
