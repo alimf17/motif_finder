@@ -3583,10 +3583,10 @@ mod tester{
 
         let remaining = motif_set.data-&motif_set.signal;
         let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
-        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+        let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data.seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
        
@@ -3620,11 +3620,10 @@ mod tester{
         
         let remaining = motif_set.data-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.set[l].len());
-        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-
-        let actual_prior = motif_set.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
+        let actual_prior = motif_set.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data.seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
 
         println!("priors {} {} {} {} {}", motif_set.set[l].height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
 
