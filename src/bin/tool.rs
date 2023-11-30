@@ -1,11 +1,12 @@
 
 use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
-use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
+use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT, MOMENTUM_SD, HMC_EPSILON, MOMENTUM_DIST};
 use motif_finder::base::*;
 use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
 use motif_finder::modified_t::SymmetricBaseDirichlet;
 
+use statrs::distribution::Normal;
 use once_cell::sync::Lazy;
 //use std::time::{Duration, Instant};
 
@@ -120,9 +121,37 @@ fn main() {
         *w = credibility; 
     }
 
+    if init_check_index > 13 { 
+        let momentum: f64 = args[13].parse().expect("We already checked that this parsed to f64");
+        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
+        //SAFETY: This modification is made before any inference is done, preventing data races
+        //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
+        //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
+
+        if !(momentum > 0.0) {panic!("Momentum distribution standard deviation must be a valid strictly positive float");}
+        
+        let mut w = MOMENTUM_SD.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
+        *w = momentum;
+    } 
 
 
+    if init_check_index > 14 { 
+        let eps: f64 = args[14].parse().expect("We already checked that this parsed to f64");
+        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
+        if !(eps > 0.0) {panic!("HMC epsilon must be a valid strictly positive float");} 
+        //SAFETY: This modification is made before any inference is done, preventing data races
+        //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
+        //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
 
+        {
+        let f = HMC_EPSILON.write();
+        let mut m = f.expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
+        *m = eps;
+        }
+    }
+
+
+    MOMENTUM_DIST.set(Normal::new(0.0, *MOMENTUM_SD.read().expect("Nothing should be writing to this now")).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
 
 
 
