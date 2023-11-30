@@ -6,7 +6,7 @@ use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
 use motif_finder::modified_t::SymmetricBaseDirichlet;
 
-
+use once_cell::sync::Lazy;
 //use std::time::{Duration, Instant};
 
 use std::env;
@@ -76,15 +76,17 @@ fn main() {
     //that change statics relevant for inference.
     //
 
+    let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
     if init_check_index > 9 { 
         let extend_alpha: f64 = args[9].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(extend_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //let mut w = PROPOSE_EXTEND.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
         //*w = Lazy::new(|&extend_alpha| SymmetricBaseDirichlet::new(extend_alpha.clone()).unwrap());
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(extend_alpha).unwrap()).expect("Nothing should have written to this before now");
+        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(extend_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
     } else {
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).unwrap()).expect("Nothing should have written to this before now");
+
+        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
     if init_check_index > 10 { 
         let pwm_alpha: f64 = args[10].parse().expect("We already checked that this parsed to f64");
@@ -93,10 +95,13 @@ fn main() {
         //SAFETY: This modification is made before any inference is done, preventing data races
         //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
         //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
-        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(pwm_alpha).unwrap()).expect("Nothing should have written to this before now");
+
+        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(pwm_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
     } else {
-        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).unwrap()).expect("Nothing should have written to this before now");
+
+        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
+
 
     if init_check_index > 11 { 
         let threshold: f64 = args[11].parse().expect("We already checked that this parsed to f64");

@@ -13,8 +13,9 @@ use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;
 
-const MOMENTUM_SD: f64 = 0.1;
-static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
+pub static MOMENTUM_SD: RwLock<f64> = RwLock::new(0.1);
+//static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
+static MOMENTUM_DIST: OnceCell<Normal> = OnceCell::new();//Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
 
 pub const NUM_CHECKPOINT_FILES: usize = 25;
 
@@ -26,7 +27,9 @@ pub const NUM_HMC_STEPS: usize = 1;
 const MAX_IND_HMC: usize = MAX_IND_LEAP+NUM_HMC_STEPS;
 
 const HMC_TRACE_STEPS: usize = 1;
-const HMC_EPSILON: f64 = 1./(4096.*16.); //2^(-21)
+//const HMC_EPSILON: RwLock<f64> = RwLock::new(1./(4096.*16.)); //2^(-21)
+
+const HMC_EPSILON: RwLock<f64> = RwLock::new(1./128.);
 
 //This only matters when taking in a meme file
 pub const MAX_E_VAL: f64 = 0.01;
@@ -38,6 +41,10 @@ pub const MAX_E_VAL: f64 = 0.01;
 
 //pub static PROPOSE_EXTEND: RwLock<Lazy<SymmetricBaseDirichlet>> = RwLock::new(Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap()));
 //pub static PROPOSE_EXTEND: RwLock<SymmetricBaseDirichlet> = RwLock::new(SymmetricBaseDirichlet::new(1.0_f64).unwrap());
+
+
+//pub static DIRICHLET_PWM: RwLock<Lazy<SymmetricBaseDirichlet>> = RwLock::new(Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap()));
+
 
 pub static PROPOSE_EXTEND: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
 

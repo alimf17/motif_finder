@@ -16,7 +16,7 @@ use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::AllData;
 
 use rand::Rng;
-//use rand::prelude::IteratorRandom;
+use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, WeightedIndex};
 
@@ -381,7 +381,7 @@ impl Base {
 
         let max = probs[Base::argmax(&probs)];
 
-        let b_form: [f64; BASE_L]  = probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
+        let b_form: [f64; BASE_L]  = core::array::from_fn(|a| probs[a]/max); //probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
 
         Base{props : b_form}
 
@@ -472,7 +472,7 @@ impl Base {
 
     pub fn to_unit_sum(&self) -> [f64; BASE_L] {
         let summed = self.props.iter().sum::<f64>();
-        let ret: [f64; BASE_L] = self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
+        let ret: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/summed); // self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
         ret
     }
 
@@ -773,6 +773,20 @@ impl Motif {
 
     }
 
+    pub fn rand_mot_dirichlet<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
+
+
+        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+        let mot = seq.random_valid_motif(num_bases);
+        
+        Self::from_motif_dirichlet(mot, rng)
+        
+
+    }
+
+
+
     pub fn rand_propensity_mot<R: Rng + ?Sized>(wave: &Waveform, rng: &mut R) -> Option<(Motif, f64)> {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
@@ -894,7 +908,7 @@ impl Motif {
 
     }
 
-    //Safety: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
+    //SAFETY: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
     pub unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
 
         let mut new_mot = self.clone();
@@ -910,7 +924,8 @@ impl Motif {
 
         for i in 0..self.len() {
             
-            let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps).collect::<Vec<_>>().try_into().unwrap();
+            //let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps).collect::<Vec<_>>().try_into().unwrap();
+            let slice: [f64; BASE_L-1] = core::array::from_fn(|a| *(momentum.get_unchecked(i*(BASE_L-1)+(a+1)))*eps); 
             new_mot.pwm[i] = self.pwm[i].add_in_hmc(slice, confine_base);
         }
 
@@ -1308,6 +1323,20 @@ impl Motif {
 
     }
 
+    //PANICS: if total_signal and data are not pointing to the same sequence with the same spacer, 
+    //        this will panic
+    pub fn safe_single_motif_grad(&self, total_signal: &Waveform, data: &Waveform, background: &Background) -> Vec<f64> {
+
+       let noise = total_signal.produce_noise(data, background);
+       let d_ad_stat_d_noise = noise.ad_grad();
+       let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+
+
+       //SAFETY: this d_ad_stat_d_noise is clearly sized correctly because total_signal must 
+       //match the data Waveform, or else produce_noise will panic
+       unsafe{ self.parallel_single_motif_grad(data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, background)}
+
+    }
 
     //SAFETY: the d_ad_stat_d_noise must be of the same length as the noise vector we get from data.
     pub unsafe fn parallel_single_motif_grad(&self,  data: &Waveform, d_ad_stat_d_noise: &Vec<f64>, d_ad_like_d_ad_stat: f64, background: &Background) -> Vec<f64> {
@@ -1346,18 +1375,18 @@ impl Motif {
         //(0..self.len()).into_par_iter().map(|i| {
         let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
             //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
-            let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
+            //let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
             
             let best_bp = self.pwm[i].best_base();
             let mut bp_inds: Vec<Bp> = BP_ARRAY.to_vec(); 
             bp_inds.retain(|&b| b != best_bp);
             
-            let ln_like_grads: [f64; BASE_L-1] = index_into.iter().map(|&k| *grad_chunk.get_unchecked(k)).collect::<Vec<_>>().try_into().unwrap();
+            let ln_like_grads: [f64; BASE_L-1] = core::array::from_fn(|k| *(grad_chunk.get_unchecked(k)));//index_into.iter().map(|&k| *grad_chunk.get_unchecked(k)).collect::<Vec<_>>().try_into().unwrap();
 
             let simplex_grad = self.pwm[i].d_base_d_simplex();
             for k in 0..(BASE_L-1) {
 
-                *grad_chunk.get_unchecked_mut(index_into[k]) = ln_like_grads.iter().zip(simplex_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+                *grad_chunk.get_unchecked_mut(k) = ln_like_grads.iter().zip(simplex_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();
             }
            
         }).collect::<Vec<_>>();
@@ -1693,18 +1722,17 @@ impl<'a> MotifSet<'a> {
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
-        let remaining = self.data-&self.signal;
-        let attempt = Motif::rand_propensity_mot(&remaining, rng); //There may not always be a place with decent propensities
-        match attempt {
-            None => {/*println!("No good propensities");*/ None},
-            Some((new_mot, pick_prob)) => {
-                let ln_gen_prob = new_mot.height_prior()+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln();
-                //let h_prior = new_mot.height_prior();
-                let ln_post = new_set.add_motif(new_mot);
-                //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
-                Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
-            }
-        }
+        
+        let new_mot = Motif::rand_mot_dirichlet(self.data.seq(), rng); //There may not always be a place with decent propensities
+        
+        let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
+        
+        let ln_gen_prob = new_mot.height_prior()+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data.seq().number_unique_kmers(new_mot.len()) as f64).ln());
+        //let h_prior = new_mot.height_prior();
+        
+        let ln_post = new_set.add_motif(new_mot);
+        //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+        Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
     }
 
     //This proposes removing an old motif for the next motif set
@@ -1716,15 +1744,11 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
-            let mod_signal = &(self.signal)-&(self.set[rem_id].generate_waveform(self.data, self.background.kernel_ref()));
-            let remaining = self.data-&mod_signal;
-            let propensities = remaining.kmer_propensities(self.set[rem_id].len());
-            let sum_propensities = propensities.iter().sum::<f64>();
-            if sum_propensities <= 0.0 {
-                return None;
-            }
-            let pick_prob = propensities[self.data.seq().id_of_u64_kmer_or_die(self.set[rem_id].len(),Sequence::kmer_to_u64(&self.set[rem_id].best_motif()))].ln()-sum_propensities.ln()+self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
-            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln();
+           
+            let pick_prob = self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
+
+            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data.seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
+
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
@@ -1936,15 +1960,30 @@ impl<'a> MotifSet<'a> {
    //MOVE TO CALL 
    pub fn hmc<R: Rng + ?Sized>(&self, rng: &mut R) ->  (Self, bool, f64) {
        
+       let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
        
-       let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
+       //let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
-       let momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.sample(rng)).collect();
+       let total_len = 1+(BASE_L-1)*self.set[k].len();
+
+       let momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.get().expect("no writes expected now").sample(rng)).collect();
 
        let mut prior_set = self.clone();
-     
-       let mut gradient_old = prior_set.gradient();
+       
+       //let mut noise = self.signal.produce_noise(self.data, self.background);
+       //let mut d_ad_stat_d_noise = noise.ad_grad();
+       //let mut d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+ 
+       //SAFETY: d_ad_stat_d_noise is derived from the noise distribution directly 
+       //let mut gradient_old = unsafe{ prior_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
+       
+      
+       let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data, self.background);
+
+
+       
        let mut momentum_apply = momentum.clone();
+
 
        for _ in 0..HMC_TRACE_STEPS {
        
@@ -1957,28 +1996,46 @@ impl<'a> MotifSet<'a> {
                //BUT, our potential energy is -ln_posterior. 
                //Because we subtract the gradient of the potential energy
                //we ADD the gradient of the ln_posterior
-               momentum_apply[i] += (HMC_EPSILON*gradient_old[i])/2.0;
+               momentum_apply[i] += ((*HMC_EPSILON.read().expect("no writes expected now"))*gradient_old[i])/2.0;
            }
 
 
            let mut start = 0;
            let mut next_start = 0;
-           for k in 0..self.set.len() {
-               next_start += self.set[k].len()*(BASE_L-1)+1;
-               new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
-              
-               if !self.data.seq().kmer_in_seq(&new_set.set[k].best_motif()) {
-                   new_set.set[k] = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], true)};
-               }
-               start = next_start;
+           //for k in 0..self.set.len() {
+               //next_start += self.set[k].len()*(BASE_L-1)+1;
+               //let mut new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
+               //if !self.data.seq().kmer_in_seq(&new_set.set[k].best_motif()) {
+                   //new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], true)};
+               //}
+               //start = next_start;
+           //}
+
+           //new_set.recalc_signal();
+           //
+
+           let mut new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, false)};
+
+           if !self.data.seq().kmer_in_seq(&new_set.set[k].best_motif()) {
+               new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, true)};
            }
+           
+           let _ = new_set.replace_motif(new_mot, k);
 
-           new_set.recalc_signal();
 
-           let gradient_new = new_set.gradient();
+           /*
+           noise = new_set.signal.produce_noise(self.data, self.background);
+           d_ad_stat_d_noise = noise.ad_grad();
+           d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+
+
+           let gradient_new = unsafe{ new_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
+           */
+
+           let gradient_new = new_set.set[k].safe_single_motif_grad(&new_set.signal, self.data, self.background);
 
            for i in 0..momentum_apply.len() {
-               momentum_apply[i] += (HMC_EPSILON*gradient_new[i])/2.0;
+               momentum_apply[i] += (((*HMC_EPSILON.read().expect("no writes expected now")))*gradient_new[i])/2.0;
            }
 
            //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
@@ -2903,7 +2960,8 @@ mod tester{
     use rand::Rng;
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
-
+    use crate::{DIRICHLET_PWM, PROPOSE_EXTEND, MOMENTUM_DIST};
+    
     fn produce_bps_and_pos(seq_motif: &Vec<Bp>) -> (Vec<Bp>, Vec<usize>) {
 
         let mut bps: Vec<Bp> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
@@ -3047,7 +3105,12 @@ mod tester{
     #[test]
     fn gradient_test() {
 
-
+        {
+            MOMENTUM_DIST.try_insert(Normal::new(0.0, 1.0_f64).expect("obviously valid")).ok();
+            DIRICHLET_PWM.try_insert(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).ok();
+            PROPOSE_EXTEND.try_insert(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).ok();
+        }
+        
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 3;
@@ -3218,7 +3281,7 @@ mod tester{
         assert!(diff_wave_check < 1e-6, "diff wave fail");
 
         println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
-        println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", HMC_EPSILON, dham, acc, motif_set,new_set);
+        println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", (*HMC_EPSILON.read().expect("no writes expected now")), dham, acc, motif_set,new_set);
 
     }
     #[test]
@@ -3363,7 +3426,11 @@ mod tester{
     #[test]
     fn rj_manipulator_tests() {
 
-
+        {
+            MOMENTUM_DIST.try_insert(Normal::new(0.0, 1.0_f64).expect("obviously valid")).ok();
+            DIRICHLET_PWM.try_insert(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).ok();
+            PROPOSE_EXTEND.try_insert(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).ok();
+        }
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 5;
@@ -3516,7 +3583,7 @@ mod tester{
 
         let remaining = motif_set.data-&motif_set.signal;
         let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
-        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| *DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(birth_mot.set[l].len(),Sequence::kmer_to_u64(&birth_mot.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
         let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
@@ -3553,7 +3620,7 @@ mod tester{
         
         let remaining = motif_set.data-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.set[l].len());
-        let pick_prob = motif_set.set[l].pwm.iter().map(|a| *DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
+        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>()*propensities[motif_set.data.seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]/propensities.iter().sum::<f64>();
 
 
 
