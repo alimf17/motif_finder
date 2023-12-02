@@ -46,11 +46,13 @@ impl Mul<f64> for &Kernel {
 
     fn mul(self, rhs: f64) -> Kernel {
 
+        
         Kernel {
             peak_height: self.peak_height*rhs,
             peak_width: self.peak_width,
             kernel: self.kernel.iter().map(|a| a*rhs).collect(),
         }
+
 
     }
 
@@ -228,22 +230,23 @@ impl<'a> Waveform<'a> {
         let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
                                                                                  //But if it is, panicking is appropriate: 
                                                                                  //center would necessarily be much bigger than the block length
+ 
+        //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
+        //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
+        
+       
 
-        let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
-        
-        
         let completion: usize = ((cc-((peak.len() % self.spacer) as isize)).rem_euclid(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
                                                                             //of the kernel to hit the next base in the cc
         
         let min_kern_cc = max(cc, place_bp);
         let nex_kern_cc = min(((self.point_lens[block]*self.spacer) as isize)+place_bp, (peak.len()+completion) as isize);
-
         let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
         let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
 
 
         let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
-
+/*
         if kern_values.len() > 0 {
             //println!("{} {} {} {} {} peak",min_data+zerdat, nex_data+zerdat, kern_values.len(), kern_change.len(), w);
             for i in 0..kern_change.len(){
@@ -251,7 +254,12 @@ impl<'a> Waveform<'a> {
             }
         } 
         
-       
+  */
+        let kern_start = min_kern_cc as usize;
+        for i in 0..kern_change.len() {
+            kern_change[i] += peak.kernel.get_unchecked(kern_start+i*self.spacer);
+        }
+
 
     }
 

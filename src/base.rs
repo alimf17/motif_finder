@@ -1346,7 +1346,8 @@ impl Motif {
         let n = 1+self.len()*(BASE_L-1);
 
 
-        let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
+        //let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
+        let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_iter().map(|i| {
             if i == 0 {
                 let d_noise_d_h = self.no_height_waveform_from_binds(&binds, data, background.kernel_ref())
                                                .account_auto(background);
@@ -1373,7 +1374,8 @@ impl Motif {
         //let grad_raw_ptrs = (0..self.len()).map(|i| d_ad_like_d_grad_form.as_mut_ptr().add(i*(BASE_L-1)+1)).collect::<Vec<_>>();
 
         //(0..self.len()).into_par_iter().map(|i| {
-        let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+        //let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+        let _ = d_ad_like_d_grad_form.chunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
             //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
             //let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
             
@@ -1593,6 +1595,7 @@ impl<'a> MotifSet<'a> {
         for mot in self.set.iter() {
             self.signal += &(mot.generate_waveform(self.data, self.background.kernel_ref()));
         }
+        self.ln_post = None;
     }
 
     fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
@@ -1876,7 +1879,8 @@ impl<'a> MotifSet<'a> {
 
            let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
 
-           let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
+           //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
+           let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {
                let mut to_add = base_set.clone();
                let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1, self.data.seq());
                let lnlike = to_add.insert_motif(add_mot, id);
@@ -1966,7 +1970,9 @@ impl<'a> MotifSet<'a> {
 
        let total_len = 1+(BASE_L-1)*self.set[k].len();
 
-       let momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.get().expect("no writes expected now").sample(rng)).collect();
+       let mut momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.get().expect("no writes expected now").sample(rng)).collect();
+
+       momentum[0] /= 16384.;//Peak height needs to move more slowly than other parameters, I think
 
        let mut prior_set = self.clone();
        
@@ -2121,7 +2127,7 @@ impl<'a> MotifSet<'a> {
 
 impl Debug for MotifSet<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, " ln_post: {:?}, background: {:?} \n set: {:#?}", self.ln_post, self.background, self.set)
+        write!(f, " ln_post: {:?}, \n set: {:#?}", self.ln_post, self.set)
     }
 }
 
@@ -3113,8 +3119,8 @@ mod tester{
         
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
-        let block_n: usize = 3;
-        let u8_per_block: usize = 90;
+        let block_n: usize = 60;
+        let u8_per_block: usize = 160;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -3143,8 +3149,12 @@ mod tester{
         println!("CV");
         let analytical_grad = motif_set.gradient();
         println!("AG");
+        println!("{:?}", analytical_grad);
         let numerical_grad = motif_set.numerical_gradient();
         println!("NG");
+
+        let mut added_to_motif_set = motif_set.clone();
+        let mut added_to_motif_set_block = motif_set.clone();
 
         let b: Base = Base::new([0.1, 0.2, 0.3, 0.4]);
 
@@ -3227,8 +3237,36 @@ mod tester{
 
         }
 
-        
+        for i in 0..added_to_motif_set.set.len() {
 
+            let to_add = motif_set.set[i].safe_single_motif_grad(&motif_set.signal, motif_set.data, motif_set.background);
+
+            println!("AG {}", i);
+            println!("{:?}", to_add);
+
+            unsafe{
+            
+                added_to_motif_set.set[i] = added_to_motif_set.set[i].add_momentum(0.01, &to_add, false);
+                added_to_motif_set_block.set[i] = added_to_motif_set_block.set[i].add_momentum(0.01, &to_add, true);
+            }
+
+
+        }
+
+        added_to_motif_set.recalc_signal();
+        let _ = added_to_motif_set.ln_posterior();
+        added_to_motif_set_block.recalc_signal();
+        let _ = added_to_motif_set_block.ln_posterior();
+       
+        let diff_unblocked = &added_to_motif_set.signal-&motif_set.signal;
+        let diff_blocked = &added_to_motif_set_block.signal-&motif_set.signal;
+
+        let total_unblocked_diff = diff_unblocked.read_wave().iter().map(|&a| a.powi(2)).sum::<f64>().sqrt();
+        let total_blocked_diff = diff_blocked.read_wave().iter().map(|&a| a.powi(2)).sum::<f64>().sqrt();
+
+        println!("Original Set {:?}", motif_set);
+        println!("unblocked diff wave {}. RMSD {}. Set: {:?}", total_unblocked_diff,total_unblocked_diff/(diff_unblocked.read_wave().len() as f64), added_to_motif_set);
+        println!("blocked diff wave {}. RMSD {}. Set: {:?}", total_blocked_diff,total_blocked_diff/(diff_blocked.read_wave().len() as f64), added_to_motif_set_block);
 
         let mut grad_reses: Vec<Result<(), String>> = Vec::with_capacity(analytical_grad.len());
         println!("{} {} {} {}", analytical_grad.len(), mot.len()*(BASE_L-1)+1, mot_a.len()*(BASE_L-1)+1, mot.len()*(BASE_L-1)+1+mot_a.len()*(BASE_L-1)+1);
