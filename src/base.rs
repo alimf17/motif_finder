@@ -1346,8 +1346,8 @@ impl Motif {
         let n = 1+self.len()*(BASE_L-1);
 
 
-        //let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
-        let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_iter().map(|i| {
+        let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
+        //let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_iter().map(|i| {
             if i == 0 {
                 let d_noise_d_h = self.no_height_waveform_from_binds(&binds, data, background.kernel_ref())
                                                .account_auto(background);
@@ -1374,8 +1374,8 @@ impl Motif {
         //let grad_raw_ptrs = (0..self.len()).map(|i| d_ad_like_d_grad_form.as_mut_ptr().add(i*(BASE_L-1)+1)).collect::<Vec<_>>();
 
         //(0..self.len()).into_par_iter().map(|i| {
-        //let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
-        let _ = d_ad_like_d_grad_form.chunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+        let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
+        //let _ = d_ad_like_d_grad_form.chunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
             //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
             //let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
             
@@ -1879,8 +1879,8 @@ impl<'a> MotifSet<'a> {
 
            let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
 
-           //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
-           let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {
+           let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
+           //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {
                let mut to_add = base_set.clone();
                let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1, self.data.seq());
                let lnlike = to_add.insert_motif(add_mot, id);
@@ -2692,6 +2692,11 @@ impl SetTraceDef {
 
     }
 
+    pub fn reduce(&mut self, max_elements: usize) {
+        if self.trace.len() >= max_elements {
+            let _ = self.trace.drain(max_elements..);
+        }
+    }
     pub fn len(&self) -> usize {
         self.trace.len()
     }

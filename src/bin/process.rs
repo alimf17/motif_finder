@@ -80,6 +80,7 @@ pub fn main() {
     }
 
 
+    let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
@@ -103,7 +104,8 @@ pub fn main() {
                                                                           .expect("All read in files must be correct json!"));
 
         for file_name in iter_files {
-            let interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+            let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+            interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
 
