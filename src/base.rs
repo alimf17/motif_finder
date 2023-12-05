@@ -222,6 +222,9 @@ impl Base {
 
         let mut props = props;
 
+        #[cfg(test)]
+        println!("Base props {:?}", props);
+
         let mut any_neg: bool = false;
 
         for i in 0..props.len() {
@@ -229,6 +232,7 @@ impl Base {
         }
         
         if any_neg{
+           //println!("props off {:?}", props);
            panic!("All base entries must be positive!"); 
         }
 
@@ -3108,6 +3112,74 @@ mod tester{
         println!("end simp {:?} prop_end_simp {:?}", confine_end_simp, [5_f64/9., 0., SQRT_2/3.-(2.*SQRT_2)/9.]);
         
         //println!("start {:?} back_to_start {:?}", confine_start, should_start);
+
+        //let random_base_dist = SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid");
+
+        let length_x_to_test: usize = 1000;
+        //let xs_on_t_face = (0..length_x_to_test).map(|i| SQRT_2*(i as f64)/(length_x_to_test as f64)-(SQRT_2/3.0)).collect::<Vec<f64>>();
+        //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
+
+
+        let random_base_dist = SymmetricBaseDirichlet::new(0.001).expect("obviously valid");
+
+        for i in 0..100000 {
+            let b = random_base_dist.sample(&mut rng);
+            println!("Base {:?}", b);
+            let f = b.as_simplex();
+            println!("back to simplex {:?}", f);
+            println!("base once more {:?}", Base::simplex_to_base(&f));
+        }
+
+        let s = [-SQRT_2/3., -0.01, -0.3333333333333];
+        println!("simplex {:?}", s);
+
+        let b = Base::simplex_to_base(&s);
+
+        println!("Base tr {:?}", b);
+
+        let s2 = b.as_simplex();
+        println!("simplex again {:?}", s2);
+        println!("base once more {:?}",Base::simplex_to_base(&s2));
+
+        let b3 = b.add_in_hmc([0.00001*(-1.0), 0.0, 0.0], false);
+        println!("b3 {:?}", b3);
+        let b3 = b.add_in_hmc([0.0, 0.0, 0.00001*(-1.0)], false);
+        println!("b4 {:?}", b3);
+        let b3 = b.add_in_hmc([1./0.00001*(-1.0), 1.0, 1./0.00001*(-1.0)], true);
+        println!("b5 {:?}", b3);
+        
+        for p in SIMPLEX_VERTICES_POINTS {
+
+            println!("point {:?}", p);
+            let mut b = Base::simplex_to_base(&p);
+            for _ in 0..10 {
+                println!("Base {:?}", Base::simplex_to_base(&p));
+                let f = b.as_simplex();
+                println!("back to simplex {:?}", f);
+                b = Base::simplex_to_base(&f);
+                println!("base once more {:?}", b);
+
+            }
+            let mut to_add = b.as_simplex();
+            let _ = to_add.iter_mut().map(|a| {*a = *a/100.;}).collect::<Vec<_>>();
+
+            println!("trying to add {:?}", b.add_in_hmc(to_add, true));
+        }
+
+        /*for i in 0..length_x_to_test {
+
+            for j in i..(2*length_x_to_test-i) {
+                
+                //let a_base_vec: [f64; 3] = [xs_on_t_face[i], most_ys_on_t_face[j], -1.0/3.0];
+                let a_base_vec: [f64; 3] = [SQRT_2*(i as f64)/(length_x_to_test as f64)-(SQRT_2/3.0), (SQRT_2/SQRT_3)*(1.0-(j as f64)/(length_x_to_test as f64)), -1.0/3.0];
+                println!("point {:?}", a_base_vec);
+                println!("Base {:?}", Base::simplex_to_base(&a_base_vec));
+
+            }
+        }*/
+
+
+
 
 
 
