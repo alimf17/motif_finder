@@ -471,7 +471,7 @@ impl ::rand::distributions::Distribution<Base> for SymmetricBaseDirichlet {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
         //Note a small optimization: we don't actually divide by the sum of the samples here. 
         //This is because Base's implementation automatically regularizes its inputs for us
-        Base::new((0..BASE_L).into_iter().map(|_| self.gamma_sample.sample(rng)).collect::<Vec<_>>().try_into().expect("We know the type and amount of elements in this vec"))
+        Base::new(core::array::from_fn(|_| self.gamma_sample.sample(rng)))
     }
 
 }
