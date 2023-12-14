@@ -216,11 +216,11 @@ impl<'a> Waveform<'a> {
     //SAFETY: block must be less than the number of blocks
     //        center must be less than the number of bps in the blockth block
     //        the length of peak MUST be strictly less than the length of the smallest data block
-    pub unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
+    pub(crate) unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
 
 
-        //Given how we construct kernels, this will never need to be rounded
+        //Given how we construct kernels, this will never need to be rounded: they always have an odd number of data points
         let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
         let cc = (place_bp).rem_euclid(self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
        
@@ -229,7 +229,7 @@ impl<'a> Waveform<'a> {
         let min_kern_bp: usize = max(0, place_bp) as usize;
         let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
                                                                                  //But if it is, panicking is appropriate: 
-                                                                                 //center would necessarily be much bigger than the block length
+                                                                                 //center would necessarily be much bigger than the block length, which violates our safety invariant
  
         //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
         //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
@@ -498,7 +498,7 @@ impl<'a, 'b> AddAssign<&'b Waveform<'b>> for Waveform<'a> {
         let n = self.wave.len();
 
 
-        //If we have the same sequence pointer and the same spacer, our lengths are provably always identical
+        //SAFETY: If we have the same sequence pointer and the same spacer, our lengths are provably always identical
         assume!(unsafe: other_wave.len() == n);
 
         for i in 0..n {
@@ -545,7 +545,7 @@ impl<'a, 'b> SubAssign<&'b Waveform<'b>> for Waveform<'a> {
         
         let n = self.wave.len();
 
-        //If we have the same sequence pointer and the same spacer, our lengths are always identical
+        //SAFETY: If we have the same sequence pointer and the same spacer, our lengths are always identical
         assume!(unsafe: other_wave.len() == n);
         
         for i in 0..n {

@@ -150,7 +150,7 @@ pub enum Bp {
 
 impl From<Bp> for usize {
     fn from(bp: Bp) -> Self {
-        //SAFETY: Bp always corresponds to a valid usize
+        //SAFETY: Bp is repr to a valid usize
         unsafe{std::mem::transmute::<Bp, usize>(bp)}
     }
 }
@@ -914,7 +914,7 @@ impl Motif {
     }
 
     //SAFETY: Momentum MUST have a length equal to precisely 1+(BASE_L-1)*self.len()
-    pub unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
+    pub(crate) unsafe fn add_momentum(&self, eps: f64, momentum: &[f64], confine_base: bool) -> Self {
 
         let mut new_mot = self.clone();
         
@@ -1019,8 +1019,7 @@ impl Motif {
 
     //BINDING FUNCTIONS
 
-    //SAFETY: If kmer is not the same length as the pwm, or if it doesn't use
-    //        all values < BASE_L, this will produce undefined behavior
+    //SAFETY: If kmer is not the same length as the pwm, this will produce undefined behavior
     unsafe fn prop_binding(&self, kmer: &[Bp]) -> (f64, bool) { 
         
 
@@ -1029,12 +1028,10 @@ impl Motif {
         let mut bind_forward: f64 = 1.0;
         let mut bind_reverse: f64 = 1.0;
 
-        unsafe{
         for i in 0..self.len() {
             bind_forward *= self.pwm[i][*kmer.get_unchecked(i)];
             //bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
             bind_reverse *= self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
-        }
         }
 
         let reverse: bool = bind_reverse > bind_forward;
@@ -1085,10 +1082,6 @@ impl Motif {
                
                 //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                 let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
-
-                //SAFETY: this is one of places where we rely on Sequence being implemented correctly 
-                //        in particular, code_to_bases should never be able to return a value >= 
-                //        BASE_L in its implementation.
                 (bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) };
                 
             }
@@ -1140,7 +1133,8 @@ impl Motif {
 
 
 
-    //NOTE: if data does not point to the same sequence that self does, this will break. HARD. 
+    //TODO: These waveform functions are currently UNSOUND, as it is possible to construct a Kernel for a sequence which is too large
+    //      for a sequence block
     pub fn generate_waveform<'a>(&self, data: &'a Waveform, unit_kernel: &Kernel) -> Waveform<'a> {
 
         let mut occupancy_trace: Waveform = data.derive_zero();
@@ -1157,11 +1151,13 @@ impl Motif {
             for j in 0..(lens[i]-self.len()) {
                 if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
                     actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height) ;
-                    //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
+                    
+                    //SAFETY: 
+                    //  -block = i, which is always less than the number of sequence blocks
+                    //  -center = j, which is always less than the number of bps in the Sequence if Sequence is correctly constructed
+                    //  -
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
-                    //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/data.spacer()]);
-                    //count+=1;
                 }
             }
         }
@@ -4191,6 +4187,8 @@ mod tester{
             for j in 0..(bp_per_block-motif.len()) {
 
                 //let test_against = motif.prop_binding(&VecDeque::from(sequence.return_bases(i, j, motif.len())));
+                //SAFETY: sequence.return_bases is called with motif.len() as its length
+                //        and always called so that we have that many bps left available
                 let test_against = unsafe{ motif.prop_binding(&(sequence.return_bases(i, j, motif.len())))};
                 assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
                 assert!(binds.1[i*bp_per_block+j] == test_against.1);
