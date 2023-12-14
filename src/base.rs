@@ -3,6 +3,7 @@ use std::{f64, fmt, fs};
 use std::error::Error;
 use std::ops::{Index, IndexMut};
 use std::hint::unreachable_unchecked;
+use std::io::{Read, Write};
 //use std::time::{Duration, Instant};
 
 use core::fmt::{Debug, Formatter};
@@ -2427,6 +2428,21 @@ impl<'a> SetTrace<'a> {
         self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
 
     }
+    
+    pub fn push_last_state_from_bincode<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>,bincode_file: &str) {
+
+
+        let mut bincode_file_handle = fs::File::open(bincode_file).expect("Binarray file MUST be valid!");
+
+        let mut buffer: Vec<u8> = Vec::new();
+
+        bincode_file_handle.read_to_end(&mut buffer);
+        
+        let prior_state: MotifSetDef = bincode::deserialize(&buffer).expect("Binarray file MUST be a valid motif set!");
+
+        self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
+
+    }
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
@@ -2486,37 +2502,35 @@ impl<'a> SetTrace<'a> {
 
     pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
 
-        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
-        
-        match &self.trace[0] {
-        
-            AnyMotifSet::Active(set) => {
-                let init_set: MotifSetDef = MotifSetDef::from(set);
-                fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
-            },
-            AnyMotifSet::Passive(set) => {fs::write(savestate_file.as_str(), 
-                                                    serde_json::to_string(&set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");},
-        };
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+       
+        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+ 
+        let mut buffer: Vec<u8> = bincode::serialize( &self.trace[0].give_stored()).expect("serializable");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
     }
     
     pub fn save_final_state(&self, output_dir: &str, run_name: &str) {
 
-        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.json";
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+       
+        if self.trace.last().is_none() {warn!("trace is empty!"); return;}
+       
         
-        match self.trace.last() {
+        let last = self.trace.last().unwrap();
         
-            Some(AnyMotifSet::Active(set)) => {
-                let init_set: MotifSetDef = MotifSetDef::from(set);
-                fs::write(savestate_file.as_str(), serde_json::to_string(&init_set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
-            },
-            Some(AnyMotifSet::Passive(set)) => {fs::write(savestate_file.as_str(), 
-                                                    serde_json::to_string(&set).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
-            },
-            None => warn!("trace is empty!"),
-        };
+        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+        
+        let mut buffer: Vec<u8> = bincode::serialize( &last.give_stored()).expect("serializable");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
     }
        
     pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+        let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
+        let mut outfile_handle = fs::File::create(trace_file).expect("Need to give a valid file to write to or inference is pointless");
 
         let len_trace = self.trace.len();
 
@@ -2524,14 +2538,15 @@ impl<'a> SetTrace<'a> {
         let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).map(|a| a.give_stored()).collect();
 
 
-        let history = SetTraceDef {
+        let mut buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
             all_data_file: self.all_data_file.clone(),
             trace: trace, 
-        };
+        })).expect("serializable");
 
-        let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.json",output_dir,run_name,zeroth_step);
+ 
+        //fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
 
-        fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
+        outfile_handle.write(&buffer).expect("buffer should write");
 
         self.save_initial_state(output_dir, run_name);
     }

@@ -80,13 +80,13 @@ pub fn main() {
     }
 
 
-    let max_max_length = 100000;
+    //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
         //let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.json")).unwrap();
-        let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"\\d{7}.json")).unwrap();
+        let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"00\\d{5}.json")).unwrap();
         let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
         
         let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -105,14 +105,14 @@ pub fn main() {
 
         for file_name in iter_files {
             let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
-            interim.reduce(max_max_length);
+            //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
 
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
-            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}d{{7}}.json", bead, '\\').as_str())).unwrap();
+            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}00d{{5}}.json", bead, '\\').as_str())).unwrap();
             let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
             let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();

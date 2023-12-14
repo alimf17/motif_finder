@@ -1440,6 +1440,7 @@ dependencies = [
  "argmin",
  "argmin-math",
  "assume",
+ "bincode",
  "criterion",
  "fastrand",
  "flamegraph",
