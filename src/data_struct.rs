@@ -8,6 +8,8 @@ use crate::waveform::{Waveform, WaveformDef, Background};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::base::{BPS, BASE_L, Motif, StrippedMotifSet, SetTrace};
 
+use thiserror::Error;
+
 use statrs::distribution::{Continuous, StudentsT, Normal};
 use statrs::function::gamma::*;
 use statrs::statistics::*;
@@ -49,6 +51,11 @@ pub struct AllData {
     data: WaveformDef, 
     background: Background
 
+}
+
+pub struct AllDataUse<'a> {
+    data: Waveform<'a>, 
+    background: &'a Background,
 }
 
 struct FitTDist<'a> {
@@ -148,7 +155,7 @@ impl AllData {
     }
 
     //Important getters for the other structs to access the data from. 
-    pub fn validated_data(&self) -> Waveform {
+    pub(crate) fn validated_data(&self) -> Result<Waveform, SequenceWaveformIncompatible> {
 
         let len = self.data.len();
         let spacer = self.data.spacer();
@@ -157,11 +164,14 @@ impl AllData {
 
         //This is our safety check for our data
         if len != (point_lens.last().unwrap()+start_dats.last().unwrap()) {
-            panic!("This sequence and waveform combination is invalid!");
+            return Err(SequenceWaveformIncompatible);
         }
 
+        //SAFETY: make_dimension_arrays yields the correct blocking, and 
+        //        we already errorred out if such correct blocking of the 
+        //        waveform is impossible
         unsafe{
-            self.data.get_waveform(point_lens, start_dats, &self.seq)
+            Ok(self.data.get_waveform(point_lens, start_dats, &self.seq))
         }
 
     }
@@ -262,15 +272,15 @@ impl AllData {
     //         but the only possible fix here would have to not know that one of the chromosomes is circular.
     //         If it's really important that you need to do inference on that chromosome with circularity, 
     //         do multiple inferences.
-    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Vec<Option<usize>> {
+    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Result<Vec<Option<usize>>, FastaError> {
 
-        let file_string = fs::read_to_string(fasta_file_name).expect("Invalid FASTA file name!");
+        let file_string = fs::read_to_string(fasta_file_name).expect("Invalid FASTA file name!"); //TODO: make this a FastaError variant
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
         
         //We want to trim the whitespace from the bottom of the Fasta file
         //From the top can be dealt with by the user
         while fasta_as_vec.last()
-              .expect("FASTA file should not be empty or all whitespace!")
+              .expect("FASTA file should not be empty or all whitespace!") //TODO: make a "FASTA file should not be be empty" FastaError variant
               .chars().all(|c| c.is_whitespace()) {_ = fasta_as_vec.pop();}
 
 
@@ -281,7 +291,7 @@ impl AllData {
         let first_line = fasta_iter.next().expect("FASTA file should not be empty!");
 
         if !first_line.1.starts_with('>') {
-            panic!("{}", ILLEGAL_FASTA_FILE_PANIC);
+            panic!("{}", ILLEGAL_FASTA_FILE_PANIC); //Make a "FASTA file must start with a line that beings with '>'" error
         }
 
         for (line_pos, line) in fasta_iter {
@@ -296,7 +306,7 @@ impl AllData {
                 } else {
                     base_vec.push(Some(*((*GET_BASE_USIZE)
                             .get(&chara)
-                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1)))))); 
+                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1)))))); //TODO: make a "FASTA file has invalid bses in all these positions" FastaError variant
                 }
             }
 
@@ -318,8 +328,8 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) -> (Vec<Vec<(usize, f64)>>, Background) {
-        let file_string = fs::read_to_string(data_file_name).expect("Invalid data file name!");
+    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background), DataProcessError> {
+        let file_string = fs::read_to_string(data_file_name).expect("Invalid data file name!"); //TODO: Make std::io::Error a variant of DataProcessError
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
         if data_as_vec.last().unwrap() == &"" {
@@ -332,12 +342,12 @@ impl AllData {
         let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
         let mut data_iter = data_as_vec.iter();
 
-        let first_line = data_iter.next().expect("Data file should not be empty!");
+        let first_line = data_iter.next().expect("Data file should not be empty!");//TODO: make an EmptyFile variant of DataProcessError
 
         let header = first_line.split(" ").collect::<Vec<_>>();
 
         if (header[0] != "loc") || (header[1] != "data") {
-            panic!("Data file is not correctly formatted!");
+            panic!("Data file is not correctly formatted!"); //TODO: make a DataFileBadFormat Error, which has a variant "Header is incorrect"
         }
 
         
@@ -347,11 +357,11 @@ impl AllData {
 
             let mut line_iter = line.split(" ");
 
-            let loc: usize = line_iter.next().expect(format!("Line {} is empty!", line_num).as_str())
-                                      .parse().expect(format!("Line {} does not start with a location in base pairs!", line_num).as_str());
+            let loc: usize = line_iter.next().expect(format!("Line {} is empty!", line_num).as_str()) //TODO: make a DataFileBadFormat Error, which has a variant for "These lines are empty"
+                                      .parse().expect(format!("Line {} does not start with a location in base pairs!", line_num).as_str()); //TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have a location in base pairs"
 
-            let data: f64 = line_iter.next().expect(format!("Line {} does not have data after location!", line_num).as_str())
-                                     .parse().expect(format!("Line {} does not have data parsable as a float after its location!", line_num).as_str());
+            let data: f64 = line_iter.next().expect(format!("Line {} does not have data after location!", line_num).as_str()) //TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have data after the location" variant
+                                     .parse().expect(format!("Line {} does not have data parsable as a float after its location!", line_num).as_str()); ////TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have float parsable data after the location" variant
 
             raw_locs_data.push((loc,data));
 
@@ -364,7 +374,7 @@ impl AllData {
         let last_loc: usize = raw_locs_data.last().unwrap().0;
 
 
-        if last_loc > sequence_len {
+        if last_loc > sequence_len { //TODO: make a BadData Error, with a variant "Sequence locations too large for sequence"
             panic!("This data has sequence locations too large to correspond to your sequence!");
         }
 
@@ -568,11 +578,11 @@ impl AllData {
 
         println!("sorted data data away from background inference data");
 
-        if ar_blocks.len() == 0 {
+        if ar_blocks.len() == 0 { //Make a BadData error, with the variant "Not enough null data to infer the background distribution"
             panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
         }
 
-        if data_blocks.len() == 0 {
+        if data_blocks.len() == 0 { ////Make a BadData error, with the variant "no peak data for data"
             panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
         }
 
@@ -1057,6 +1067,65 @@ impl AllData {
         trimmed_data
 
     }
+
+}
+
+pub enum FastaError {    
+    #[error(transparent)]
+    InvalidFile(#[from] std::io::Error),
+    #[error(transparent)]
+    BlankFile(#[from] EmptyFastaError), 
+    BadFastaInput(#[from] InvalidBasesError),
+}
+
+
+#[derive(Error, Debug)]
+struct EmptyFastaError {}
+
+impl std::fmt::Display for EmptyFastaError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace!")}
+}
+
+#[derive(Error, Debug)]
+struct InvalidBasesError {
+    bad_base_locations: Vec<(u64, u64)>, 
+    too_many_bad_bases: bool,
+}
+
+impl std::fmt::Display for InvalidBasesError{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.too_many_bad_bases { write!(f, "Too many bad bases for this architecture to track\n")?;}
+        for &(line, position) in bad_base_locations.iter() {
+            write!(f, "Invalid base on line {}, position {}", line+1, position+1)?;
+        }
+    }
+}
+
+
+
+
+
+impl<'a> AllDataUse<'a> {
+
+    pub fn new(reference_struct: &'a AllData) -> Result<Self<'a>, Box<dyn error::Error>> {
+        let wave = reference_struct.validated_data();
+       
+        //We already panicked if it's impossible for the IP data
+        //and sequence information to agree on their block lengths
+
+        let background = reference_struct.background();
+
+        let kernel_width = background.kernel.len();
+
+        let sequence_lengths = reference_struct.seq.block_lens();
+
+
+
+
+
+
+    }
+
 
 }
 

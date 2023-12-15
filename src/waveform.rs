@@ -597,7 +597,7 @@ impl WaveformDef {
     //        point_lens.last().unwrap()+start_dats.last().unwrap(). 
     //
     //ACCURACY:  Make sure that wave is in fact organized into the blocks implied by point_lens and start_dats.
-    pub unsafe fn get_waveform<'a>(&self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
+    pub(crate) unsafe fn get_waveform<'a>(&self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
 
         Waveform {
 
