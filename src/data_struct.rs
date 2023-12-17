@@ -1,4 +1,4 @@
-use std::{f64, fs};
+use std::{f64, fs, fmt, error};
 use std::collections::HashMap;
 //use std::time::{Duration, Instant};
 
@@ -107,7 +107,7 @@ impl AllData {
     //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>) -> (Self, String) {
+                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>) -> Result<(Self, String), _> {
 
 
         let file_out = format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
@@ -116,12 +116,12 @@ impl AllData {
         let check_initialization = fs::read_to_string(file_out.as_str());
 
         match check_initialization {
-            Ok(try_json) => return (serde_json::from_str(try_json.as_str()).expect("Provided data file not in proper format for inference!"), file_out),
+            Ok(try_json) => return Ok((serde_json::from_str(try_json.as_str()).expect("Provided data file not in proper format for inference!"), file_out)),
             Err(_) => (), //We just want the full preprocessing to try to continue if we get an error from read_to_string
         };
 
         println!("checked if initialized and isn't");
-        let pre_sequence = Self::process_fasta(fasta_file, *null_char);
+        let pre_sequence = Self::process_fasta(fasta_file, *null_char)?;
 
         println!("processed fasta");
         let sequence_len = pre_sequence.len();
@@ -149,7 +149,7 @@ impl AllData {
             Err(error) => unreachable!("Something deeply wrong in the data has occurred. It shouldn't be possible to get here. {:?}", error),
         };
 
-        (full_data, file_out)
+        Ok((full_data, file_out))
 
 
     }
@@ -274,25 +274,36 @@ impl AllData {
     //         do multiple inferences.
     fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Result<Vec<Option<usize>>, FastaError> {
 
-        let file_string = fs::read_to_string(fasta_file_name).expect("Invalid FASTA file name!"); //TODO: make this a FastaError variant
+        let file_string = match fs::read_to_string(fasta_file_name) {
+
+            Ok(file) => file, 
+            Err(E) => return Err(FastaError::InvalidFile(E)),
+        };//TODO: make this a FastaError variant
+        
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
         
         //We want to trim the whitespace from the bottom of the Fasta file
         //From the top can be dealt with by the user
-        while fasta_as_vec.last()
-              .expect("FASTA file should not be empty or all whitespace!") //TODO: make a "FASTA file should not be be empty" FastaError variant
-              .chars().all(|c| c.is_whitespace()) {_ = fasta_as_vec.pop();}
+
+        let mut fasta_is_empty_or_blank = true;
+        while let Some(line) = fasta_as_vec.last() {
+            if line.chars().all(|c| c.is_whitespace()) {_ = fasta_as_vec.pop();}
+            else { fasta_is_empty_or_blank = false; break; }
+        }
+        if fasta_is_empty_or_blank { return Err(FastaError::BlankFile(EmptyFastaError));}
 
 
         let mut base_vec: Vec<Option<usize>> = Vec::new();
        
         let mut fasta_iter = fasta_as_vec.iter().enumerate();
 
-        let first_line = fasta_iter.next().expect("FASTA file should not be empty!");
+        let first_line = fasta_iter.next().expect("We already returned an error if the fasta file is empty or is all whitespace");
 
-        if !first_line.1.starts_with('>') {
-            panic!("{}", ILLEGAL_FASTA_FILE_PANIC); //Make a "FASTA file must start with a line that beings with '>'" error
-        }
+        if !first_line.1.starts_with('>') { return Err(FastaError::BadFastaStart(MaybeNotFastaError)); }
+
+        let mut has_a_valid_bp = false;
+
+        let mut potential_invalid_bp_err: Option<InvalidBasesError> = None;
 
         for (line_pos, line) in fasta_iter {
 
@@ -301,21 +312,41 @@ impl AllData {
             }
             for (char_pos, chara) in line.chars().enumerate(){
 
-                if Some(chara) == null_char {
-                    base_vec.push(None);
-                } else {
-                    base_vec.push(Some(*((*GET_BASE_USIZE)
-                            .get(&chara)
-                            .expect(&(format!("Invalid base on line {}, position {}", line_pos+1, char_pos+1)))))); //TODO: make a "FASTA file has invalid bses in all these positions" FastaError variant
-                }
-            }
+                let (valid_base_or_known_null, to_push) = {
+                    let mut valid_answer = true;
+                    let can_push = GET_BASE_USIZE.get(&chara).copied();
+                    if can_push.is_none() {valid_answer = Some(chara) == null_char;
+                    } else {has_a_valid_bp |= true;}
 
+                    (valid_answer, can_push)
+                };
+
+                match (valid_base_or_known_null, potential_invalid_bp_err.is_none()) {
+                    (true, true) => { base_vec.push(to_push);}, 
+                    (true, false) => {},
+                    (false, true) => { potential_invalid_bp_err = Some(InvalidBasesError::new(line_pos as u64, char_pos as u64));}, //If we panic at line_pos or char_pos's conversion, your file is WAY too big
+                    (false, false) => {
+                        if !(potential_invalid_bp_err.expect("Condition makes this unwrap infallible").too_many_bad_bases) {
+                            match potential_invalid_bp_err.iter_mut().next() {
+                                Some(a) => a.add_invalid_if_possible(line_pos as u64, char_pos as u64),
+                                None => unreachable!(),
+                            };
+                        }
+                    },
+                };
+            }
         }
+
+        if !has_a_valid_bp { return Err(FastaError::BlankFile(EmptyFastaError));}
+        if let Some(invalid_bp) = potential_invalid_bp_err {
+            return Err(FastaError::BadFastaInput(invalid_bp));
+        }
+
 
 
         //This regular expression cleans the fasta_file_name to remove the last extension
         //Examples: ref.fasta -> ref, ref.txt.fasta -> ref.txt, ref_Fd -> ref_Fd
-        base_vec
+        Ok(base_vec)
     }
 
     //TODO: I need a data processing function that reads in a CSV along with a
@@ -328,7 +359,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background), DataProcessError> {
+    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) ->(Vec<Vec<(usize, f64)>>, Background) { //Result<(Vec<Vec<(usize, f64)>>, Background), DataProcessError> {
         let file_string = fs::read_to_string(data_file_name).expect("Invalid data file name!"); //TODO: Make std::io::Error a variant of DataProcessError
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
@@ -1070,20 +1101,31 @@ impl AllData {
 
 }
 
+#[derive(Error, Debug)]
 pub enum FastaError {    
     #[error(transparent)]
     InvalidFile(#[from] std::io::Error),
     #[error(transparent)]
-    BlankFile(#[from] EmptyFastaError), 
+    BlankFile(#[from] EmptyFastaError),
+    #[error(transparent)]
+    BadFastaStart(#[from] MaybeNotFastaError),
+    #[error(transparent)]
     BadFastaInput(#[from] InvalidBasesError),
 }
 
 
 #[derive(Error, Debug)]
-struct EmptyFastaError {}
+struct EmptyFastaError;
 
 impl std::fmt::Display for EmptyFastaError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace!")}
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace, and must have at least one line with valid base pairs in it!")}
+}
+
+#[derive(Error, Debug)]
+struct MaybeNotFastaError;
+
+impl std::fmt::Display for MaybeNotFastaError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file first line must start with a '>'! Are you certain this is a FASTA file?") }
 }
 
 #[derive(Error, Debug)]
@@ -1092,11 +1134,35 @@ struct InvalidBasesError {
     too_many_bad_bases: bool,
 }
 
+impl InvalidBasesError {
+
+    fn new(line: u64, pos: u64) -> Self {
+        Self {
+            bad_base_locations: vec![(line, pos)],
+            too_many_bad_bases: false,
+        }
+    }
+
+    fn add_invalid_if_possible(&mut self, line: u64, pos: u64) {
+        
+        if let Err(tuple) = self.bad_base_locations.push_within_capacity((line, pos)) {
+            if self.too_many_bad_bases == true {return;}
+            let check = self.bad_base_locations.try_reserve(1);
+            match check {
+                Ok(()) => {self.bad_base_locations.push_within_capacity(tuple).expect("Only runs if reserve successful!");}
+                Err(_) => {self.too_many_bad_bases = true;}
+            }
+        }
+
+    }
+
+}
+
 impl std::fmt::Display for InvalidBasesError{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.too_many_bad_bases { write!(f, "Too many bad bases for this architecture to track\n")?;}
-        for &(line, position) in bad_base_locations.iter() {
-            write!(f, "Invalid base on line {}, position {}", line+1, position+1)?;
+        for &(line, position) in self.bad_base_locations.iter() {
+            write!(f, "Invalid base on line {}, position {}\n", line+1, position+1)?;
         }
     }
 }
@@ -1107,7 +1173,7 @@ impl std::fmt::Display for InvalidBasesError{
 
 impl<'a> AllDataUse<'a> {
 
-    pub fn new(reference_struct: &'a AllData) -> Result<Self<'a>, Box<dyn error::Error>> {
+    pub fn new(reference_struct: &AllData) -> Result<Self, Box<dyn error::Error>> {
         let wave = reference_struct.validated_data();
        
         //We already panicked if it's impossible for the IP data
