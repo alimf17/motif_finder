@@ -135,7 +135,7 @@ impl AllData {
         println!("synchronized fasta and data");
         let full_data: AllData = AllData {seq: seq, data: data, background: background};
 
-        let wave = full_data.validated_data(); //This won't be returned: it's just a validation check.
+        let wave = full_data.validated_data()?; //This won't be returned: it's just a validation check.
 
         println!("validated data");
         //This probably isn't necessary, but helps ensure that the validation check doesn't get optimized away by the compiler
@@ -1101,6 +1101,27 @@ impl AllData {
 
 }
 
+impl<'a> AllDataUse<'a> {
+
+    pub fn new(reference_struct: &AllData) -> Result<Self, Box<dyn error::Error>> {
+        let wave = reference_struct.validated_data();
+       
+        //We already panicked if it's impossible for the IP data
+        //and sequence information to agree on their block lengths
+
+        let background = reference_struct.background();
+
+        let kernel_width = background.kernel.len();
+
+        let sequence_lengths = reference_struct.seq.block_lens();
+
+
+        todo!()
+    }
+
+
+}
+
 #[derive(Error, Debug)]
 pub enum FastaError {    
     #[error(transparent)]
@@ -1132,6 +1153,13 @@ impl std::fmt::Display for MaybeNotFastaError {
 struct InvalidBasesError {
     bad_base_locations: Vec<(u64, u64)>, 
     too_many_bad_bases: bool,
+}
+
+#[derive(Error, Debug)]
+struct SequenceWaveformIncompatible;
+
+impl std::fmt::Display for SequenceWaveformIncompatible {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "The sequence and the data you are using are incompatible!") }
 }
 
 impl InvalidBasesError {
@@ -1168,32 +1196,89 @@ impl std::fmt::Display for InvalidBasesError{
 }
 
 
+#[derive(Error, Debug)]
+enum DataProcessError {
+    #[error(transparent)]
+    InvalidFile(#[from] std::io::Error),
+    #[error(transparent)]
+    BlankFile(#[from] EmptyDataError),
+    #[error(transparent)]
+    BadDataFormat(#[from] DataFileBadFormat),
+}
+
+#[derive(Error, Debug)]
+struct EmptyDataError;
+impl std::fmt::Display for EmptyDataError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Data file should not be empty!")}
+}
+
+#[derive(Error, Debug)]
+struct DataFileBadFormat {
+    bad_header: bool, 
+    empty_lines: Vec<u64>,
+    no_location_lines: Vec<u64>, 
+    no_data_lines: Vec<u64>,
+}
+
+impl DataFileBadFormat {
+
+    fn new(bad_header: bool) -> Self {
+        Self {
+            bad_header: bad_header, 
+            empty_lines: Vec::new(),
+            no_location_lines: Vec::new(),
+            no_data_lines: Vec::new(),
+        }
+    }
+ 
+    fn add_problem_line(&mut self, empty_line: Option<u64>, locationless_line: Option<u64>, dataless_line: Option<u64>) {
+        if Some(empty) = empty_line { self.empty_lines.push(empty); }
+        if Some(locationless) = locationless_line { self.no_location_lines.push(locationless); }
+        if Some(dataless) = dataless_line { self.no_data_lines_lines.push(dataless); }
+    }
+}
+
+impl std::fmt::Display for DataFileBadFormat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Your data is formatted poorly:\n")?;
+        if self.bad_header { write!(f, "Your data header is incorrect: it must start 'loc data'\n")?;}
+        if self.empty_lines.len() > 0 {
+            write!(f, "You have empty lines at the following line numbers: {:?}\n", self.empty_lines.iter().map(|a| a+1).collect::<Vec<_>>());
+        }
+        if self.no_location_lines.len() > 0 {
+            write!(f, "You have lines that do not start with a valid location (a nonnegative integer) at the following line numbers: {:?}\n", self.no_location_lines.iter().map(|a| a+1).collect::<Vec<_>>());
+        }
+
+        if self.no_data_lines.len() > 0 {
+            write!(f, "You have lines that do not have valid data after the location at the following line numbers: {:?}\n", self.no_data_lines.iter().map(|a| a+1).collect::<Vec<_>>());
+        }
+    }
+}
 
 
+#[derive(Error, Debug)]
+enum BadDataSequenceSynchronization {
+    SequenceMismatch, 
+    NotEnoughNullData, 
+    NotEnoughPeakData, 
+    NeedDifferentExperiment, //This is NotEnoughNullData AND NotEnoughPeakData. You can't screw with peak_thresh to make this better: you're basically screwed and need a new set
+}
 
-impl<'a> AllDataUse<'a> {
+impl std::fmt::Display for BadDataSequenceSynchronization {
 
-    pub fn new(reference_struct: &AllData) -> Result<Self, Box<dyn error::Error>> {
-        let wave = reference_struct.validated_data();
-       
-        //We already panicked if it's impossible for the IP data
-        //and sequence information to agree on their block lengths
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 
-        let background = reference_struct.background();
+        match self {
 
-        let kernel_width = background.kernel.len();
-
-        let sequence_lengths = reference_struct.seq.block_lens();
-
-
-
-
-
-
+            BadDataSequenceSynchronization::SequenceMismatch => write!(f, "You have data in locations too large for your sequence!"),
+            BadDataSequenceSynchronization::NotEnoughNullData => write!(f, "Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!"),
+            BadDataSequenceSynchronization::NotEnoughPeakData => write!(f, "You do not have enough peak-like data that is within ungapped valid base pairs! Make peak_thresh smaller to allow more data to count as data!"),
+            BadDataSequenceSynchronization::NeedDifferentExperiment => write!(f, "You neither have enough null data nor enough peak data! This data can't have inference done on it! Supply a different data set!"),
+        }?;
     }
 
-
 }
+
 
 #[cfg(test)]
 mod tests{
