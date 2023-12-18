@@ -107,7 +107,7 @@ impl AllData {
     //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>) -> Result<(Self, String), _> {
+                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>) -> Result<(Self, String), AllProcessingError> {
 
 
         let file_out = format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
@@ -121,12 +121,15 @@ impl AllData {
         };
 
         println!("checked if initialized and isn't");
-        let pre_sequence = Self::process_fasta(fasta_file, *null_char)?;
+        let pre_sequence = Self::process_fasta(fasta_file, *null_char);
 
         println!("processed fasta");
-        let sequence_len = pre_sequence.len();
+        let sequence_len_or_fasta_error = match (pre_sequence).as_ref() { 
+            Some(seq_ref) => Some(seq.len()),
+            Err(E) => Err(E.clone()),
+        };
 
-        let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular, use_ar_model);
+        let (pre_data, background) = Self::process_data(data_file, sequence_len, fragment_length, spacing, is_circular, use_ar_model)?;
  
         println!("processed data");
 
@@ -155,7 +158,7 @@ impl AllData {
     }
 
     //Important getters for the other structs to access the data from. 
-    pub(crate) fn validated_data(&self) -> Result<Waveform, SequenceWaveformIncompatible> {
+    pub(crate) fn validated_data(&self) -> Result<Waveform, AllProcessingError> {
 
         let len = self.data.len();
         let spacer = self.data.spacer();
@@ -164,7 +167,7 @@ impl AllData {
 
         //This is our safety check for our data
         if len != (point_lens.last().unwrap()+start_dats.last().unwrap()) {
-            return Err(SequenceWaveformIncompatible);
+            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::SequenceMismatch));
         }
 
         //SAFETY: make_dimension_arrays yields the correct blocking, and 
@@ -359,8 +362,17 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, sequence_len: usize, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) ->(Vec<Vec<(usize, f64)>>, Background) { //Result<(Vec<Vec<(usize, f64)>>, Background), DataProcessError> {
-        let file_string = fs::read_to_string(data_file_name).expect("Invalid data file name!"); //TODO: Make std::io::Error a variant of DataProcessError
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) ->(Vec<Vec<(usize, f64)>>, Background) Result<(Vec<Vec<(usize, f64)>>, Background), AllProcessingError> {
+       
+        let att_file = fs::read_to_string(data_file_name);
+
+        if att_file.is_err() {
+            let err = DataProcessError::InvalidFile(att_file.unwrap_err());
+            return Err(err.collect_wrongdoing(possible_sequence_len));
+        }
+
+        let file_string = att_file.expect("We already returned if this was an error");
+
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
         if data_as_vec.last().unwrap() == &"" {
@@ -373,31 +385,74 @@ impl AllData {
         let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
         let mut data_iter = data_as_vec.iter();
 
-        let first_line = data_iter.next().expect("Data file should not be empty!");//TODO: make an EmptyFile variant of DataProcessError
+        let check_header = data_iter.next();
+
+        if check_header.is_err() {
+            let err = DataProcessError::BlankFile(EmptyDataError);
+            return Err(err.collect_wrongdoing(possible_sequence_len));
+        }
+
+        let first_line = check_header.expect("We already returned if this was an error");
 
         let header = first_line.split(" ").collect::<Vec<_>>();
 
+        let mut format_error: Option<DataFileBadFormat> = None;
         if (header[0] != "loc") || (header[1] != "data") {
-            panic!("Data file is not correctly formatted!"); //TODO: make a DataFileBadFormat Error, which has a variant "Header is incorrect"
+            format_error = Some(DataFileBadFormat::new(true)); //TODO: make a DataFileBadFormat Error, which has a variant "Header is incorrect"
         }
 
-        
+
+        if data_iter.peek().is_none() { return Err(DataProcessError::BlankFile(EmptyDataError).collect_wrongdoing(possible_sequence_len)); }
 
         //This gets us the raw data and location data, paired together and sorted
         for (line_num, line) in data_iter.enumerate() {
 
-            let mut line_iter = line.split(" ");
+            let mut line_iter = line.split_whitespace();
 
-            let loc: usize = line_iter.next().expect(format!("Line {} is empty!", line_num).as_str()) //TODO: make a DataFileBadFormat Error, which has a variant for "These lines are empty"
-                                      .parse().expect(format!("Line {} does not start with a location in base pairs!", line_num).as_str()); //TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have a location in base pairs"
+            let content_0 = line_iter.next();
 
-            let data: f64 = line_iter.next().expect(format!("Line {} does not have data after location!", line_num).as_str()) //TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have data after the location" variant
-                                     .parse().expect(format!("Line {} does not have data parsable as a float after its location!", line_num).as_str()); ////TODO: make a DataFileBadFormat Error, which has a variant for "these lines do not have float parsable data after the location" variant
+            if content_0.is_none() { 
+                format_error.add_problem_line(Some(line_num), None, None);
+                continue;
+            }
+
+
+            let loc: usize = match content_0.expect("Getting here requires content in the line").parse() {
+                Ok(l) => l,
+                Err() => { 
+                    format_error.add_problem_line(None, Some(line_num), None);
+                    continue; 
+                }, //This arm diverges, so so nothing else gets executed for this line if it goes wrong
+            };
+
+            let content_1 = line_iter.next();
+
+            if content_1.is_none() {       
+                format_error.add_problem_line(None, None, Some(line_num));
+                continue;
+            }
+
+            let data: f64 = match content_1.expect("Getting here requires content in the second part of the line").parse() {
+                Ok(d) => d,
+                Err() => {
+                    format_error.add_problem_line(None, None, Some(line_num));
+                    continue;
+                },
+            };
 
             raw_locs_data.push((loc,data));
 
         }
 
+        if let Some(bad_file) = format_error {
+            let err = DataProcessError::BadDataFormat(bad_file);
+            return Err(err.collect_wrongdoing(possible_sequence_len));
+        }
+
+        //We already returned if there were any data errors. Now we just check if we have sequence errors
+        if possible_sequence_len.is_err() { return Err(AllProcessingError::SequenceOnly(possible_sequence_len.unwrap_err())); }
+
+        //Between peeking the data_file iterator and the code to process it after, we know that we have at least ONE data point now
         raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         println!("Data sorted");
@@ -405,8 +460,12 @@ impl AllData {
         let last_loc: usize = raw_locs_data.last().unwrap().0;
 
 
-        if last_loc > sequence_len { //TODO: make a BadData Error, with a variant "Sequence locations too large for sequence"
-            panic!("This data has sequence locations too large to correspond to your sequence!");
+        //Note: this is the last possible place where possible_sequence_len can 
+        //      possibly be live. If it died before this, we already returned.
+        let sequence_len = possible_sequence_len.expect("We only get here if we didn't have an error");
+
+        if last_loc > sequence_len {
+            return Err(AllProcessingError::Synchronization(SequenceMismatch));
         }
 
         let hits_end: bool = last_loc == sequence_len;
@@ -414,7 +473,7 @@ impl AllData {
 
         if hits_end && zero_indexed {
             //Same panic as overrunning the sequence, because it overruns the sequence by one
-            panic!("This data has sequence locations too large to correspond to your sequence!");
+            return Err(AllProcessingError::Synchronization(SequenceMismatch));
         }
 
         if (!hits_end) && (!zero_indexed) {
@@ -554,8 +613,7 @@ impl AllData {
             lerped_blocks.push(Self::lerp(&block, spacing));
         }
 
-        //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer
-
+        //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer, amd are non-empty where they exist
         //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
         //Keep data that has peaks in preparation for being synced with the sequence
         //Cut up data so that I can derive AR model from not kept data
@@ -572,7 +630,7 @@ impl AllData {
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
-        let data_zone: usize = fragment_length/spacing;
+        let data_zone: usize = 100.max(fragment_length/spacing);
         
         for block in lerped_blocks {
 
@@ -607,14 +665,21 @@ impl AllData {
             }
         }
 
+        data_blocks.retain(|a| a.len() > data_zone);
+
         println!("sorted data data away from background inference data");
 
-        if ar_blocks.len() == 0 { //Make a BadData error, with the variant "Not enough null data to infer the background distribution"
-            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+
+        if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+            return Err(AllProcessingError::Synchronization(NeedDifferentExperiment));
         }
 
-        if data_blocks.len() == 0 { ////Make a BadData error, with the variant "no peak data for data"
-            panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+        if ar_blocks.len() == 0 {
+            return Err(AllProcessingError::Synchronization(NotEnoughNullData));
+        }
+
+        if data_blocks.len() == 0 {
+            return Err(AllProcessingError::Synchronization(NotEnoughPeakData));
         }
 
         if !cut { //This code is only run if the genome is circular and has no missing data
@@ -627,7 +692,7 @@ impl AllData {
                     let mut rem_block = data_blocks.remove(0); 
                     rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
                     let Some(end_vec) = data_blocks.last_mut() else {
-                        panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                        return Err(AllProcessingError::Synchronization(NotEnoughNullData));
                     };
                     end_vec.append(&mut rem_block);
 
@@ -638,7 +703,7 @@ impl AllData {
                     let mut rem_block = ar_blocks.remove(0);
                     rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
                     let Some(end_vec) = ar_blocks.last_mut() else {
-                        panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+                        return Err(AllProcessingError::Synchronization(NotEnoughPeakData));
                     };
                     end_vec.append(&mut rem_block);
                     *end_vec = Self::lerp(&*end_vec, spacing);
@@ -654,7 +719,7 @@ impl AllData {
                         rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
                         let mut fuse_ar = ar_blocks.pop().unwrap();
                         let Some(end_vec) = data_blocks.last_mut() else {
-                            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                            return Err(AllProcessingError::Synchronization(NotEnoughNullData));
                         };
 
                         end_vec.append(&mut fuse_ar);
@@ -665,7 +730,7 @@ impl AllData {
                         rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
                         let mut split = 1_usize;
                         let Some(end_vec) = ar_blocks.last_mut() else {
-                            panic!("You have nothing that counts as a peak in this data! Make peak_thresh smaller to allow more data to count as data!");
+                            return Err(AllProcessingError::Synchronization(NotEnoughPeakData));
                         };
                         while (*end_vec)[split].0 < last_data_place {split+=1;}
                         let mut begin_fin_dat = end_vec.split_off(split);
@@ -691,7 +756,7 @@ impl AllData {
                             let mut fuse_ar = ar_blocks.remove(0);
                             fuse_ar = fuse_ar.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
                             let Some(end_vec) = data_blocks.last_mut() else {
-                                panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+                                return Err(AllProcessingError::Synchronization(NotEnoughNullData));
                             };
 
                             end_vec.append(&mut fuse_ar);
@@ -721,12 +786,19 @@ impl AllData {
         ar_blocks.retain(|a| a.len() > data_zone);
 
         if ar_blocks.len() == 0 {
-            panic!("Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!");
+            return Err(AllProcessingError::Synchronization(NotEnoughNullData));
         }
+
 
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
 
+        //Despite yule_walker_ar_coefficients_with_bic and estimate_t_dist both
+        //having the CAPACITY to panic if ar_inference has only empty vectors, 
+        //the invariants we guarenteed if we're at this point of the function
+        //mean that this will not be the case. There ARE pathological cases in
+        //the inference of the results, but only if we have like fewer than 2 data
+        //points, which doesn't happen with the way we defined data_zone
         let background_dist = if is_ar {Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30), fragment_length)} else { 
             let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
             Background::new(sd, df, (fragment_length as f64)/6.0, None)
@@ -737,7 +809,7 @@ impl AllData {
                                                                      .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        (trimmed_data_blocks, background_dist)
+        Ok((trimmed_data_blocks, background_dist))
 
 
 
@@ -1001,11 +1073,15 @@ impl AllData {
 
         let cost = FitTDist { decorrelated_data };
 
+        //This is fine to unwrap because we are setting a valid tolerance
         let solver = NelderMead::new(init_simplex).with_sd_tolerance(1e-6).unwrap();
 
         let executor = Executor::new(cost, solver);
 
+        //This is fine to unwrap because a rerun would probably fix it: I 
+        //do not know what advice to give if this breaks, because it's probably fine
         let res = executor.run().unwrap();
+
 
         let best_vec = res.state().get_best_param().unwrap();
 
@@ -1122,7 +1198,7 @@ impl<'a> AllDataUse<'a> {
 
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum FastaError {    
     #[error(transparent)]
     InvalidFile(#[from] std::io::Error),
@@ -1135,21 +1211,21 @@ pub enum FastaError {
 }
 
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 struct EmptyFastaError;
 
 impl std::fmt::Display for EmptyFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace, and must have at least one line with valid base pairs in it!")}
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 struct MaybeNotFastaError;
 
 impl std::fmt::Display for MaybeNotFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file first line must start with a '>'! Are you certain this is a FASTA file?") }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 struct InvalidBasesError {
     bad_base_locations: Vec<(u64, u64)>, 
     too_many_bad_bases: bool,
@@ -1206,6 +1282,16 @@ enum DataProcessError {
     BadDataFormat(#[from] DataFileBadFormat),
 }
 
+impl DataProcessError {
+
+    fn collect_wrongdoing(self, possible_sequence_err: Option<FastaError>) -> AllProcessingError {
+        match possible_sequence_err {
+            None => AllProcessingError::DataOnly(self),
+            Some(E) => AllProcessingError::DataAndSequence((self, E))
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 struct EmptyDataError;
 impl std::fmt::Display for EmptyDataError {
@@ -1230,11 +1316,17 @@ impl DataFileBadFormat {
             no_data_lines: Vec::new(),
         }
     }
- 
+}
+
+impl Option<DataFileBadFormat> {
+
     fn add_problem_line(&mut self, empty_line: Option<u64>, locationless_line: Option<u64>, dataless_line: Option<u64>) {
-        if Some(empty) = empty_line { self.empty_lines.push(empty); }
-        if Some(locationless) = locationless_line { self.no_location_lines.push(locationless); }
-        if Some(dataless) = dataless_line { self.no_data_lines_lines.push(dataless); }
+
+        if self.is_none() { *self = Some(DataFileBadFormat::new(false));}
+        let mut inside = self.as_deref_mut();
+        if Some(empty) = empty_line { inside.map(|a| a.empty_lines.push(empty));} 
+        if Some(locationless) = locationless_line { inside.map(|a| a.no_location_lines.push(locationless)); }
+        if Some(dataless) = dataless_line { inside.map(|a| a.no_data_lines.push(dataless)); }
     }
 }
 
@@ -1255,6 +1347,27 @@ impl std::fmt::Display for DataFileBadFormat {
     }
 }
 
+#[derive(Error, Debug)]
+enum AllProcessingError {
+
+    DataOnly(DataProcessError),
+    SequenceOnly(FastaError),
+    DataAndSequence((DataProcessError, FastaError)),
+    Synchronization(BadDataSequenceSyncrhonization),
+}
+ 
+impl std::fmt::Display for AllProcessingError {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AllProcessingError::DataOnly(d) => write!(f, "Only found data errors:\n {}", d),
+            AllProcessingError::SequenceOnly(s) => write!(f, "Only found sequence errors: \n {}", s),
+            AllProcessingError::DataAndSequence((d, s)) => write!(f, "Found both data and sequencing errors: \n Sequence errors:\n \t{}\n Data errors:\n \t{}"),
+            AllProcessingError::Synchronization(y) => write!("Data and sequence both fine, but they are not compatible:\n {}", y),
+        }
+    }
+
+}
 
 #[derive(Error, Debug)]
 enum BadDataSequenceSynchronization {
