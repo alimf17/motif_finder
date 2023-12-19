@@ -2778,7 +2778,7 @@ impl SetTraceDef {
 
         let data_reconstructed: AllData = serde_json::from_str(fs::read_to_string(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file").as_str()).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
-        let data = data_reconstructed.validated_data();
+        let data = data_reconstructed.validated_data().expect("AllData file must be valid!");
         let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
 
         let current_active = self.trace[index_best].clone().reactivate_set(&data, data_reconstructed.background());

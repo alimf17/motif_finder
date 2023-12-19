@@ -43,9 +43,9 @@ fn main() {
     assert!(spacing > 0, "The spacing cannot be zero!");
     assert!(fragment_length > spacing, "The fragment length must be strictly greater than the spacing!");
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR);
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR).unwrap();
 
-    let data: Waveform = total_data.validated_data();
+    let data: Waveform = total_data.validated_data().unwrap();
 
     let background = total_data.background();
 
