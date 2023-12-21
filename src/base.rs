@@ -1976,7 +1976,7 @@ impl<'a> MotifSet<'a> {
    }
     
    //MOVE TO CALL 
-   pub fn hmc<R: Rng + ?Sized>(&self, rng: &mut R) ->  (Self, bool, f64) {
+   pub fn hmc<R: Rng + ?Sized>(&self, momentum_dist: &Normal, rng: &mut R) ->  (Self, bool, f64) {
        
        let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
        
@@ -1984,9 +1984,9 @@ impl<'a> MotifSet<'a> {
 
        let total_len = 1+(BASE_L-1)*self.set[k].len();
 
-       let mut momentum: Vec<f64> = (0..total_len).map(|_| MOMENTUM_DIST.get().expect("no writes expected now").sample(rng)).collect();
+       let mut momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
 
-       momentum[0] /= 16384.;//Peak height needs to move more slowly than other parameters, I think
+       momentum[0] /= 16384.;//Peak height needs to move more slowly than other parameters
 
        let mut prior_set = self.clone();
        
@@ -2374,7 +2374,7 @@ impl<'a> SetTrace<'a> {
     //Panics: if self.trace is empty
     //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
     //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
-    pub fn advance<R: Rng + ?Sized>(&mut self, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
+    pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
         
 
 
@@ -2394,7 +2394,7 @@ impl<'a> SetTrace<'a> {
                 (set, (4, true))
             },
             RANGE_LEAP..=MAX_IND_HMC => {
-                let (set, accept, _) = self.active_set.hmc(rng);
+                let (set, accept, _) = self.active_set.hmc(momentum_dist, rng);
                 (set, (5, accept))
             },
             _ => unreachable!(),
@@ -2415,6 +2415,145 @@ impl<'a> SetTrace<'a> {
         retval
 
     }
+
+    //PANICS: if initial_sd is not positive
+    //This function gives back (number of 50 hmc move blocks to stabilize acceptance, sd at which hmc stabilized at about 90% acceptance)
+    pub fn burn_in_momentum<R: Rng + ?Sized>(&mut self, initial_sd: f64, rng: &mut R) -> (usize, f64) {
+        //I'm aiming for acceptance rates of about 0.8. Blocks are about 50 hmc proposals big, so I'm 
+        //aiming for three blocks in a row to hit between 0.69 and 0.91, within 2 standard errors of 0.8
+
+        let mut dist = Normal::new(0.0, initial_sd).expect("Do not give a non positive sd");
+        //We are taking ownership of this, but will replace it by the end
+        let mut set = &mut self.active_set;
+
+        const BLOCK_LEN: usize = 50;
+        const TARGET_PROP: f64 = 0.8;
+        let min_prop = TARGET_PROP-2.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+        let max_prop = TARGET_PROP+2.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+
+        let mut all_fine = true;
+
+        let mut num_accept = 0_f64;
+
+        let mut num_blocks: usize = 0;
+
+        let mut sum_props = 0.0_f64;
+        for _ in 0..3 {
+            for _ in 0..BLOCK_LEN {
+                let (s, accept, _) = set.hmc(&dist, rng);
+                *set = s;
+                if accept {num_accept += 1.0;}
+            }
+            let prop_accept = num_accept/(BLOCK_LEN as f64);
+            sum_props += prop_accept;
+            all_fine &= ((prop_accept > min_prop) && (prop_accept < max_prop));
+        }
+
+        num_blocks += 1;
+       
+        if all_fine { 
+            return (num_blocks, initial_sd);
+        }
+
+        let mut lowbound;
+        let mut upbound;
+
+        if sum_props/3.0 < TARGET_PROP {
+
+            lowbound = initial_sd;
+            let mut found = false;
+            let mut upper_sd = initial_sd;
+            while !found {
+                num_accept = 0_f64;
+                sum_props = 0.0_f64;
+                upper_sd *= 2.0;
+                dist = Normal::new(0.0, upper_sd).unwrap();
+                for _ in 0..3 {
+                    for _ in 0..BLOCK_LEN {
+                        let (s, accept, _) = set.hmc(&dist, rng);
+                        *set = s;
+                        if accept {num_accept += 1.0;}
+                    }
+                    let prop_accept = num_accept/(BLOCK_LEN as f64);
+                    sum_props += prop_accept;
+                }
+
+                found = (sum_props/3.0) > max_prop;
+                num_blocks += 1;
+            }
+
+            upbound = upper_sd;
+
+        } else {
+
+            upbound = initial_sd;
+            let mut found = false;
+            let mut lower_sd = initial_sd;
+            while !found {
+                num_accept = 0_f64;
+                sum_props = 0.0_f64;
+                lower_sd /= 2.0;
+                dist = Normal::new(0.0, lower_sd).unwrap();
+                for _ in 0..3 {
+                    for _ in 0..BLOCK_LEN {
+                        let (s, accept, _) = set.hmc(&dist, rng);
+                        *set = s;
+                        if accept {num_accept += 1.0;}
+                    }
+                    let prop_accept = num_accept/(BLOCK_LEN as f64);
+                    sum_props += prop_accept;
+                }
+
+                found = (sum_props/3.0) < min_prop;
+
+            }
+
+            lowbound = lower_sd;
+            num_blocks += 1;
+
+        }
+
+        let mut mid_sd = (lowbound*upbound).sqrt();
+        let mut found = false;
+
+        while !found {
+            num_accept = 0_f64;
+            sum_props = 0.0_f64;
+            dist = Normal::new(0.0, mid_sd).unwrap();
+            for _ in 0..3 {
+                for _ in 0..BLOCK_LEN {
+                    let (s, accept, _) = set.hmc(&dist, rng);
+                    *set = s;
+                    if accept {num_accept += 1.0;}
+                }
+                let prop_accept = num_accept/(BLOCK_LEN as f64);
+                sum_props += prop_accept;
+            }
+
+            let above_low = (sum_props/3.0) > min_prop;
+            let below_high = (sum_props/3.0) < max_prop;
+            found = above_low && below_high;
+
+            if !found {
+                if !above_low {
+                    lowbound = mid_sd;
+                } else {
+                    upbound = mid_sd;
+                }
+            }
+            
+            mid_sd = (lowbound*upbound).sqrt();
+            num_blocks += 1;
+        }
+
+        return (num_blocks, mid_sd);
+
+
+
+
+    }
+
+   
 
     //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
     //         The ln posterior will also be recalculated if the motif set isn't correctly pointed

@@ -200,9 +200,9 @@ fn main() {
 
     let mut track_hmc: usize = 0;
 
-    for step in 0..num_advances {
+    for step in 0..1000 {
  
-        let (selected_move, accepted) = current_trace.advance(&mut rng);
+        let (selected_move, accepted) = current_trace.advance(MOMENTUM_DIST.get().expect("No more writing"), &mut rng);
 
         trials[selected_move] += 1;
         if accepted {acceptances[selected_move] += 1;}
@@ -226,6 +226,38 @@ fn main() {
 
     }
 
+    //let init_sd: f64 = MOMENTUM_SD.read().expect("Nothing should write to this right now");
+    let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
+
+    println!("Momentum burn in took {} trials to stabilize", number_burn_in);
+
+    let new_momentum_dist = Normal::new(0.0, new_sd).unwrap();
+
+    for step in 0..num_advances {
+ 
+        let (selected_move, accepted) = current_trace.advance(&new_momentum_dist, &mut rng);
+
+        trials[selected_move] += 1;
+        if accepted {acceptances[selected_move] += 1;}
+        rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
+
+        //println!("Step {} ", step);
+        if step % 10 == 0 {
+            println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
+            if (acceptances[5]-track_hmc) == 0 {
+                println!("Not really changing motif???");
+                println!("{:?}", current_trace.current_set_to_print());
+            }
+            track_hmc=acceptances[5];
+        }
+        if step % save_step == 0 {
+            
+            current_trace.save_trace(output_dir, run_name, step);
+            current_trace.save_and_drop_history(output_dir, run_name, step);
+
+        }
+
+    }
 
     println!("Finished run");
 
