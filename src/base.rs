@@ -2276,7 +2276,7 @@ impl MotifSetDef {
         let redo_signal = recalculate || scrambled_motifs || signal_will_make_ub;
 
         let signal = if !redo_signal { //Notice how we carefully checked to make sure that signal follows our safety guarentees
-            unsafe {self.signal.get_waveform(data.point_lens(), data.start_dats(), data.seq())}
+            self.signal.get_waveform(data.seq())
         } else {
             data.derive_zero() //This isn't our final signal. This just ensures our safety guarentees
         };
@@ -2318,10 +2318,13 @@ impl MotifSetDef {
 //SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
 //AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
 pub struct SetTrace<'a> {
-    trace: Vec<AnyMotifSet<'a>>,
+    trace: Vec<StrippedMotifSet>,
+    active_set: MotifSet<'a>,
     all_data_file: String,
     data: &'a Waveform<'a>, 
     background: &'a Background,
+    sparse: usize, 
+    sparse_count: usize,
 }
 
 
@@ -2334,14 +2337,18 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_empty(capacity: usize, all_data_file: String, data: &'a Waveform<'a>, background: &'a Background) -> SetTrace<'a> {
+    pub fn new_trace(capacity: usize, all_data_file: String, initial_condition: Option<MotifSet<'a>>, data: &'a Waveform<'a>, background: &'a Background, sparse: Option<usize>) -> SetTrace<'a> {
+
 
 
         SetTrace{
-            trace: Vec::<AnyMotifSet<'a>>::with_capacity(capacity),
+            trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
+            active_set: initial_condition.unwrap_or_else(MotifSet::rand_with_one(data, background))
             all_data_file: all_data_file,
             data: data, 
             background: background,
+            sparse: sparse.unwrap_or(10),
+            sparse_count: 0_usize,
         }
 
     }
@@ -2482,6 +2489,13 @@ impl<'a> SetTrace<'a> {
 
     pub fn current_set(&self) -> MotifSet<'a> {
         self.trace[self.trace.len()-1].give_activated(self.data, self.background)
+    }
+
+    pub fn current_set_mut_ptr(&mut self) -> &mut MotifSet<'a> {
+
+        self.trace[self.trace.len()-1].activate(self.data, self.background);
+
+
     }
 
     pub fn current_set_to_print(&self) -> StrippedMotifSet {

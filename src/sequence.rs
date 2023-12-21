@@ -45,6 +45,9 @@ pub struct Sequence {
 */
 impl Sequence {
     
+
+    //PANICS: if a block has a length not divisible by BP_PER_U8 (4), a length shorter than MAX_BASE, or a usize not less than BASE_L (4)
+    //        This should not panic in our crate
     pub fn new(blocks: Vec<Vec<usize>>) -> Sequence {
 
         let mut block_is: Vec<usize> = Vec::new();

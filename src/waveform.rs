@@ -213,9 +213,10 @@ impl<'a> Waveform<'a> {
 
     }
 
-    //SAFETY: block must be less than the number of blocks
-    //        center must be less than the number of bps in the blockth block
-    //        the length of peak MUST be strictly less than the length of the smallest data block
+    //SAFETY: -block must be less than the number of blocks
+    //        -center must be less than the number of bps in the blockth block
+    //        -the length of peak MUST be strictly less than the number of base pairs represented in the smallest data block
+    //              which can be up to point_lens.min()*self.spacer+(self.spacer-1) 
     pub(crate) unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
 
@@ -227,9 +228,7 @@ impl<'a> Waveform<'a> {
         let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
 
         let min_kern_bp: usize = max(0, place_bp) as usize;
-        let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //Technicaly, the end CAN return a negative int. 
-                                                                                 //But if it is, panicking is appropriate: 
-                                                                                 //center would necessarily be much bigger than the block length, which violates our safety invariant
+        let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
  
         //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
         //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
@@ -597,18 +596,8 @@ impl WaveformDef {
     //        point_lens.last().unwrap()+start_dats.last().unwrap(). 
     //
     //ACCURACY:  Make sure that wave is in fact organized into the blocks implied by point_lens and start_dats.
-    pub(crate) unsafe fn get_waveform<'a>(&self, point_lens: Vec<usize>, start_dats: Vec<usize>, seq: &'a Sequence) -> Waveform<'a> {
-
-        Waveform {
-
-            wave: self.wave.clone(),
-            spacer: self.spacer, 
-            point_lens: point_lens,
-            start_dats: start_dats,
-            seq: seq
-        }
-
-
+    pub(crate) fn get_waveform<'a>(&self, seq: &'a Sequence) -> Waveform<'a> {
+        Waveform::new(self.wave.clone(), seq, self.spacer)
     }
 
     pub fn len(&self) -> usize {

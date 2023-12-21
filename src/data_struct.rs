@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use core::f64::consts::PI;
 
-use crate::waveform::{Waveform, WaveformDef, Background};
+use crate::waveform::{Waveform, WaveformDef, Background, WIDE};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::base::{BPS, BASE_L, Motif, StrippedMotifSet, SetTrace};
 
@@ -175,12 +175,9 @@ impl AllData {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::SequenceMismatch));
         }
 
-        //SAFETY: make_dimension_arrays yields the correct blocking, and 
-        //        we already errorred out if such correct blocking of the 
-        //        waveform is impossible
-        unsafe{
-            Ok(self.data.get_waveform(point_lens, start_dats, &self.seq))
-        }
+        //we already errorred out if such correct blocking if the 
+        //waveform is impossible
+        Ok(self.data.get_waveform(&self.seq))
 
     }
     
@@ -670,7 +667,6 @@ impl AllData {
             }
         }
 
-        data_blocks.retain(|a| a.len() > data_zone);
 
         println!("sorted data data away from background inference data");
 
@@ -788,12 +784,29 @@ impl AllData {
 
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
+
         ar_blocks.retain(|a| a.len() > data_zone);
+
+        let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
+                                                                     .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
+        
+        //SAFETY: This data block filtering is what allows us to guarentee Kernel
+        //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
+        //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
+        //never rounds down
+        data_blocks.retain(|a| (a.len()+1)*spacing > fragment_length);
+
+        if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
+        }
 
         if ar_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
         }
 
+        if data_blocks.len() == 0 {
+            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
+        }
 
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
@@ -806,12 +819,9 @@ impl AllData {
         //points, which doesn't happen with the way we defined data_zone
         let background_dist = if is_ar {Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30), fragment_length)} else { 
             let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
-            Background::new(sd, df, (fragment_length as f64)/6.0, None)
+            Background::new(sd, df, (fragment_length as f64)/(2.0*WIDE), None)
         } ;
         println!("inferred background dist");
-
-        let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
-                                                                     .map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
         Ok((trimmed_data_blocks, background_dist))
@@ -840,6 +850,9 @@ impl AllData {
             let bp_prior = bp_ind;
             let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
 
+            //SAFETY: This line, in conjunction with the previous checks on pre_data
+            //        necessary to call this function, upholds our safety invariants 
+            //        when we actually generate the occupancy signals with Waveform::place_peak
             let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
 
             let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
@@ -1184,27 +1197,32 @@ impl AllData {
 
 impl<'a> AllDataUse<'a> {
 
-    pub fn new(reference_struct: &AllData) -> Result<Self, Box<dyn error::Error>> {
-        let wave = reference_struct.validated_data();
+    pub fn new(reference_struct: &AllData) -> Result<Self, AllProcessingError> {
        
-        //We already panicked if it's impossible for the IP data
-        //and sequence information to agree on their block lengths
-
         let background = reference_struct.background();
 
         let kernel_width = background.kernel.len();
 
         let sequence_lengths = reference_struct.seq.block_lens();
 
+        let kernelVariantUpheld = sequence_lengths.into_iter().all(|a| a > kernel_width);
 
-        todo!()
+        if !kernelVariantUpheld {
+            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::KernelMismatch));
+        }
+
+        Ok( Self{ 
+               data: reference_struct.validated_data()?,
+               background: reference_struct.background(),
+        })
+
     }
 
 
 }
 
 #[derive(Error, Debug, Clone)]
-pub enum FastaError {    
+enum FastaError {    
     #[error(transparent)]
     InvalidFile(#[from] Rc<std::io::Error>),
     #[error(transparent)]
@@ -1395,7 +1413,8 @@ impl std::fmt::Display for AllProcessingError {
 
 #[derive(Error, Debug)]
 enum BadDataSequenceSynchronization {
-    SequenceMismatch, 
+    SequenceMismatch,
+    KernelMismatch,
     NotEnoughNullData, 
     NotEnoughPeakData, 
     NeedDifferentExperiment, //This is NotEnoughNullData AND NotEnoughPeakData. You can't screw with peak_thresh to make this better: you're basically screwed and need a new set
@@ -1408,6 +1427,7 @@ impl std::fmt::Display for BadDataSequenceSynchronization {
         match self {
 
             BadDataSequenceSynchronization::SequenceMismatch => write!(f, "You have data in locations too large for your sequence!"),
+            BadDataSequenceSynchronization::KernelMismatch => write!(f, "You have data blocks that are too small for your fragment length!"),
             BadDataSequenceSynchronization::NotEnoughNullData => write!(f, "Not enough null data to infer the background distribution! Make peak_thresh bigger to allow more null data!"),
             BadDataSequenceSynchronization::NotEnoughPeakData => write!(f, "You do not have enough peak-like data that is within ungapped valid base pairs! Make peak_thresh smaller to allow more data to count as data!"),
             BadDataSequenceSynchronization::NeedDifferentExperiment => write!(f, "You neither have enough null data nor enough peak data! This data can't have inference done on it! Supply a different data set!"),
