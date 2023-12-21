@@ -9,6 +9,7 @@ use core::iter::zip;
 use crate::base::Bp;
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
+use crate::data_struct::AllDataUse;
 
 use statrs::distribution::{StudentsT, Continuous, ContinuousCDF};
 
@@ -216,7 +217,6 @@ impl<'a> Waveform<'a> {
     //SAFETY: -block must be less than the number of blocks
     //        -center must be less than the number of bps in the blockth block
     //        -the length of peak MUST be strictly less than the number of base pairs represented in the smallest data block
-    //              which can be up to point_lens.min()*self.spacer+(self.spacer-1) 
     pub(crate) unsafe fn place_peak(&mut self, peak: &Kernel, block: usize, center: usize) {
 
 
@@ -344,11 +344,11 @@ impl<'a> Waveform<'a> {
 
 
 
-    pub fn produce_noise<'b>(&self, data: &Waveform, background: &'b Background) -> Noise<'b> {
+    pub fn produce_noise<'b>(&self, data_ref: &'b AllDataUse) -> Noise<'b> {
         
-        let residual = self-data;
+        let residual = self-data_ref.data();
 
-        residual.produce_resid_noise(background)
+        residual.produce_resid_noise(data_ref.background_ref())
 
     }
    

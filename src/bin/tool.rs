@@ -157,17 +157,22 @@ fn main() {
 
     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR).unwrap();
 
-    let data: Waveform = total_data.validated_data().unwrap();
 
-    let background = total_data.background();
+    let data_ref = AllDataUse::new(&total_data).unwrap();
+
+    let data = data_ref.data();
+
+    let background = data_ref.background_ref();
 
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
 
-    //Initialize trace
-    let mut current_trace: SetTrace = SetTrace::new_empty(capacity,data_string.clone(), &data, &background);
+
 
     let mut rng = rand::thread_rng();
+    
+    //Initialize trace
+    let mut current_trace: SetTrace = SetTrace::new_trace(capacity,data_string.clone(), InitializeSet::Rng(&mut rng), &data_ref, None);
     
     let check: Option<&str> = match args.get(init_check_index) { Some(x) => Some(x.as_str()), None => None};
     match check {
@@ -183,7 +188,7 @@ fn main() {
             };
             current_trace.push_last_state_from_json(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a Json output file").as_str());
         },
-        _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, &mut rng)),
+        _ => (),
     };
 
     //run MCMC and make sure that I'm saving and clearing periodically

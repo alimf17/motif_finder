@@ -5,9 +5,9 @@ use std::rc::Rc;
 
 use core::f64::consts::PI;
 
-use crate::waveform::{Waveform, WaveformDef, Background, WIDE};
+use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel};
 use crate::sequence::{Sequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, Motif, StrippedMotifSet, SetTrace};
+use crate::base::{BPS, BASE_L, Motif, StrippedMotifSet, SetTrace, InitializeSet};
 
 use thiserror::Error;
 
@@ -190,69 +190,6 @@ impl AllData {
     }
 
 
-    pub fn generate_initial_condition_jsons<R: Rng + ?Sized>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: &mut R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
-
-
-        
-        let mut real_noises = noises.clone().into_iter().filter(|&a| *a >= 0.0).map(|&a| a).collect::<Vec<f64>>();
-
-        let max_shuffle = base_set.set_iter().map(|a| a.len()).max().expect("Don't start with a comparison set that has no motifs");
-
-        let mut real_shuffles = shuffles.clone().into_iter().filter(|&a| *a <= max_shuffle).map(|&a| a).collect::<Vec<_>>();
-
-        if real_shuffles.len() == 0 { real_shuffles = vec![0]; }
-        if real_noises.len() == 0 { real_noises = vec![0.0] };
-       
-        let valid_data = self.validated_data().unwrap();
-
-        for &noi in real_noises.iter()  {
-        
-            //If noise is exactly 0, we want this to be none and know not to add any noise
-            let noise_dist: Option<Normal> = Normal::new(0.0, noi).ok();
-            for &shuf in real_shuffles.iter(){ 
-            
-
-                let mut base_trace = SetTrace::new_empty(1, self_file_name.clone(), &valid_data, self.background());
-
-                let mut new_set = base_set.clone();
-
-                for motif in new_set.mutable_set_iter() {
-
-                    let mot_len = motif.len();
-                    let shuffle_num = shuf.min(mot_len);
-
-                    let Some(&new_mot_id) = self.seq.all_kmers_with_exact_hamming(&motif.best_motif(), shuffle_num).choose(rng) else { 
-                        println!("Did not generate hamming distance {} because there are no relevant motifs with that hamming distance", shuf); 
-                        continue; 
-                    };
-
-                    *motif = motif.scramble_by_id_to_valid(new_mot_id, false, self.seq());
-
-                    if let Some(noise_sampler) = noise_dist {
-
-                        let mut noises: Vec<f64> = vec![0.0; 1+((BASE_L-1)*mot_len)];
-
-                        for i in 1..(noises.len()) { noises[i] = noise_sampler.sample(rng); }
-
-                        //SAFETY: We specifically defined the noises vector to follow length
-                        //invariant of add_momentum
-                        *motif = unsafe{ motif.add_momentum(1.0, &noises, true) };
-
-                    }
-                        
-                }
-
-                base_trace.push_set(new_set.reactivate_set(&valid_data, self.background()));
-
-                let name_of_init = format!("{}_shuffle_{}_bases_with_noise_{}", init_name, shuf, noi);
-
-                base_trace.save_initial_state(init_dir, &name_of_init);
-
-            }
-        };
-
-
-    }
 
     //SAFETY: I'm spending a lot of effort to validate your FASTA file
     //If your FASTA file is invalid and it somehow gets through, 
@@ -1197,7 +1134,7 @@ impl AllData {
 
 impl<'a> AllDataUse<'a> {
 
-    pub fn new(reference_struct: &AllData) -> Result<Self, AllProcessingError> {
+    pub fn new(reference_struct: &'a AllData) -> Result<Self, AllProcessingError> {
        
         let background = reference_struct.background();
 
@@ -1218,6 +1155,89 @@ impl<'a> AllDataUse<'a> {
 
     }
 
+    //SAFETY: This must uphold the safety invariant that the kernel length
+    //        is SHORTER than the number of bps in any sequence block in 
+    //        the sequence data points to
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, background: &'a Background) -> Self {
+        Self{
+            data: data, 
+            background: background,
+        }
+    }
+
+    pub fn data(&self) -> &Waveform {
+        &self.data
+    }
+
+    pub fn background_ref(&self) -> &Background {
+        &self.background
+    }
+
+    pub fn unit_kernel_ref(&self) -> &Kernel {
+        self.background.kernel_ref()
+    }
+    
+    pub fn generate_initial_condition_jsons<R: Rng + ?Sized>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: &mut R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
+
+
+        
+        let mut real_noises = noises.clone().into_iter().filter(|&a| *a >= 0.0).map(|&a| a).collect::<Vec<f64>>();
+
+        let max_shuffle = base_set.set_iter().map(|a| a.len()).max().expect("Don't start with a comparison set that has no motifs");
+
+        let mut real_shuffles = shuffles.clone().into_iter().filter(|&a| *a <= max_shuffle).map(|&a| a).collect::<Vec<_>>();
+
+        if real_shuffles.len() == 0 { real_shuffles = vec![0]; }
+        if real_noises.len() == 0 { real_noises = vec![0.0] };
+       
+        for &noi in real_noises.iter()  {
+        
+            //If noise is exactly 0, we want this to be none and know not to add any noise
+            let noise_dist: Option<Normal> = Normal::new(0.0, noi).ok();
+            for &shuf in real_shuffles.iter(){ 
+            
+
+
+                let mut new_set = base_set.clone();
+
+                for motif in new_set.mutable_set_iter() {
+
+                    let mot_len = motif.len();
+                    let shuffle_num = shuf.min(mot_len);
+
+                    let Some(&new_mot_id) = self.data.seq().all_kmers_with_exact_hamming(&motif.best_motif(), shuffle_num).choose(rng) else { 
+                        println!("Did not generate hamming distance {} because there are no relevant motifs with that hamming distance", shuf); 
+                        continue; 
+                    };
+
+                    *motif = motif.scramble_by_id_to_valid(new_mot_id, false, self.data.seq());
+
+                    if let Some(noise_sampler) = noise_dist {
+
+                        let mut noises: Vec<f64> = vec![0.0; 1+((BASE_L-1)*mot_len)];
+
+                        for i in 1..(noises.len()) { noises[i] = noise_sampler.sample(rng); }
+
+                        //SAFETY: We specifically defined the noises vector to follow length
+                        //invariant of add_momentum
+                        *motif = unsafe{ motif.add_momentum(1.0, &noises, true) };
+
+                    }
+                        
+                }
+
+
+                let base_trace = SetTrace::new_trace::<R>(1, self_file_name.clone(), InitializeSet::Set(new_set.reactivate_set(&self)), &self, None);
+
+                let name_of_init = format!("{}_shuffle_{}_bases_with_noise_{}", init_name, shuf, noi);
+
+                base_trace.save_initial_state(init_dir, &name_of_init);
+
+            }
+        };
+
+
+    }
 
 }
 

@@ -45,15 +45,18 @@ fn main() {
 
     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR).unwrap();
 
-    let data: Waveform = total_data.validated_data().unwrap();
+    let data_ref = AllDataUse::new(&total_data).unwrap();
 
-    let background = total_data.background();
+    let data = data_ref.data();
+
+    let background = data_ref.background_ref();
 
 
     //Initialize trace
-    let mut current_trace: SetTrace = SetTrace::new_empty(10,data_string.clone(), &data, &background);
 
     let mut rng = rand::thread_rng();
+
+    let mut current_trace: SetTrace = SetTrace::new_trace(20,data_string.clone(), InitializeSet::Rng(&mut rng), &data_ref, None);
     
     let check: Option<&str> = match args.get(9) { Some(x) => Some(x.as_str()), None => None};
     match check {
@@ -69,7 +72,7 @@ fn main() {
             };
             current_trace.push_last_state_from_json(validate, validate, &mut maybe_rng, args.get(10).expect("Must inlcude a string indicating a Json output file").as_str());
         },
-        _ => current_trace.push_set(MotifSet::rand_with_one(&data, &background, &mut rng)),
+        _ => (), 
     };
 
     //run MCMC and make sure that I'm saving and clearing periodically
