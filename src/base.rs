@@ -3407,7 +3407,7 @@ mod tester{
         let background = Background::new(0.25, 2.64, 350./6.0, Some(&corrs));
 
         //SAFETY: check SAFETY comment in u8_per_block 
-        let data_seq = unsafe{ AllDataUse.new_unchecked_data(&wave, &background) };
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(), &background) };
         let mut motif_set = MotifSet::rand_with_one_height(13.2, &data_seq, &mut rng);
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
@@ -3468,7 +3468,7 @@ mod tester{
         
             let mot2 = unsafe{mot.add_momentum(1.0, &mommy, false)};
        
-            let wave2 = mot2.generate_waveform(&wave, background.kernel_ref());
+            let wave2 = mot2.generate_waveform(&data_seq);
 
             let prop_bp = unsafe{mot.pwm()[p][bp]};
             let n_diff: Vec<f64> = wave2.produce_noise(&data_seq).resids().iter()
@@ -3506,7 +3506,7 @@ mod tester{
 
         for i in 0..added_to_motif_set.set.len() {
 
-            let to_add = motif_set.set[i].safe_single_motif_grad(&motif_set.signal, motif_set.data, motif_set.background);
+            let to_add = motif_set.set[i].safe_single_motif_grad(&motif_set.signal, motif_set.data_ref);
 
             println!("AG {}", i);
             println!("{:?}", to_add);
@@ -3574,10 +3574,10 @@ mod tester{
             panic!();
         }
 
-        let mom_dist = Normal::new(0.0, 10.0).unwrap();
+        let mom_dist = Normal::new(0.0, 0.1).unwrap();
         let mut rng = rand::thread_rng();
         let eps = 1e-6;
-        let (new_set, acc, dham) = motif_set.hmc(&mut rng);
+        let (new_set, acc, dham) = motif_set.hmc(&mom_dist, &mut rng);
 
         let should_wave = new_set.recalced_signal();
 
@@ -3618,7 +3618,10 @@ mod tester{
 
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, 350./6.,Some(&corrs));
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, &mut rng);
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(), &background)};
+
+        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &data_seq, &mut rng);
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
      
@@ -3755,18 +3758,19 @@ mod tester{
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
+        let corrs: Vec<f64> = vec![0.9, -0.1];
+        let background = Background::new(0.25, 2.64, 350./6., Some(&corrs));
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &background) };
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let corrs: Vec<f64> = vec![0.9, -0.1];
-        let background = Background::new(0.25, 2.64, 350./6., Some(&corrs));
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &wave, &background, &mut rng);
+        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &data_seq, &mut rng);
 
         let check_set = motif_set.clone();
 
         let mid_mot = (MIN_BASE+MAX_BASE)/2;
         //TESTING THE MANIPULATOR FUNCTIONS: these should simply mutate the motif set to conform and usually output the new ln posterior
-        let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, wave.seq(), &mut rng);
+        let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, data_seq.data().seq(), &mut rng);
         
         //Testing: fn add_motif(&mut self, new_mot: Motif) -> f64 
         let new_like = motif_set.add_motif(add_mot.clone());
@@ -3776,7 +3780,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
+        let check_diff = &wave_diff-&add_mot.generate_waveform(&data_seq);
 
         let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3793,7 +3797,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        //let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
+        //let check_diff = &wave_diff-&add_mot.generate_waveform(&data_seq);
 
         let all_good = wave_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3825,7 +3829,7 @@ mod tester{
 
         let wave_diff = &motif_set.signal-&check_set.signal;
 
-        let check_diff = &wave_diff-&add_mot.generate_waveform(motif_set.data, background.kernel_ref());
+        let check_diff = &wave_diff-&add_mot.generate_waveform(&data_seq);
 
         let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
 
@@ -3839,13 +3843,13 @@ mod tester{
 
         //Testing fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64
 
-        let add_mot2 = Motif::rand_mot_with_height(-6.2, wave.seq(), &mut rng);
+        let add_mot2 = Motif::rand_mot_with_height(-6.2, data_seq.data().seq(), &mut rng);
         
         let new_like = motif_set.replace_motif(add_mot2.clone(), 0);
 
         assert!(motif_set.ln_post == Some(new_like));
 
-        let bring_wave_back = &motif_set.signal -&add_mot2.generate_waveform(motif_set.data, background.kernel_ref());
+        let bring_wave_back = &motif_set.signal -&add_mot2.generate_waveform(&data_seq);
 
         let check_diff = &bring_wave_back-&check_set.signal;
 
@@ -3886,7 +3890,7 @@ mod tester{
 
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
-        let remaining = motif_set.data-&motif_set.signal;
+        let remaining = motif_set.data_ref.data()-&motif_set.signal;
         let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
         let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
@@ -3923,7 +3927,7 @@ mod tester{
 
         let should_prior = ln_prop-(death_mot.calc_ln_post());
         
-        let remaining = motif_set.data-&death_mot.signal;
+        let remaining = motif_set.data_ref.data()-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.set[l].len());
         let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
@@ -3976,7 +3980,7 @@ mod tester{
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
  
-        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MAX_BASE, &wave, &background, &mut rng);
+        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MAX_BASE, &data_seq, &mut rng);
 
         assert!(cant_extend_set.propose_extend_motif(&mut rng).is_none(), "Can extend PWM beyond allowed limits!");
 
@@ -4021,7 +4025,7 @@ mod tester{
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
-        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MIN_BASE, &wave, &background, &mut rng);
+        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MIN_BASE, &data_seq, &mut rng);
 
         assert!(cant_contract_set.propose_contract_motif(&mut rng).is_none(), "Can contract PWM beyond allowed limits!");
 
@@ -4029,7 +4033,7 @@ mod tester{
 
         //Testing full RJ move
         for _ in 0..3{
-            let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, wave.seq(), &mut rng);
+            let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, data_seq.data().seq(), &mut rng);
             _ = motif_set.add_motif(add_mot);
         }
         for i in 0..100 {
@@ -4154,7 +4158,7 @@ mod tester{
         let duration = start_gen.elapsed();
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, 20., Some(&corrs));
-        
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &background) }; 
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -4168,25 +4172,26 @@ mod tester{
 
         let start = Instant::now();
 
-        let waveform = motif.generate_waveform(&wave, background.kernel_ref());
+        let waveform = motif.generate_waveform(&data_seq);
         let duration = start.elapsed();
         
-        let waveform2 = &waveform + &(motif2.generate_waveform(&wave, background.kernel_ref()));
+        let waveform2 = &waveform + &(motif2.generate_waveform(&data_seq));
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &background) }; 
 
-        let noise: Noise = waveform.produce_noise(&waveform2, &background);
+        let noise: Noise = waveform.produce_noise(&data_seq_2);
 
         let d_ad_stat_d_noise = noise.ad_grad();
         let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
 
-        let grad = unsafe{ motif.parallel_single_motif_grad(&waveform2, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, &background)};
+        let grad = unsafe{ motif.parallel_single_motif_grad(&data_seq_2, &d_ad_stat_d_noise, d_ad_like_d_ad_stat)};
 
         let waveform_raw = waveform.raw_wave();
 
         let binds = motif.return_bind_score(&sequence);
 
         let start_b = Instant::now();
-        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &wave, background.kernel_ref()) };
+        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
         let duration_b = start_b.elapsed();
 
         let unsafe_raw = unsafe_waveform.raw_wave();
@@ -4291,6 +4296,8 @@ mod tester{
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
         let wave_background = Background::new(0.25, 2.64, 1.0, Some(&corrs));
 
+
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave, &wave_background) }; 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -4300,7 +4307,7 @@ mod tester{
         let little_motif: Motif = Motif::raw_pwm(mat, 10.0); //wave_seq
 
         print!("{}", little_motif);
-        println!("{:?}",little_motif.generate_waveform(&wave_wave, wave_background.kernel_ref()).raw_wave());
+        println!("{:?}",little_motif.generate_waveform(&wave_data_seq).raw_wave());
 
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let small_inds: Vec<usize> = vec![0, 6]; 
@@ -4382,9 +4389,9 @@ mod tester{
         let pwm_bp: Bp = Bp::T;
         let pwm_pos: usize = 6;
         let prop_bp = motif.pwm[pwm_pos][pwm_bp];
-        let wave_main = motif.generate_waveform(&wave, background.kernel_ref());
+        let wave_main = motif.generate_waveform(&data_seq);
         let start0 = Instant::now();
-        let wave_noh = motif.no_height_waveform(&wave, background.kernel_ref());
+        let wave_noh = motif.no_height_waveform(&data_seq);
         let duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let wave_sho: Vec<f64> = wave_noh.raw_wave();
@@ -4392,7 +4399,7 @@ mod tester{
         let checked = motif.base_check(&sequence, &binds.1, Bp::T, 6);
 
         let start = Instant::now();
-        let wave_filter = motif.only_pos_waveform(Bp::T, 6, &wave, background.kernel_ref());
+        let wave_filter = motif.only_pos_waveform(Bp::T, 6, &data_seq);
         let duration = start.elapsed();
 
         let raw_filter: Vec<f64> = wave_filter.raw_wave();
@@ -4411,11 +4418,11 @@ mod tester{
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
         let start2 = Instant::now();
-        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, Bp::T, 6, &wave, background.kernel_ref())};
+        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, Bp::T, 6, &data_seq)};
         let duration2 = start2.elapsed();
 
         let start3 = Instant::now();
-        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &wave, background.kernel_ref())};
+        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &data_seq)};
         let duration3 = start3.elapsed();
 
         let unsafe_sho = just_divide.raw_wave();

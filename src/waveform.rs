@@ -1237,12 +1237,14 @@ mod tests{
 
         let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
 
-        let noise: Noise = signal.produce_noise(&base_w, &background);
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &background)};
+
+        let noise: Noise = signal.produce_noise(&data_seq);
 
         let noi: Vec<f64> = noise.resids();
 
 
-        let raw_resid = &signal-&base_w;
+        let raw_resid = &signal-data_seq.data();
 
         let w = raw_resid.raw_wave();
 

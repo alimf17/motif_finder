@@ -33,7 +33,7 @@ use log::warn;
 
 use regex::Regex;
 
-const DATA_SUFFIX: &str = "data.json";
+const DATA_SUFFIX: &str = "data.bin";
 const MAD_ADJUSTER: f64 = 1.4826;
 
 const ILLEGAL_FASTA_FILE_PANIC: &str = "FASTA file must be alternating pairs of lines: first in pair should start with '>', second should be the bases";
