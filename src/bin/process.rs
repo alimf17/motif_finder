@@ -1,4 +1,5 @@
-use std::fs; 
+use std::fs;
+use std::io::Read;
 
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3};
@@ -79,14 +80,15 @@ pub fn main() {
         num_chains = 26;
     }
 
+    let mut buffer: Vec<u8> = Vec::new();
 
     //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
-        //let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.json")).unwrap();
-        let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"00\\d{5}.json")).unwrap();
+        //let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
+        let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"00\\d{5}.bin")).unwrap();
         let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
         
         let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -99,12 +101,16 @@ pub fn main() {
 
         println!("file {:?} ", file_y);
 
-        set_trace_collections.push(serde_json::from_str(&fs::read_to_string(file_y.expect("Must have matches to proceed"))
-                                                                          .expect("File must exist or wouldn't appear"))
-                                                                          .expect("All read in files must be correct json!"));
+
+        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer);
+
+        set_trace_collections.push(bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"));
+
 
         for file_name in iter_files {
-            let mut interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+            buffer.clear();
+            fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer);
+            let mut interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
@@ -112,7 +118,7 @@ pub fn main() {
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
-            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}00d{{5}}.json", bead, '\\').as_str())).unwrap();
+            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}00d{{5}}.bin", bead, '\\').as_str())).unwrap();
             let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
             let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -122,7 +128,9 @@ pub fn main() {
             let iter_files = chain_files.iter();
 
             for file_name in iter_files {
-                let interim: SetTraceDef = serde_json::from_str(&fs::read_to_string(file_name).expect("File must exist or wouldn't appear")).expect("All read in files must be correct json!");
+                buffer.clear();
+                fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer);
+                let interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"); 
                 
                 /*if interim.len() >= 5 {
                     println!("{} {:?} inter", file_name, interim.index_into(0..5));
@@ -136,7 +144,11 @@ pub fn main() {
 
 
         }}
+    
+        buffer.clear();
     }
+
+    std::mem::drop(buffer);
 
     //set_trace_collections is now the chains we want
 
