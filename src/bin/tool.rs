@@ -188,6 +188,13 @@ fn main() {
             };
             current_trace.push_last_state_from_json(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a Json output file").as_str());
         },
+        Some("bincode") => {
+            let (validate, mut maybe_rng) = match args.get(init_check_index+1).map(|x| x.parse::<bool>().ok()).flatten() {
+                None | Some(false) => (true, Some(&mut rng)),
+                Some(true) => (false, None),
+            };
+            current_trace.push_last_state_from_bincode(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a bincode output file").as_str());
+        }
         _ => (),
     };
 
