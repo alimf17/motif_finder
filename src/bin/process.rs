@@ -463,7 +463,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
 
     let len = map_heights.len();
-    let plot = BitMapBackend::new(file_name, (600, (len as u32)*600)).into_drawing_area();
+    let plot = BitMapBackend::new(file_name, (120*(len as u32), 600)).into_drawing_area();
 
     plot.fill(&full_palette::WHITE).unwrap();
 
