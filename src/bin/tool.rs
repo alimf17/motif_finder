@@ -26,14 +26,17 @@ fn main() {
     //8) Number of advances to run the set trace
     //May also have the following arguments:
 
-    //9) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
-    //   extensions and contractions on a single motif
-    //10) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
-    //    base identities for entirely NEW PWMs. Will only work if (9) included
-    //11) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
-    //    certain position before giving up drawing it. Will only work if (9) and (10) included 
-    //12) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
-    //    being considered. Will only work if (9), (10), and (11) included
+    //9) A non negative double for how much to scale the cutoff for a data block
+    //   to be considered peaky: less than 1.0 is more permissive, greater than 1.0 
+    //   is more strict
+    //10) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
+    //   extensions and contractions on a single motif Will only work if (9) included
+    //11) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
+    //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included
+    //12) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
+    //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included 
+    //13) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
+    //    being considered. Will only work if (9), (10), (11), and (12) included
     //
     //Penultimate argument) Either the word "meme" or the word "json". If one of these is not the argument,
     //   no other arguments will be considered.
@@ -77,9 +80,14 @@ fn main() {
     //that change statics relevant for inference.
     //
 
+    let mut peak_cutoff: Option<f64> = None;
+
     let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
-    if init_check_index > 9 { 
-        let extend_alpha: f64 = args[9].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 9 {
+        peak_cutoff = Some(args[9].parse().expect("We already checked that this parsed to f64"));
+    }
+    if init_check_index > 10 { 
+        let extend_alpha: f64 = args[10].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(extend_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //let mut w = PROPOSE_EXTEND.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
@@ -89,8 +97,8 @@ fn main() {
 
         PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
-    if init_check_index > 10 { 
-        let pwm_alpha: f64 = args[10].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 11 { 
+        let pwm_alpha: f64 = args[11].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(pwm_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -104,16 +112,16 @@ fn main() {
     }
 
 
-    if init_check_index > 11 { 
-        let threshold: f64 = args[11].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 12 { 
+        let threshold: f64 = args[12].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(threshold > 0.0) || (threshold >= 1.0) {panic!("Peak drawing threshold must be a valid strictly positive float strictly less than 1.0");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
         let mut w = THRESH.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
         *w = threshold; 
     }
-    if init_check_index > 12 { 
-        let credibility: f64 = args[12].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 13 { 
+        let credibility: f64 = args[13].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -121,8 +129,8 @@ fn main() {
         *w = credibility; 
     }
 
-    if init_check_index > 13 { 
-        let momentum: f64 = args[13].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 14 { 
+        let momentum: f64 = args[14].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         //SAFETY: This modification is made before any inference is done, preventing data races
         //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
@@ -135,8 +143,8 @@ fn main() {
     } 
 
 
-    if init_check_index > 14 { 
-        let eps: f64 = args[14].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > 15 { 
+        let eps: f64 = args[15].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(eps > 0.0) {panic!("HMC epsilon must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -155,7 +163,7 @@ fn main() {
 
 
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR).unwrap();
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR, peak_cutoff).unwrap();
 
 
     let data_ref = AllDataUse::new(&total_data).unwrap();

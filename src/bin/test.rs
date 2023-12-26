@@ -43,7 +43,7 @@ fn main() {
     assert!(spacing > 0, "The spacing cannot be zero!");
     assert!(fragment_length > spacing, "The fragment length must be strictly greater than the spacing!");
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR).unwrap();
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR, None).unwrap();
 
     let data_ref = AllDataUse::new(&total_data).unwrap();
 

@@ -54,6 +54,7 @@ pub fn main() {
     let mut num_chains: usize = args[3].parse().expect("The number of chains you have should be numeric!");
     let mut max_chain: usize = args[4].parse().expect("The number of strung together inferences you have per chain should be numeric!");
     let burn_in: Option<usize> = args.get(5).map(|a| a.parse::<usize>().ok()).flatten();
+    let scale_thresh: Option<f64> = args.get(6).map(|a| a.parse::<f64>().ok()).flatten();
 
     let mut min_chain: usize = burn_in.unwrap_or(0);
 
@@ -86,7 +87,11 @@ pub fn main() {
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
-        let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
+        let base_str = if scale_thresh.is_none() {
+            format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain])
+        } else {
+            format!("{}/{}_custom_scale_{}_{}", out_dir.clone(), base_file,scale_thresh.unwrap(), UPPER_LETTERS[chain])
+        };
         //let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
         let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"00\\d{5}.bin")).unwrap();
         let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");

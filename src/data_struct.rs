@@ -36,8 +36,6 @@ use regex::Regex;
 const DATA_SUFFIX: &str = "data.bin";
 const MAD_ADJUSTER: f64 = 1.4826;
 
-const ILLEGAL_FASTA_FILE_PANIC: &str = "FASTA file must be alternating pairs of lines: first in pair should start with '>', second should be the bases";
-
 static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
     let mut map: HashMap<char, usize> = HashMap::new();
     for i in 0..BASE_L {
@@ -109,10 +107,14 @@ impl AllData {
     //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>) -> Result<(Self, String), AllProcessingError> {
+                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
 
 
-        let file_out = format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX);
+        let file_out = if peak_scale.is_some() {
+            format!("{}/{}_{}_custom_scale_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),peak_scale.expect("We only get here if peak_scale is Some"), spacing,DATA_SUFFIX)
+        } else {
+            format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX)
+        };
 
         println!("formatted");
         let check_initialization = fs::File::open(file_out.as_str());
@@ -146,7 +148,7 @@ impl AllData {
             Err(E) => Err(E.clone()),
         };
 
-        let (pre_data, background) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, is_circular, use_ar_model)?;
+        let (pre_data, background) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, is_circular, use_ar_model, peak_scale)?;
  
         println!("processed data");
 
@@ -314,7 +316,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background), AllProcessingError> {
        
         let att_file = fs::read_to_string(data_file_name);
 
@@ -577,7 +579,19 @@ impl AllData {
         //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
         //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
         //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
-        let peak_thresh = 2.0_f64.sqrt()*(raw_locs_data.len() as f64).ln().sqrt();
+        
+        let mut peak_scale: f64 = scale_peak_thresh.unwrap_or(1.0);
+
+        if !(peak_scale.is_finite()) {
+            warn!("peak scaling must be a valid finite value! Program will use default scaling.");
+            peak_scale = 1.0;
+        }
+        if peak_scale < 0.0 {
+            warn!("peak scaling must be a nonnegative value! Taking absolute value of your supplied number!");
+            peak_scale = peak_scale.abs();
+        }
+
+        let peak_thresh = 2.0_f64.sqrt()*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
@@ -1257,7 +1271,7 @@ impl<'a> AllDataUse<'a> {
 }
 
 #[derive(Error, Debug, Clone)]
-enum FastaError {    
+pub enum FastaError {    
     #[error(transparent)]
     InvalidFile(#[from] Rc<std::io::Error>),
     #[error(transparent)]
@@ -1270,27 +1284,27 @@ enum FastaError {
 
 
 #[derive(Error, Debug, Clone)]
-struct EmptyFastaError;
+pub struct EmptyFastaError;
 
 impl std::fmt::Display for EmptyFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace, and must have at least one line with valid base pairs in it!")}
 }
 
 #[derive(Error, Debug, Clone)]
-struct MaybeNotFastaError;
+pub struct MaybeNotFastaError;
 
 impl std::fmt::Display for MaybeNotFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file first line must start with a '>'! Are you certain this is a FASTA file?") }
 }
 
 #[derive(Error, Debug, Clone)]
-struct InvalidBasesError {
+pub struct InvalidBasesError {
     bad_base_locations: Vec<(u64, u64)>, 
     too_many_bad_bases: bool,
 }
 
 #[derive(Error, Debug)]
-struct SequenceWaveformIncompatible;
+pub struct SequenceWaveformIncompatible;
 
 impl std::fmt::Display for SequenceWaveformIncompatible {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "The sequence and the data you are using are incompatible!") }
@@ -1344,7 +1358,7 @@ impl std::fmt::Display for InvalidBasesError{
 
 
 #[derive(Error, Debug)]
-enum DataProcessError {
+pub enum DataProcessError {
     #[error(transparent)]
     InvalidFile(#[from] Rc<std::io::Error>),
     #[error(transparent)]
@@ -1364,13 +1378,13 @@ impl DataProcessError {
 }
 
 #[derive(Error, Debug)]
-struct EmptyDataError;
+pub struct EmptyDataError;
 impl std::fmt::Display for EmptyDataError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Data file should not be empty!")}
 }
 
 #[derive(Error, Debug)]
-struct DataFileBadFormat {
+pub struct DataFileBadFormat {
     bad_header: bool, 
     empty_lines: Vec<u64>,
     no_location_lines: Vec<u64>, 
@@ -1483,7 +1497,7 @@ impl std::fmt::Display for AllProcessingError {
 }
 
 #[derive(Error, Debug)]
-enum BadDataSequenceSynchronization {
+pub enum BadDataSequenceSynchronization {
     SequenceMismatch,
     KernelMismatch,
     NotEnoughNullData, 
