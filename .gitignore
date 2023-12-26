@@ -3,4 +3,5 @@ core*
 *.swp
 *.out
 *.err
+*.log
 perf.data*
