@@ -6,6 +6,8 @@ use motif_finder::base::{SQRT_2, SQRT_3};
 
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT};
 
+use motif_finder::data_struct::{AllData, AllDataUse};
+
 use log::warn;
 
 use kmedoids;
@@ -153,6 +155,11 @@ pub fn main() {
         buffer.clear();
     }
 
+    let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
+    all_dat_file.read_to_end(&mut buffer);
+    let all_dat: AllData = bincode::deserialize(&buffer).expect("Big trouble if we're saving invalid data files");
+    let all_dat_use: AllDataUse = AllDataUse::new(&all_dat).expect("Big trouble if we're saving invalid data files");
+
     std::mem::drop(buffer);
 
     //set_trace_collections is now the chains we want
@@ -192,7 +199,14 @@ pub fn main() {
     let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace().unwrap().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&all_dat).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+    };
+
+    let mut plot_like = poloto::plot(format!("{} Median distance to data", base_file), "Step", "Median Dist");
+    let plot_like_file = fs::File::create(format!("{}/{}_med_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_like.line(format!("Chain {}", letter), trace.wave_dist_trace(&all_dat_use).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };
 
 

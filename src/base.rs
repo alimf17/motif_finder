@@ -1690,6 +1690,9 @@ impl<'a> MotifSet<'a> {
         }
     }
 
+    pub fn median_data_dist(&self) -> f64 {
+        self.signal.median_distance_between_waves(self.data_ref.data())
+    }
     fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
@@ -2896,20 +2899,24 @@ impl SetTraceDef {
         self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
     }
 
-    pub fn ln_likelihood_trace(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+    pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
         
-        let check_data = fs::read_to_string(self.all_data_file.as_str())?;
-
-        let full_data: AllData = serde_json::from_str(check_data.as_str())?;
-
-        Ok(self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>())
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>()
 
     }
 
     pub fn motif_num_trace(&self) -> Vec<f64> {
-        self.trace.iter().map(|a| a.set.len() as f64).collect::<Vec<_>>()
+        self.trace.par_iter().map(|a| a.set.len() as f64).collect::<Vec<_>>()
     }
 
+
+    pub fn wave_dist_trace(&self, waypost: &AllDataUse) -> Vec<f64> {
+        self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
+    }
+
+    pub fn data_name(&self) -> &str {
+        &self.all_data_file
+    }
 
     //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
     pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {

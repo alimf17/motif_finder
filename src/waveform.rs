@@ -351,6 +351,17 @@ impl<'a> Waveform<'a> {
         residual.produce_resid_noise(data_ref.background_ref())
 
     }
+
+    pub fn median_distance_between_waves(&self, data: &Self) -> f64 {
+        let residual = self-data;
+        let mut abs_wave = residual.wave.iter().map(|&a| a.abs()).collect::<Vec<f64>>();
+        abs_wave.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        if (abs_wave.len() & 1) == 1 {
+            abs_wave[abs_wave.len()/2]
+        } else {
+            (abs_wave[abs_wave.len()/2]+abs_wave[abs_wave.len()/2 -1])/2.0
+        }
+    }
    
     pub fn account_auto<'b>(&self, background: &'b Background) -> Noise<'b> {
 
