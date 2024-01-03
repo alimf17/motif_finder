@@ -50,7 +50,6 @@ fn main() {
         panic!("Not enough arguments!");
     }
 
-    let run_name = args[1].as_str();
     let output_dir = args[2].as_str();
     let fasta_file = args[3].as_str();
     let is_circular: bool = args[4].parse().expect("Circularity must be either 'true' or 'false'!");
@@ -83,8 +82,12 @@ fn main() {
     let mut peak_cutoff: Option<f64> = None;
 
     let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
+    let run_name;
     if init_check_index > 9 {
         peak_cutoff = Some(args[9].parse().expect("We already checked that this parsed to f64"));
+        run_name = format!("{}_custom_scale_{}", args[1].as_str(), args[9]);
+    } else {
+        run_name = args[1].clone();
     }
     if init_check_index > 10 { 
         let extend_alpha: f64 = args[10].parse().expect("We already checked that this parsed to f64");
@@ -215,7 +218,7 @@ fn main() {
 
     let mut track_hmc: usize = 0;
 
-    for step in 0..1000 {
+    for step in 0..10000 {
  
         let (selected_move, accepted) = current_trace.advance(MOMENTUM_DIST.get().expect("No more writing"), &mut rng);
 
@@ -234,9 +237,11 @@ fn main() {
         }
         if step % save_step == 0 {
             
-            current_trace.save_trace(output_dir, run_name, step);
-            current_trace.save_and_drop_history(output_dir, run_name, step);
-
+            current_trace.save_trace(output_dir, &run_name, step);
+            
+            if step != 0 {
+                current_trace.save_and_drop_history(output_dir, &run_name, step);
+            }
         }
 
     }
@@ -244,7 +249,7 @@ fn main() {
     //let init_sd: f64 = MOMENTUM_SD.read().expect("Nothing should write to this right now");
     let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
 
-    println!("Momentum burn in took {} trials to stabilize", number_burn_in);
+    println!("Momentum burn in took {} trials to stabilize to sd of {}", number_burn_in, new_sd);
 
     let new_momentum_dist = Normal::new(0.0, new_sd).unwrap();
 
@@ -267,8 +272,8 @@ fn main() {
         }
         if step % save_step == 0 {
             
-            current_trace.save_trace(output_dir, run_name, step);
-            current_trace.save_and_drop_history(output_dir, run_name, step);
+            current_trace.save_trace(output_dir, &run_name, step+10000);
+            current_trace.save_and_drop_history(output_dir, &run_name, step+10000);
 
         }
 

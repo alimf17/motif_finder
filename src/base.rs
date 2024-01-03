@@ -233,7 +233,7 @@ impl Base {
         }
         
         if any_neg{
-           //println!("props off {:?}", props);
+           println!("props off {:?}", props);
            panic!("All base entries must be positive!"); 
         }
 
@@ -2084,9 +2084,6 @@ impl<'a> MotifSet<'a> {
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
-       if delta_potential_energy == -f64::INFINITY {
-            println!("d k {} p {} old_mots {:?} new mots {:?} mot_dists {:?}",delta_kinetic_energy, delta_potential_energy,self.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), prior_set.set.iter().map(|a| a.best_motif()).collect::<Vec<_>>(), self.set.iter().zip(prior_set.set.iter()).map(|(a,b)| a.distance_function(b)).collect::<Vec<_>>()); 
-       }
        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
        } else {
@@ -2422,17 +2419,17 @@ impl<'a> SetTrace<'a> {
     //PANICS: if initial_sd is not positive
     //This function gives back (number of 50 hmc move blocks to stabilize acceptance, sd at which hmc stabilized at about 90% acceptance)
     pub fn burn_in_momentum<R: Rng + ?Sized>(&mut self, initial_sd: f64, rng: &mut R) -> (usize, f64) {
-        //I'm aiming for acceptance rates of about 0.8. Blocks are about 50 hmc proposals big, so I'm 
-        //aiming for three blocks in a row to hit between 0.69 and 0.91, within 2 standard errors of 0.8
+        //I'm aiming for acceptance rates of about 0.9. Blocks are about 1000 hmc proposals big, so I'm 
+        //aiming for three blocks in a row to hit between 0.81 and 0.99, within 3 standard errors of 0.9
 
         let mut dist = Normal::new(0.0, initial_sd).expect("Do not give a non positive sd");
         //We are taking ownership of this, but will replace it by the end
         let mut set = &mut self.active_set;
 
-        const BLOCK_LEN: usize = 50;
-        const TARGET_PROP: f64 = 0.8;
-        let min_prop = TARGET_PROP-2.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
-        let max_prop = TARGET_PROP+2.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+        const BLOCK_LEN: usize = 100;
+        const TARGET_PROP: f64 = 0.9;
+        let min_prop = TARGET_PROP-3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+        let max_prop = TARGET_PROP+3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
 
         let mut all_fine = true;
 
@@ -2461,6 +2458,8 @@ impl<'a> SetTrace<'a> {
         let mut lowbound;
         let mut upbound;
 
+        let mut high_give_up = false;
+
         if sum_props/3.0 < TARGET_PROP {
 
             lowbound = initial_sd;
@@ -2469,20 +2468,32 @@ impl<'a> SetTrace<'a> {
             while !found {
                 num_accept = 0_f64;
                 sum_props = 0.0_f64;
-                upper_sd *= 2.0;
-                dist = Normal::new(0.0, upper_sd).unwrap();
-                for _ in 0..3 {
-                    for _ in 0..BLOCK_LEN {
-                        let (s, accept, _) = set.hmc(&dist, rng);
-                        *set = s;
-                        if accept {num_accept += 1.0;}
-                    }
-                    let prop_accept = num_accept/(BLOCK_LEN as f64);
-                    sum_props += prop_accept;
+                let mut try_up = upper_sd/8.0;
+                //upper_sd /= 8.0;
+                if try_up <= 0.0 {
+                    println!("hitting minimum sd {}. Trying to mitigate.", try_up);
+                    try_up = upper_sd/2.0;
                 }
+                if try_up <= 0.0 {
+                    println!("can't mitigate minimum sd {}. Giving up on doing better: finall upper_sd {}", try_up, upper_sd);
+                    found = true;
+                } else {
+                    
+                    upper_sd = try_up;
+                    dist = Normal::new(0.0, upper_sd).unwrap();
+                    for _ in 0..3 {
+                        for _ in 0..BLOCK_LEN {
+                            let (s, accept, _) = set.hmc(&dist, rng);
+                            *set = s;
+                            if accept {num_accept += 1.0;}
+                        }
+                        let prop_accept = num_accept/(BLOCK_LEN as f64);
+                        sum_props += prop_accept;
+                    }
 
-                found = (sum_props/3.0) > max_prop;
-                num_blocks += 1;
+                    found = (sum_props/3.0) > max_prop;
+                    num_blocks += 1;
+                }
             }
 
             upbound = upper_sd;
@@ -2495,7 +2506,7 @@ impl<'a> SetTrace<'a> {
             while !found {
                 num_accept = 0_f64;
                 sum_props = 0.0_f64;
-                lower_sd /= 2.0;
+                lower_sd *= 10.0;
                 dist = Normal::new(0.0, lower_sd).unwrap();
                 for _ in 0..3 {
                     for _ in 0..BLOCK_LEN {
@@ -2506,18 +2517,22 @@ impl<'a> SetTrace<'a> {
                     let prop_accept = num_accept/(BLOCK_LEN as f64);
                     sum_props += prop_accept;
                 }
-
-                found = (sum_props/3.0) < min_prop;
+               
+                if num_blocks > 1000 {
+                    high_give_up = true;
+                }
+                found = !high_give_up && ((sum_props/3.0) < min_prop);
+                num_blocks += 1;
 
             }
 
             lowbound = lower_sd;
-            num_blocks += 1;
 
         }
 
-        let mut mid_sd = (lowbound*upbound).sqrt();
-        let mut found = false;
+        println!("finding bounds took {} blocks", num_blocks);
+        let mut found = high_give_up;
+        let mut mid_sd = if found {upbound} else {(lowbound*upbound).sqrt()};
 
         while !found {
             num_accept = 0_f64;
@@ -2544,11 +2559,29 @@ impl<'a> SetTrace<'a> {
                     upbound = mid_sd;
                 }
             }
-            
-            mid_sd = (lowbound*upbound).sqrt();
+        
+            if (num_blocks > 1000) { 
+               if !above_low {
+                   mid_sd = lowbound;
+               } else {
+                   mid_sd = upbound;
+               }
+               found = true;
+            } 
+            if !found {
+                if !above_low {
+                    lowbound = mid_sd;
+                } else {
+                    upbound = mid_sd;
+                }
+                mid_sd = (lowbound*upbound).sqrt();
+            }
             num_blocks += 1;
         }
 
+        if high_give_up {
+            warn!("Gave up trying to get ambitious: this is probably ambitious enough without causing acceptance problems");
+        }
         return (num_blocks, mid_sd);
 
 
@@ -2957,9 +2990,12 @@ impl SetTraceDef {
 
     }
     
-    pub fn save_best_trace(&self, output_dir: &str, run_name: &str) {
+    pub fn save_best_trace(&self, buffer: &mut Vec<u8>, output_dir: &str, run_name: &str) {
 
-        let data_reconstructed: AllData = serde_json::from_str(fs::read_to_string(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file").as_str()).expect("Monte Carlo chain should always point to data in proper format for inference!");
+        let mut try_bincode = fs::File::open(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+        let _ = try_bincode.read_to_end(buffer);
+
+        let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
         let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
         let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
