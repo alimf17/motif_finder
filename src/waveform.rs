@@ -469,6 +469,10 @@ impl<'a> Waveform<'a> {
         self.seq
     }
 
+    pub fn amount_data(&self) -> usize {
+        self.wave.len()
+    }
+
 }
 
 impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {

@@ -1198,6 +1198,10 @@ impl<'a> AllDataUse<'a> {
         &self.data
     }
 
+    pub fn size(&self) -> usize {
+        self.data.amount_data()
+    }
+
     pub fn background_ref(&self) -> &Background {
         &self.background
     }
