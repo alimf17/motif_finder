@@ -469,6 +469,10 @@ impl<'a> Waveform<'a> {
         self.seq
     }
 
+    pub fn number_bp(&self) -> usize {
+        self.seq.number_bp()
+    }
+
     pub fn amount_data(&self) -> usize {
         self.wave.len()
     }

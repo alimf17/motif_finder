@@ -23,7 +23,7 @@ use rand::distributions::{Distribution, WeightedIndex};
 
 use statrs::{consts, StatsError};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
-use statrs::statistics::{Min, Max};
+use statrs::statistics::{Min, Max, Distribution as StatrsDist};
 
 use once_cell::sync::Lazy;
 
@@ -1989,7 +1989,13 @@ impl<'a> MotifSet<'a> {
 
        let mut momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
 
-       momentum[0] /= 16384.;//Peak height needs to move more slowly than other parameters
+       let height_scale: f64 = self.data_ref.number_bp() as f64;
+
+       let square_height_scale: f64 = height_scale*height_scale;
+
+       let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
+
+       momentum[0] /= height_scale;//Peak height needs to move more slowly than other parameters
 
        let mut prior_set = self.clone();
        
@@ -2002,8 +2008,6 @@ impl<'a> MotifSet<'a> {
        
       
        let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data_ref);
-
-
        
        let mut momentum_apply = momentum.clone();
 
@@ -2068,7 +2072,6 @@ impl<'a> MotifSet<'a> {
 
        }
 
-       let mut delta_kinetic_energy: f64 = 0.0;
 
 
        //Our M-H cutoff is exp(-(new hamiltonian-old hamiltonian))
@@ -2078,11 +2081,18 @@ impl<'a> MotifSet<'a> {
        //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
        //self.ln_post
 
-       for i in 0..momentum.len() {
-           delta_kinetic_energy += (momentum[i].powi(2) - momentum_apply[i].powi(2)  )/2.0;
-       }
+       let delta_kinetic_energy = Self::net_kinetic_energy(&momentum, square_height_scale, variance)
+           -Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance);
 
        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
+       
+       if cfg!(test) {
+           println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum, square_height_scale, variance), Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance));
+           println!("first mom {:?}\n Second mom {:?}", &momentum_apply, &momentum);
+       
+           println!("d kin {} d pot {}", delta_kinetic_energy, delta_potential_energy)
+       }
+
 
        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
@@ -2095,6 +2105,27 @@ impl<'a> MotifSet<'a> {
        
    }
 
+   //The actual kinetic energy is p·M^(-1)p+ln(||M||)+constant
+   //But that doesn't matter. I'm only every calculating kinetic energy 
+   //as a difference, so I can omit +ln(||M||)+constant
+   fn net_kinetic_energy(momentum: &[f64], squared_genome_size: f64, momentum_var: f64) -> f64 {
+       let l_momentum = momentum.len();
+       //if l_momentum = 0 {return 0.0;}
+
+       let mut ke: f64 = 0.0;
+
+       let mut mom_iter = momentum.iter();
+
+       match mom_iter.next() {
+           None => return 0.0,
+           //Some(m) => ke += m*m*squared_genome_size/(2.0*momentum_var),
+           Some(m) => ke += m*m/(2.0),
+       };
+
+       ke += mom_iter.map(|m| m*m/(2.0)).sum::<f64>();
+
+       ke
+   }
 
     #[cfg(test)]
     fn numerical_gradient(&self) -> Vec<f64> {

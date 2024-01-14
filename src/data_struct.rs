@@ -1209,6 +1209,10 @@ impl<'a> AllDataUse<'a> {
     pub fn unit_kernel_ref(&self) -> &Kernel {
         self.background.kernel_ref()
     }
+
+    pub fn number_bp(&self) -> usize {
+        self.data.number_bp()
+    }
     
     pub fn generate_initial_condition_jsons<R: Rng + ?Sized>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: &mut R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
 

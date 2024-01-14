@@ -221,6 +221,16 @@ impl Sequence {
 
 
     //Regular reader functions
+
+    //This can TECHNICALLY panic in debug mode and produce incorrect answers 
+    //when compiled with optimizations. For 32 bit platforms, I'd watch out
+    //if somehow operating on an entire human genome at once without any 
+    //omissions, but for 64 bit platforms (or more), there are no known genome 
+    //sizes on which this could be a concern.
+    pub fn number_bp(&self) -> usize {
+        self.seq_blocks.len() << 2 //Each u8 contains four bp, so we multiply by 4
+    }
+
     pub fn seq_blocks(&self) -> &Vec<u8> {
         &self.seq_blocks
     }
