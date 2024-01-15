@@ -44,7 +44,7 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
     map
 });
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AllData {
 
     seq: Sequence,

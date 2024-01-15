@@ -592,7 +592,7 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WaveformDef {
     wave: Vec<f64>,
     spacer: usize,
