@@ -1730,7 +1730,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
+    pub fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.set[rem_id].clone();
         self.signal -= &rem_mot.generate_waveform(self.data_ref);
         self.signal += &new_mot.generate_waveform(self.data_ref) ;

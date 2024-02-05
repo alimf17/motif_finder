@@ -8,7 +8,7 @@ use motif_finder::modified_t::SymmetricBaseDirichlet;
 
 use statrs::distribution::Normal;
 use once_cell::sync::Lazy;
-//use std::time::{Duration, Instant};
+use std::time::{Duration, Instant};
 
 use std::env;
 
@@ -218,6 +218,8 @@ fn main() {
 
     let mut track_hmc: usize = 0;
 
+    let start_inference_time = Instant::now();
+
     for step in 0..10000 {
  
         let (selected_move, accepted) = current_trace.advance(MOMENTUM_DIST.get().expect("No more writing"), &mut rng);
@@ -245,7 +247,7 @@ fn main() {
         }
 
     }
-
+/*
     //let init_sd: f64 = MOMENTUM_SD.read().expect("Nothing should write to this right now");
     let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
 
@@ -278,8 +280,8 @@ fn main() {
         }
 
     }
-
-    println!("Finished run");
+*/
+    println!("Finished run in {:?}", start_inference_time.elapsed());
 
   
 
