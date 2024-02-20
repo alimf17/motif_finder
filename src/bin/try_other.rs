@@ -47,8 +47,12 @@ fn main() {
 
     let mut cho_set: MotifSet = MotifSet::rand_with_one(&using, &mut rng);
 
-    let _ = cho_set.replace_motif(cho_mot, 0);
+    let cho_like = cho_set.replace_motif(cho_mot, 0);
 
+    println!("mot {:?}", cho_set.get_nth_motif(0).best_motif());
+    println!(" reg close {:?}", using.data().seq().all_kmers_within_hamming(&cho_set.get_nth_motif(0).best_motif(), 3).iter().map(|&a| Sequence::u64_to_kmer(using.data().seq().idth_unique_kmer(cho_set.get_nth_motif(0).len(), a), cho_set.get_nth_motif(0).len())).collect::<Vec<_>>());
+
+    println!("cho like {}", cho_like);
     let cho_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(cho_set), &using, None);
 
     cho_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "cho_set", 0);
