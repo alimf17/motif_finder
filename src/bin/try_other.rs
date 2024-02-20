@@ -1,4 +1,4 @@
-
+use motif_finder::sequence::Sequence;
 use motif_finder::data_struct::{AllData, AllDataUse};
 use motif_finder::base::{Base, Motif, MotifSet, SetTrace, InitializeSet};
 
@@ -53,7 +53,12 @@ fn main() {
 
     cho_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "cho_set", 0);
 
-    let reg_mot: Motif = Motif::raw_pwm(vec![
+    //This is the actual regulonDB set. Its best motif, [A, G, T, A, A, C, T, T, A, C, A, A],
+    //does not appear directly in the sequence
+    //So I modified it: there are only two motifs that are within hamming distance 2 of it:
+    //[A, G, T, *C*, A, *T*, T, T, A, C, A, A] and [A, G, T, A, A, C, T, T, A, C, *T*, *G*]
+    //I chose the latter because the former requires changing around more decisive bases
+    /*let reg_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([1.0, 0.5, 0.125, 0.125]),
                                        Base::new([1./7., 1./7., 1.0, 5./7.]),
                                        Base::new([0.375, 0.25, 0.125, 1.0]),
@@ -67,10 +72,30 @@ fn main() {
                                        Base::new([1.0, 1./7., 5./7., 1./7.]),
                                        Base::new([1.0, 1.0, 0.75, 0.75])], 10.0);
 
+                                       */
+    
+    let reg_mot: Motif = Motif::raw_pwm(vec![
+                                       Base::new([1.0, 0.5, 0.125, 0.125]),
+                                       Base::new([1./7., 1./7., 1.0, 5./7.]),
+                                       Base::new([0.375, 0.25, 0.125, 1.0]),
+                                       Base::new([1.0, 1./7., 1./7., 5./7.]),
+                                       Base::new([1.0, 0.1, 0.2, 0.1]),
+                                       Base::new([1./11., 1.0, 1./11., 1./11.]),
+                                       Base::new([0.1, 0.1, 0.2, 1.0]),
+                                       Base::new([1./11., 1./11., 1./11., 1.0]),
+                                       Base::new([1.0, 1./6., 1./3., 2./3.]),
+                                       Base::new([0.25, 1.0, 0.125, 0.375]),
+                                       Base::new([1./7., 1./7., 5./7., 1.0]),
+                                       Base::new([0.75, 0.99, 1.0, 0.75])], 10.0);
+
+
+
     let mut reg_set: MotifSet = MotifSet::rand_with_one(&using, &mut rng);
 
     let like = reg_set.replace_motif(reg_mot, 0);
 
+    println!("mot {:?}", reg_set.get_nth_motif(0).best_motif());
+    println!(" reg close {:?}", using.data().seq().all_kmers_within_hamming(&reg_set.get_nth_motif(0).best_motif(), 2).iter().map(|&a| Sequence::u64_to_kmer(using.data().seq().idth_unique_kmer(reg_set.get_nth_motif(0).len(), a), reg_set.get_nth_motif(0).len())).collect::<Vec<_>>());
 
     println!("reg like {}", like);
 
