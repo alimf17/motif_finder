@@ -2701,8 +2701,9 @@ impl<'a> MotifSet<'a> {
 
             bincode_file_handle.read_to_end(&mut buffer);
 
-            let prior_state: MotifSetDef = bincode::deserialize(&buffer).expect("Binarray file MUST be a valid motif set!");
+            let prior_state: MotifSetDef = bincode::deserialize(&buffer).unwrap_or_else(|_| (&bincode::deserialize::<StrippedMotifSet>(&buffer).expect("bincode must be a valid motif set!").reactivate_set(self.data_ref)).into());
 
+            println!("bincode state {:?}", prior_state.set);
             self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
 
         }
@@ -2766,7 +2767,12 @@ impl<'a> MotifSet<'a> {
 
             let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
 
-            let mut buffer: Vec<u8> = bincode::serialize( &self.trace[0]).expect("serializable");
+            let mot_to_save: StrippedMotifSet = match self.trace.get(0) {
+                Some(set) => set.clone(), 
+                None => self.current_set_to_print(),
+            };
+
+            let mut buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
 
             outfile_handle.write(&buffer).expect("buffer should write");
         }

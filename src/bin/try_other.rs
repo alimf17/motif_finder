@@ -104,7 +104,8 @@ fn main() {
     println!("reg like {}", like);
 
     let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
-    
+   
+    reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set");
     reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set", 0);
     let swi_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.2, 0.1, 0.1, 1.0]),

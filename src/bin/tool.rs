@@ -204,11 +204,13 @@ fn main() {
                 None | Some(false) => (true, Some(&mut rng)),
                 Some(true) => (false, None),
             };
+            println!("bincode");
             current_trace.push_last_state_from_bincode(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a bincode output file").as_str());
         }
         _ => (),
     };
 
+    println!("init {:?}", current_trace.current_set_to_print());
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
@@ -220,8 +222,9 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
-    for step in 0..10000 {
+    //for step in 0..10000 {
  
+    for step in 0..num_advances {
         let (selected_move, accepted) = current_trace.advance(MOMENTUM_DIST.get().expect("No more writing"), &mut rng);
 
         trials[selected_move] += 1;
@@ -247,9 +250,9 @@ fn main() {
         }
 
     }
-/*
+
     //let init_sd: f64 = MOMENTUM_SD.read().expect("Nothing should write to this right now");
-    let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
+    /*let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
 
     println!("Momentum burn in took {} trials to stabilize to sd of {}", number_burn_in, new_sd);
 
