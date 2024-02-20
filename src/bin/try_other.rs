@@ -69,7 +69,10 @@ fn main() {
 
     let mut reg_set: MotifSet = MotifSet::rand_with_one(&using, &mut rng);
 
-    let _ = reg_set.replace_motif(reg_mot, 0);
+    let like = reg_set.replace_motif(reg_mot, 0);
+
+
+    println!("reg like {}", like);
 
     let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
     
