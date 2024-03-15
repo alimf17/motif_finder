@@ -16,6 +16,8 @@ use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEP
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
 
+use itertools::Itertools;
+
 use rand::Rng;
 use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
@@ -118,6 +120,11 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
 const PROB_POS_PEAK: f64 = 0.9;
+
+//This controls how much shuffling we do for the secondary base shuffling move
+//Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
+//4^SHUFFLE_BASES PWMs
+const SHUFFLE_BASES: usize = 4;
 
 /*
 static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
@@ -315,24 +322,50 @@ impl Base {
 
     pub fn make_best(&self, best: Bp) -> Base {
 
-        let mut base2 = self.clone();
-
-        let which_b = base2.best_base();
+        let which_b = self.best_base();
 
         if best != which_b {
-
-            let tmp = base2[which_b];
-            base2[which_b] = base2[best];
-            base2[best] = tmp;
+            self.swap_pair(best, which_b)
+        } else {
+            self.clone()
         }
 
 
+    }
+
+    pub fn swap_pair(&self, bp1: Bp, bp2: Bp) -> Base {
+        
+        let mut base2 = self.clone();
+        base2[bp1] = self[bp2];
+        base2[bp2] = self[bp1];
+
         base2
+
     }
 
     pub fn best_base(&self) -> Bp {
         //Safety: self.props has a size of BASE_L, so this always produces a valid result
         unsafe{ std::mem::transmute::<usize, Bp>(Self::argmax(&self.props))}
+ 
+        //Genuine surprise: this is worse when I profile it on godbolt
+        /*let mut best = if (self[Bp::A] < self[Bp::C]) { Bp::C } else {Bp::A};
+        if (self[best] < self[Bp::G]) { best = Bp::G; }
+        if (self[best] < self[Bp::T]) { best = Bp::T; }
+        best*/
+    }
+
+    pub fn all_non_best(&self) -> [Bp; BASE_L-1] {
+        let best = self.best_base();
+
+
+        match best {
+
+            Bp::A => [Bp::C, Bp::G, Bp::T],
+            Bp::C => [Bp::A, Bp::G, Bp::T],
+            Bp::G => [Bp::A, Bp::C, Bp::T],
+            Bp::T => [Bp::A, Bp::C, Bp::G],
+        }
+
     }
 
     pub fn dist_sq(&self, base: Option<&Base>) -> f64 {
@@ -362,6 +395,36 @@ impl Base {
                                                        .collect::<Vec<f64>>().try_into().unwrap();
 
         simplex
+    }
+
+
+    //This converts our base representation directly to a vector space representation
+    //In particular, our bases form a metric space under 
+    //"Vector addition" is elementwise multiplication and then renormalize
+    //"Scalar multiplication" is elementwise powering to the scalar and then renormalize
+    //And the metric is the Aitchison metric
+    //This vector space is isometric to R3 under the transformation specified in the functions
+    //Where if p = 1/(2*(1+e)) and q = e/p
+    //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
+    pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
+
+        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| self.props[a].ln());
+
+        [ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
+          -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
+          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]]
+    }
+
+    pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
+
+
+        let unnormalized_base: [f64; BASE_L] = 
+            [(-(base_as_vec[0]+base_as_vec[1]+base_as_vec[2])).exp(), 
+              ( base_as_vec[0]+base_as_vec[1]-base_as_vec[2]).exp(),
+              ( base_as_vec[0]-base_as_vec[1]+base_as_vec[2]).exp(),
+              (-base_as_vec[0]+base_as_vec[1]+base_as_vec[2]).exp()];
+
+        Base::new(unnormalized_base)
     }
 
     //Panic: if given a point outside of the base terahedron, this function will panic 
@@ -908,6 +971,44 @@ impl Motif {
         }
 
         new_mot
+
+    }
+
+    pub fn scramble_secondaries(&self, to_scramble: &[usize]) -> Vec<Motif> {
+
+        
+        let final_length = SHUFFLE_BASES.pow(to_scramble.len() as u32);
+        
+        let swapped_bases: Vec<[Base; BASE_L-1]> = to_scramble.iter().map(|&a| {
+            let non_best = self.pwm[a].all_non_best();
+            [self.pwm[a].swap_pair(non_best[0], non_best[1]), 
+            self.pwm[a].swap_pair(non_best[1], non_best[2]), self.pwm[a].swap_pair(non_best[0], non_best[2])]
+        }).collect();
+
+
+        let mut final_swaps: Vec<Motif> = Vec::with_capacity(final_length);
+
+        let mut power_scrambles = to_scramble.iter().powerset();
+
+        final_swaps.push(self.clone());
+
+        let _ = power_scrambles.next();
+
+        for scramble in power_scrambles {
+          
+            for gray_code in 0..((BASE_L-1).pow(scramble.len() as u32)) {
+                
+                let inner_swap = scramble.iter().enumerate().map(|(i, &s)| (s, (gray_code/((BASE_L-1).pow(i as u32)) % (BASE_L-1))));
+
+                let mut mot_to_be = self.clone();
+
+                for (&b, s) in inner_swap { mot_to_be.pwm[b] = swapped_bases[b][s].clone(); }
+
+                final_swaps.push(mot_to_be);
+            }
+        }
+
+        final_swaps
 
     }
 
@@ -1928,7 +2029,7 @@ impl<'a> MotifSet<'a> {
             let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
 
             let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
-                //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {
+                //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {//}
                 let mut to_add = base_set.clone();
                 let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1, self.data_ref.data().seq());
                 let lnlike = to_add.insert_motif(add_mot, id);
@@ -1951,14 +2052,61 @@ impl<'a> MotifSet<'a> {
                 selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp().abs();
             }
 
-            /*if selection_probs.len() == 0 {
-              panic!("No states being selected from!");
-              }*/
+            let dist = match WeightedIndex::new(&selection_probs) {
 
-            //println!("base leap sel {:?}", selection_probs);
+                Ok(weights) => weights, 
+                Err(_) => {warn!("Issue with base leap weights in this step. Randomly selecting. Discard inference before this point {:?}", selection_probs);
+                    WeightedIndex::new(&(vec![1.0; likes_and_mots.len()])).expect("This is statically valid")},
+            };
 
-            //let likes = (0..likes_and_mots.len()).map(|i| likes_and_mots[i].0).collect::<Vec<_>>();
-            //println!("likes base leap {:?}", likes);
+            current_set = likes_and_mots[dist.sample(rng)].1.clone();
+        }
+
+        current_set
+
+    }
+    
+    pub fn secondary_shuffle<R: Rng + ?Sized>(&self, rng: &mut R) -> Self {
+
+
+        //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
+        let mut ids: Vec<usize> = (0..self.set.len()).collect();
+        ids.shuffle(rng);
+
+        let mut current_set = self.clone();
+
+        for id in ids {
+
+            let current_mot = current_set.set[id].clone();
+
+            let mut base_set = current_set.clone();
+            base_set.remove_motif_void(id);
+          
+            let pick_elements = (0..current_mot.len()).choose_multiple(rng, SHUFFLE_BASES);
+
+            let mots = current_mot.scramble_secondaries(&pick_elements);
+
+            let likes_and_mots: Vec<(f64, Self)> = mots.into_par_iter().map(|a| {
+                let mut to_add = base_set.clone();
+                let lnlike = to_add.insert_motif(a, id);
+                (lnlike, to_add)
+            }).collect();
+
+            //We want to pick these based on their relative ln posteriors
+            //But these are going to be small. We normalize based on the max
+            //ln likelihood because it prevents errors from infinities
+
+            let mut selection_probs: Vec<f64> = vec![0.0; likes_and_mots.len()];
+
+            let normalize_ln_like: f64 = likes_and_mots.iter().map(|(a, _)| a).fold(-f64::INFINITY, |a, &b| a.max(b)) ;
+
+            for i in 0..selection_probs.len() {
+                //This subtraction might seem technically unnecessary, but
+                //but computers are not infinitely precise. We want to 
+                //ensure that we minimize numerical issues
+
+                selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp().abs();
+            }
 
             let dist = match WeightedIndex::new(&selection_probs) {
 
@@ -1968,608 +2116,581 @@ impl<'a> MotifSet<'a> {
             };
 
             current_set = likes_and_mots[dist.sample(rng)].1.clone();
-            }
-
-            current_set
-
         }
 
+        current_set
 
-        fn gradient(&self) -> Vec<f64> {
+    }
 
-            let noise = self.signal.produce_noise(self.data_ref);
-            let d_ad_stat_d_noise = noise.ad_grad();
-            let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
-            let mut len_grad: usize = self.set.len();
 
-            for i in 0..self.set.len() {
-                len_grad += self.set[i].len()*(BASE_L-1);
-            }
+    fn gradient(&self) -> Vec<f64> {
 
-            let mut gradient = vec![0.0_f64; len_grad];
+        let noise = self.signal.produce_noise(self.data_ref);
+        let d_ad_stat_d_noise = noise.ad_grad();
+        let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+        let mut len_grad: usize = self.set.len();
 
-            let mut finished_compute: usize = 0;
-
-            for i in 0..self.set.len() {
-
-                let motif = &self.set[i];
-                let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
-                let motif_grad = &mut gradient[finished_compute..compute_to];
-                //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
-                let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data_ref, &d_ad_stat_d_noise, d_ad_like_d_ad_stat)};
-
-                for i in 0..motif_grad.len() {
-                    motif_grad[i] = grad_vec[i];
-                }
-
-                finished_compute = compute_to;
-            }
-
-            gradient
-
+        for i in 0..self.set.len() {
+            len_grad += self.set[i].len()*(BASE_L-1);
         }
 
-        //MOVE TO CALL 
-        pub fn hmc<R: Rng + ?Sized>(&self, momentum_dist: &Normal, rng: &mut R) ->  (Self, bool, f64) {
+        let mut gradient = vec![0.0_f64; len_grad];
 
-            let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
+        let mut finished_compute: usize = 0;
 
-            //let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
+        for i in 0..self.set.len() {
 
-            let total_len = 1+(BASE_L-1)*self.set[k].len();
+            let motif = &self.set[i];
+            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
+            let motif_grad = &mut gradient[finished_compute..compute_to];
+            //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
+            let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data_ref, &d_ad_stat_d_noise, d_ad_like_d_ad_stat)};
 
-            let mut momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
-
-            let height_scale: f64 = self.data_ref.number_bp() as f64;
-
-            let square_height_scale: f64 = height_scale*height_scale;
-
-            let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
-
-            momentum[0] /= height_scale;//Peak height needs to move more slowly than other parameters
-
-            let mut prior_set = self.clone();
-
-            //let mut noise = self.signal.produce_noise(self.data_ref);
-            //let mut d_ad_stat_d_noise = noise.ad_grad();
-            //let mut d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
-
-            //SAFETY: d_ad_stat_d_noise is derived from the noise distribution directly 
-            //let mut gradient_old = unsafe{ prior_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
-
-
-            let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data_ref);
-
-            let mut momentum_apply = momentum.clone();
-
-
-            for _ in 0..HMC_TRACE_STEPS {
-
-                let mut new_set = self.clone();
-                new_set.ln_post = None;
-
-
-                for i in 0..momentum_apply.len(){
-                    //We calculate the gradient of the ln posterior with gradient
-                    //BUT, our potential energy is -ln_posterior. 
-                    //Because we subtract the gradient of the potential energy
-                    //we ADD the gradient of the ln_posterior
-                    momentum_apply[i] += ((*HMC_EPSILON.read().expect("no writes expected now"))*gradient_old[i])/2.0;
-                }
-
-
-                let mut start = 0;
-                let mut next_start = 0;
-                //for k in 0..self.set.len() {
-                //next_start += self.set[k].len()*(BASE_L-1)+1;
-                //let mut new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
-                //if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
-                //new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], true)};
-                //}
-                //start = next_start;
-                //}
-
-                //new_set.recalc_signal();
-                //
-
-                let mut new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, false)};
-
-                if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
-                    new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, true)};
-                }
-
-                let _ = new_set.replace_motif(new_mot, k);
-
-
-                /*
-                   noise = new_set.signal.produce_noise(self.data_ref);
-                   d_ad_stat_d_noise = noise.ad_grad();
-                   d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
-
-
-                   let gradient_new = unsafe{ new_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
-                 */
-
-                let gradient_new = new_set.set[k].safe_single_motif_grad(&new_set.signal, self.data_ref);
-
-                for i in 0..momentum_apply.len() {
-                    momentum_apply[i] += (((*HMC_EPSILON.read().expect("no writes expected now")))*gradient_new[i])/2.0;
-                }
-
-                //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
-                //Same with prior_set and new_set
-                gradient_old = gradient_new;
-                prior_set = new_set;
-
+            for i in 0..motif_grad.len() {
+                motif_grad[i] = grad_vec[i];
             }
 
-
-
-            //Our M-H cutoff is exp(-(new hamiltonian-old hamiltonian))
-            //ie exp(old_hamiltonian-new hamiltonian)
-            //hamiltonian = kinetic+potential, and potential = -ln posterior
-            //So, the delta_kinetic_energy is (momentum^2-momentum_apply^2)/2
-            //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
-            //self.ln_post
-
-            let delta_kinetic_energy = Self::net_kinetic_energy(&momentum, square_height_scale, variance)
-                -Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance);
-
-            let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
-
-            if cfg!(test) {
-                println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum, square_height_scale, variance), Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance));
-                println!("first mom {:?}\n Second mom {:?}", &momentum_apply, &momentum);
-
-                println!("d kin {} d pot {}", delta_kinetic_energy, delta_potential_energy)
-            }
-
-
-            if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
-                (prior_set, true, delta_potential_energy+delta_kinetic_energy)
-            } else {
-                //println!("rejected. the old mot is {:?}, and the diff is {}", self, delta_potential_energy+delta_kinetic_energy);
-                (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
-            }
-
-
-
+            finished_compute = compute_to;
         }
 
-        //The actual kinetic energy is p·M^(-1)p+ln(||M||)+constant
-        //But that doesn't matter. I'm only every calculating kinetic energy 
-        //as a difference, so I can omit +ln(||M||)+constant
-        fn net_kinetic_energy(momentum: &[f64], squared_genome_size: f64, momentum_var: f64) -> f64 {
-            let l_momentum = momentum.len();
-            //if l_momentum = 0 {return 0.0;}
+        gradient
 
-            let mut ke: f64 = 0.0;
+    }
 
-            let mut mom_iter = momentum.iter();
+    //MOVE TO CALL 
+    pub fn hmc<R: Rng + ?Sized>(&self, momentum_dist: &Normal, rng: &mut R) ->  (Self, bool, f64) {
 
-            match mom_iter.next() {
-                None => return 0.0,
-                //Some(m) => ke += m*m*squared_genome_size/(2.0*momentum_var),
-                Some(m) => ke += m*m/(2.0),
-            };
+        let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
 
-            ke += mom_iter.map(|m| m*m/(2.0)).sum::<f64>();
+        //let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
-            ke
-        }
+        let total_len = 1+(BASE_L-1)*self.set[k].len();
 
-        #[cfg(test)]
-        fn numerical_gradient(&self) -> Vec<f64> {
-            let h: f64 = 1e-6;
+        let mut momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
 
-            let num_motifs = self.set.len();
+        let height_scale: f64 = self.data_ref.number_bp() as f64;
 
-            let curr_post = self.calc_ln_post();
-            let curr_like = self.ln_likelihood();
+        let square_height_scale: f64 = height_scale*height_scale;
 
-            let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
+        let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
 
-                let len_gradient_form = 1+a.len()*(BASE_L-1);
+        momentum[0] /= height_scale;//Peak height needs to move more slowly than other parameters
 
-                let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
+        let mut prior_set = self.clone();
 
-                    let mut perturb_vec = vec![0.0_f64; len_gradient_form];
+        //let mut noise = self.signal.produce_noise(self.data_ref);
+        //let mut d_ad_stat_d_noise = noise.ad_grad();
+        //let mut d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
-                    perturb_vec[i] = h;
-                    let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice(), false)};
+        //SAFETY: d_ad_stat_d_noise is derived from the noise distribution directly 
+        //let mut gradient_old = unsafe{ prior_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
 
-                    let mut alter_set = self.clone();
-                    let new_ln_post = alter_set.replace_motif(mod_mot,k);
-                    let new_ln_like = new_ln_post-alter_set.ln_prior();
-                    (new_ln_post-curr_post)/h
-                        //(new_ln_like-curr_like)/h
-                }).collect::<Vec<f64>>();
 
-                motif_grad
+        let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data_ref);
 
-            }).flatten().collect();
+        let mut momentum_apply = momentum.clone();
 
-            gradient
+
+        for _ in 0..HMC_TRACE_STEPS {
+
+            let mut new_set = self.clone();
+            new_set.ln_post = None;
+
+
+            for i in 0..momentum_apply.len(){
+                //We calculate the gradient of the ln posterior with gradient
+                //BUT, our potential energy is -ln_posterior. 
+                //Because we subtract the gradient of the potential energy
+                //we ADD the gradient of the ln_posterior
+                momentum_apply[i] += ((*HMC_EPSILON.read().expect("no writes expected now"))*gradient_old[i])/2.0;
+            }
+
+
+            let mut start = 0;
+            let mut next_start = 0;
+            //for k in 0..self.set.len() {
+            //next_start += self.set[k].len()*(BASE_L-1)+1;
+            //let mut new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
+            //if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
+            //new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], true)};
+            //}
+            //start = next_start;
+            //}
+
+            //new_set.recalc_signal();
+            //
+
+            let mut new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, false)};
+
+            if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
+                new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, true)};
+            }
+
+            let _ = new_set.replace_motif(new_mot, k);
+
+
+            /*
+               noise = new_set.signal.produce_noise(self.data_ref);
+               d_ad_stat_d_noise = noise.ad_grad();
+               d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
+
+
+               let gradient_new = unsafe{ new_set.set[k].parallel_single_motif_grad(self.data, &d_ad_stat_d_noise, d_ad_like_d_ad_stat, self.background)};
+             */
+
+            let gradient_new = new_set.set[k].safe_single_motif_grad(&new_set.signal, self.data_ref);
+
+            for i in 0..momentum_apply.len() {
+                momentum_apply[i] += (((*HMC_EPSILON.read().expect("no writes expected now")))*gradient_new[i])/2.0;
+            }
+
+            //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
+            //Same with prior_set and new_set
+            gradient_old = gradient_new;
+            prior_set = new_set;
 
         }
 
 
 
+        //Our M-H cutoff is exp(-(new hamiltonian-old hamiltonian))
+        //ie exp(old_hamiltonian-new hamiltonian)
+        //hamiltonian = kinetic+potential, and potential = -ln posterior
+        //So, the delta_kinetic_energy is (momentum^2-momentum_apply^2)/2
+        //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
+        //self.ln_post
+
+        let delta_kinetic_energy = Self::net_kinetic_energy(&momentum, square_height_scale, variance)
+            -Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance);
+
+        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
+
+        if cfg!(test) {
+            println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum, square_height_scale, variance), Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance));
+            println!("first mom {:?}\n Second mom {:?}", &momentum_apply, &momentum);
+
+            println!("d kin {} d pot {}", delta_kinetic_energy, delta_potential_energy)
+        }
+
+
+        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
+            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
+        } else {
+            //println!("rejected. the old mot is {:?}, and the diff is {}", self, delta_potential_energy+delta_kinetic_energy);
+            (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
+        }
 
 
 
     }
 
+    //The actual kinetic energy is p·M^(-1)p+ln(||M||)+constant
+    //But that doesn't matter. I'm only every calculating kinetic energy 
+    //as a difference, so I can omit +ln(||M||)+constant
+    fn net_kinetic_energy(momentum: &[f64], squared_genome_size: f64, momentum_var: f64) -> f64 {
+        let l_momentum = momentum.len();
+        //if l_momentum = 0 {return 0.0;}
 
-    impl Debug for MotifSet<'_> {
-        fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-            write!(f, " ln_post: {:?}, \n set: {:#?}", self.ln_post, self.set)
-        }
+        let mut ke: f64 = 0.0;
+
+        let mut mom_iter = momentum.iter();
+
+        match mom_iter.next() {
+            None => return 0.0,
+            //Some(m) => ke += m*m*squared_genome_size/(2.0*momentum_var),
+            Some(m) => ke += m*m/(2.0),
+        };
+
+        ke += mom_iter.map(|m| m*m/(2.0)).sum::<f64>();
+
+        ke
     }
+
+    #[cfg(test)]
+    fn numerical_gradient(&self) -> Vec<f64> {
+        let h: f64 = 1e-6;
+
+        let num_motifs = self.set.len();
+
+        let curr_post = self.calc_ln_post();
+        let curr_like = self.ln_likelihood();
+
+        let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
+
+            let len_gradient_form = 1+a.len()*(BASE_L-1);
+
+            let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
+
+                let mut perturb_vec = vec![0.0_f64; len_gradient_form];
+
+                perturb_vec[i] = h;
+                let mod_mot = unsafe {a.add_momentum(1.0, perturb_vec.as_slice(), false)};
+
+                let mut alter_set = self.clone();
+                let new_ln_post = alter_set.replace_motif(mod_mot,k);
+                let new_ln_like = new_ln_post-alter_set.ln_prior();
+                (new_ln_post-curr_post)/h
+                    //(new_ln_like-curr_like)/h
+            }).collect::<Vec<f64>>();
+
+            motif_grad
+
+        }).flatten().collect();
+
+        gradient
+
+    }
+
+
+
+
+
+
+}
+
+
+impl Debug for MotifSet<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, " ln_post: {:?}, \n set: {:#?}", self.ln_post, self.set)
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-    pub struct StrippedMotifSet {
-        set: Vec<Motif>,
-        ln_post: f64,
+pub struct StrippedMotifSet {
+    set: Vec<Motif>,
+    ln_post: f64,
+}
+
+impl StrippedMotifSet {
+
+    //Yes, self, not &self. I'm destroying the stripped motif set whenever I make the active motif set
+    pub fn reactivate_set<'a>(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
+
+        let mut revived = MotifSet {
+
+            set: self.set.clone(),
+            signal: data_ref.data().derive_zero(),
+            ln_post: None,
+            data_ref: data_ref,
+        };
+
+
+        revived.recalc_signal();
+
+        _ = revived.ln_posterior(); //I don't believe these ln posteriors if I'm going to be using them for inference. 
+                                    //I only have this struct save a ln posterior because I want to record it for post processing
+
+        revived
     }
 
-    impl StrippedMotifSet {
-
-        //Yes, self, not &self. I'm destroying the stripped motif set whenever I make the active motif set
-        pub fn reactivate_set<'a>(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
-
-            let mut revived = MotifSet {
-
-                set: self.set.clone(),
-                signal: data_ref.data().derive_zero(),
-                ln_post: None,
-                data_ref: data_ref,
-            };
-
-
-            revived.recalc_signal();
-
-            _ = revived.ln_posterior(); //I don't believe these ln posteriors if I'm going to be using them for inference. 
-                                        //I only have this struct save a ln posterior because I want to record it for post processing
-
-            revived
-        }
-
-        pub fn motif_num_prior(&self) -> f64 {
-            -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
-        }
-
-        pub fn ln_prior(&self, seq: &Sequence) -> f64 {
-            self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
-        }
-
-        pub fn set_iter(&self) -> Iter<'_, Motif> {
-            self.set.iter()
-        }
-        //If you use this, the ln posterior that we save is no longer valid
-        pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
-            self.set.iter_mut()
-        }
-
+    pub fn motif_num_prior(&self) -> f64 {
+        -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
     }
 
-    enum AnyMotifSet<'a> {
-        Active(MotifSet<'a>),
-        Passive(StrippedMotifSet),
+    pub fn ln_prior(&self, seq: &Sequence) -> f64 {
+        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
     }
 
-    impl<'a> AnyMotifSet<'a> {
+    pub fn set_iter(&self) -> Iter<'_, Motif> {
+        self.set.iter()
+    }
+    //If you use this, the ln posterior that we save is no longer valid
+    pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
+        self.set.iter_mut()
+    }
 
-        fn give_activated(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
-            match self {
-                AnyMotifSet::Passive(set) => set.reactivate_set(data_ref),
-                AnyMotifSet::Active(ready) => ready.clone(),
-            }
+}
+
+enum AnyMotifSet<'a> {
+    Active(MotifSet<'a>),
+    Passive(StrippedMotifSet),
+}
+
+impl<'a> AnyMotifSet<'a> {
+
+    fn give_activated(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
+        match self {
+            AnyMotifSet::Passive(set) => set.reactivate_set(data_ref),
+            AnyMotifSet::Active(ready) => ready.clone(),
         }
+    }
 
-        fn give_stored(&self) -> StrippedMotifSet {
+    fn give_stored(&self) -> StrippedMotifSet {
 
-            match self {
-                AnyMotifSet::Passive(set) => set.clone(),
-                AnyMotifSet::Active(ready) => StrippedMotifSet::from(ready),
-            }
-
-        }
-
-        fn activate(&mut self, data_ref: &'a AllDataUse){
-            *self = AnyMotifSet::Active(self.give_activated(data_ref));                                
-        }
-
-        fn store(&mut self) {
-
-            if let AnyMotifSet::Active(set) = self {
-                *self = AnyMotifSet::Passive(StrippedMotifSet::from(&*set));
-            }
-
-
+        match self {
+            AnyMotifSet::Passive(set) => set.clone(),
+            AnyMotifSet::Active(ready) => StrippedMotifSet::from(ready),
         }
 
     }
 
-    impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
-        fn from(other: &'a MotifSet) -> StrippedMotifSet {
-            let ln_post: f64 = other.calc_ln_post();
-            StrippedMotifSet {
-                set: other.set.clone(),
-                ln_post: ln_post,
-            }
+    fn activate(&mut self, data_ref: &'a AllDataUse){
+        *self = AnyMotifSet::Active(self.give_activated(data_ref));                                
+    }
+
+    fn store(&mut self) {
+
+        if let AnyMotifSet::Active(set) = self {
+            *self = AnyMotifSet::Passive(StrippedMotifSet::from(&*set));
+        }
+
+
+    }
+
+}
+
+impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
+    fn from(other: &'a MotifSet) -> StrippedMotifSet {
+        let ln_post: f64 = other.calc_ln_post();
+        StrippedMotifSet {
+            set: other.set.clone(),
+            ln_post: ln_post,
         }
     }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
-    pub struct MotifSetDef {
+pub struct MotifSetDef {
 
-        set: Vec<Motif>,
-        signal: WaveformDef,
-        ln_post: f64,
+    set: Vec<Motif>,
+    signal: WaveformDef,
+    ln_post: f64,
 
-    }
+}
 
-    impl<'a> From<&'a MotifSet<'a>> for MotifSetDef {
-        fn from(other: &'a MotifSet) -> Self {
+impl<'a> From<&'a MotifSet<'a>> for MotifSetDef {
+    fn from(other: &'a MotifSet) -> Self {
 
-            let signal = WaveformDef::from(&other.signal);
+        let signal = WaveformDef::from(&other.signal);
 
-            Self {
-                set: other.set.clone(), 
-                signal: signal,
-                ln_post: other.calc_ln_post(),
-            }
+        Self {
+            set: other.set.clone(), 
+            signal: signal,
+            ln_post: other.calc_ln_post(),
         }
     }
+}
 
-    impl MotifSetDef {
+impl MotifSetDef {
 
-        //SOUNDNESS: if data has the same length and spacer as self.signal, the kernels all match what should be defined by width,
-        //            and the kernel heights are all permitted by the bounds of the height prior, then we skip a lot of recalculation
-        //            to generate the correct signal: we assume that the signal given IS correct for the waveform. 
-        //            If recalculate is set to true, then we do not skip. You MUST set recalculate to true if the motif set was not 
-        //            generated by these data. 
-        pub fn get_motif_set<'a, R: Rng + ?Sized>(self, recalculate: bool, validate_motifs: bool, randomizer: &mut Option<&mut R>, data_ref: &'a AllDataUse ) -> MotifSet<'a> {
+    //SOUNDNESS: if data has the same length and spacer as self.signal, the kernels all match what should be defined by width,
+    //            and the kernel heights are all permitted by the bounds of the height prior, then we skip a lot of recalculation
+    //            to generate the correct signal: we assume that the signal given IS correct for the waveform. 
+    //            If recalculate is set to true, then we do not skip. You MUST set recalculate to true if the motif set was not 
+    //            generated by these data. 
+    pub fn get_motif_set<'a, R: Rng + ?Sized>(self, recalculate: bool, validate_motifs: bool, randomizer: &mut Option<&mut R>, data_ref: &'a AllDataUse ) -> MotifSet<'a> {
 
-            let mut set = self.set.clone();
+        let mut set = self.set.clone();
 
-            //We fix up any kernels that don't match the width defined in our MotifSet
-            let mut scrambled_motifs = false;
-            for mot in set.iter_mut() {
+        //We fix up any kernels that don't match the width defined in our MotifSet
+        let mut scrambled_motifs = false;
+        for mot in set.iter_mut() {
 
-                if validate_motifs && mot.pwm_prior(data_ref.data().seq()) == f64::NEG_INFINITY {
-                    scrambled_motifs = true;
-                    _ = mot.scramble_to_close_random_valid(data_ref.data().seq(), randomizer);
-                }
-
-            }
-
-            //We check to see if we need to recalculate the wave signal.
-            let signal_will_make_ub =  (self.signal.len() != data_ref.data().read_wave().len()) || (self.signal.spacer() != data_ref.data().spacer());
-            let redo_signal = recalculate || scrambled_motifs || signal_will_make_ub;
-
-            let signal = if !redo_signal { //Notice how we carefully checked to make sure that signal follows our safety guarentees
-                self.signal.get_waveform(data_ref.data().seq())
-            } else {
-                data_ref.data().derive_zero() //This isn't our final signal. This just ensures our safety guarentees
-            };
-
-            let mut pre_set = MotifSet {
-                set: set,
-                signal: signal,
-                ln_post: None,
-                data_ref: data_ref, 
-            };
-
-            if !redo_signal {
-                pre_set.ln_post = Some(self.ln_post);
-            } else {
-                if !recalculate {
-                    warn!("Had to adjust your motif set and recalculate its occupancy trace because:");
-                    if scrambled_motifs { warn!("-Some of your motifs' best binding kmers were unrepresented in your sequence, and you wanted them validated. They've been scrambled to have a best kmer that is compatible with your sequence while remaining as close to the unrepresented kmers as possible.");}
-                    if signal_will_make_ub { warn!("The occupancy trace you reported for your motif set is incompatible with your ChIP data. We calculated the signal to prevent segfaults.");}
-                }
-
-                pre_set.recalc_signal();
-                _ = pre_set.ln_posterior();
-            }
-
-            pre_set
-
-
-        }
-
-    }
-
-
-
-    //Why this weird lifetime annotation?
-    //If this is Set, the associated lifetime of Set matters.
-    //But, if this is Rng, I can generate the random variable and Rng's life is irrelevant
-    pub enum InitializeSet<'a,'b, R: Rng + ?Sized>{
-        Set(MotifSet<'a>),
-        Rng(&'b mut R),
-    }
-
-
-    //THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
-    //SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
-    //AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
-    pub struct SetTrace<'a> {
-        trace: Vec<StrippedMotifSet>,
-        active_set: MotifSet<'a>,
-        all_data_file: String,
-        data_ref: &'a AllDataUse<'a>, 
-        sparse: usize, 
-        sparse_count: usize,
-    }
-
-    //TODO: 
-    //Create an "advance" function which does the appropriate number of HMCs, base leaps, and RJ steps
-    //Create an "output and reset" type of function which outputs all motifs but the final one to a file and starts us to just that motif
-    //Create an initialize function that reads in the prepared sequence, waveform, and background distribution from some pre initialized source
-    //          and allows us to either start from a prior SetTrace file, from a MEME motif file, or from completely anew
-
-    impl<'a> SetTrace<'a> {
-
-        //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-        pub fn new_trace<'b, R: Rng + ?Sized>(capacity: usize, all_data_file: String, initial_condition: InitializeSet<'a,'b, R>, data_ref: &'a AllDataUse<'a>, sparse: Option<usize>) -> SetTrace<'a> {
-
-            let active_set = match initial_condition {
-                InitializeSet::Set(set) => set,
-                InitializeSet::Rng(rng) => MotifSet::rand_with_one(data_ref, rng),
-            };
-
-
-            SetTrace{
-                trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
-                active_set: active_set, 
-                all_data_file: all_data_file,
-                data_ref: data_ref, 
-                sparse: sparse.unwrap_or(10),
-                sparse_count: 0_usize,
+            if validate_motifs && mot.pwm_prior(data_ref.data().seq()) == f64::NEG_INFINITY {
+                scrambled_motifs = true;
+                _ = mot.scramble_to_close_random_valid(data_ref.data().seq(), randomizer);
             }
 
         }
 
-        //Panics: if self.trace is empty
-        //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
-        //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
-        pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
+        //We check to see if we need to recalculate the wave signal.
+        let signal_will_make_ub =  (self.signal.len() != data_ref.data().read_wave().len()) || (self.signal.spacer() != data_ref.data().spacer());
+        let redo_signal = recalculate || scrambled_motifs || signal_will_make_ub;
 
+        let signal = if !redo_signal { //Notice how we carefully checked to make sure that signal follows our safety guarentees
+            self.signal.get_waveform(data_ref.data().seq())
+        } else {
+            data_ref.data().derive_zero() //This isn't our final signal. This just ensures our safety guarentees
+        };
 
+        let mut pre_set = MotifSet {
+            set: set,
+            signal: signal,
+            ln_post: None,
+            data_ref: data_ref, 
+        };
 
-            let select_move: usize = rng.gen_range(0..=MAX_IND_HMC);
-
-            const RANGE_RJ: usize = MAX_IND_RJ+1;
-            const RANGE_LEAP: usize = MAX_IND_LEAP+1;
-
-            let (new_set, retval): (MotifSet, (usize,bool)) = match select_move {
-
-                0..=MAX_IND_RJ => {
-                    let (set, move_type, accept) = self.active_set.run_rj_move(rng);
-                    (set, (move_type, accept))
-                },
-                RANGE_RJ..=MAX_IND_LEAP => {
-                    let set = self.active_set.base_leap(rng);
-                    (set, (4, true))
-                },
-                RANGE_LEAP..=MAX_IND_HMC => {
-                    let (set, accept, _) = self.active_set.hmc(momentum_dist, rng);
-                    (set, (5, accept))
-                },
-                _ => unreachable!(),
-            };
-
-            self.sparse_count = (self.sparse_count+1) % self.sparse;
-
-            if self.sparse_count == 0 {
-
-                //This order INCLUDES the last possible motif set
-                //and specifically EXCLUDES the initial state
-                self.trace.push(StrippedMotifSet::from(&new_set));
+        if !redo_signal {
+            pre_set.ln_post = Some(self.ln_post);
+        } else {
+            if !recalculate {
+                warn!("Had to adjust your motif set and recalculate its occupancy trace because:");
+                if scrambled_motifs { warn!("-Some of your motifs' best binding kmers were unrepresented in your sequence, and you wanted them validated. They've been scrambled to have a best kmer that is compatible with your sequence while remaining as close to the unrepresented kmers as possible.");}
+                if signal_will_make_ub { warn!("The occupancy trace you reported for your motif set is incompatible with your ChIP data. We calculated the signal to prevent segfaults.");}
             }
 
-
-            self.active_set = new_set;
-
-            retval
-
+            pre_set.recalc_signal();
+            _ = pre_set.ln_posterior();
         }
 
-        //PANICS: if initial_sd is not positive
-        //This function gives back (number of 50 hmc move blocks to stabilize acceptance, sd at which hmc stabilized at about 90% acceptance)
-        pub fn burn_in_momentum<R: Rng + ?Sized>(&mut self, initial_sd: f64, rng: &mut R) -> (usize, f64) {
-            //I'm aiming for acceptance rates of about 0.9. Blocks are about 1000 hmc proposals big, so I'm 
-            //aiming for three blocks in a row to hit between 0.81 and 0.99, within 3 standard errors of 0.9
+        pre_set
 
-            let mut dist = Normal::new(0.0, initial_sd).expect("Do not give a non positive sd");
-            //We are taking ownership of this, but will replace it by the end
-            let mut set = &mut self.active_set;
 
-            const BLOCK_LEN: usize = 100;
-            const TARGET_PROP: f64 = 0.9;
-            let min_prop = TARGET_PROP-3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
-            let max_prop = TARGET_PROP+3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+    }
 
-            let mut all_fine = true;
+}
 
-            let mut num_accept = 0_f64;
 
-            let mut num_blocks: usize = 0;
 
-            let mut sum_props = 0.0_f64;
-            for _ in 0..3 {
-                for _ in 0..BLOCK_LEN {
-                    let (s, accept, _) = set.hmc(&dist, rng);
-                    *set = s;
-                    if accept {num_accept += 1.0;}
-                }
-                let prop_accept = num_accept/(BLOCK_LEN as f64);
-                sum_props += prop_accept;
-                all_fine &= ((prop_accept > min_prop) && (prop_accept < max_prop));
+//Why this weird lifetime annotation?
+//If this is Set, the associated lifetime of Set matters.
+//But, if this is Rng, I can generate the random variable and Rng's life is irrelevant
+pub enum InitializeSet<'a,'b, R: Rng + ?Sized>{
+    Set(MotifSet<'a>),
+    Rng(&'b mut R),
+}
+
+
+//THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
+//SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
+//AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
+pub struct SetTrace<'a> {
+    trace: Vec<StrippedMotifSet>,
+    active_set: MotifSet<'a>,
+    all_data_file: String,
+    data_ref: &'a AllDataUse<'a>, 
+    sparse: usize, 
+    sparse_count: usize,
+}
+
+//TODO: 
+//Create an "advance" function which does the appropriate number of HMCs, base leaps, and RJ steps
+//Create an "output and reset" type of function which outputs all motifs but the final one to a file and starts us to just that motif
+//Create an initialize function that reads in the prepared sequence, waveform, and background distribution from some pre initialized source
+//          and allows us to either start from a prior SetTrace file, from a MEME motif file, or from completely anew
+
+impl<'a> SetTrace<'a> {
+
+    //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
+    pub fn new_trace<'b, R: Rng + ?Sized>(capacity: usize, all_data_file: String, initial_condition: InitializeSet<'a,'b, R>, data_ref: &'a AllDataUse<'a>, sparse: Option<usize>) -> SetTrace<'a> {
+
+        let active_set = match initial_condition {
+            InitializeSet::Set(set) => set,
+            InitializeSet::Rng(rng) => MotifSet::rand_with_one(data_ref, rng),
+        };
+
+
+        SetTrace{
+            trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
+            active_set: active_set, 
+            all_data_file: all_data_file,
+            data_ref: data_ref, 
+            sparse: sparse.unwrap_or(10),
+            sparse_count: 0_usize,
+        }
+
+    }
+
+    //Panics: if self.trace is empty
+    //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
+    //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
+    pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
+
+
+
+        let select_move: usize = rng.gen_range(0..=MAX_IND_HMC);
+
+        const RANGE_RJ: usize = MAX_IND_RJ+1;
+        const RANGE_LEAP: usize = MAX_IND_LEAP+1;
+
+        let (new_set, retval): (MotifSet, (usize,bool)) = match select_move {
+
+            0..=MAX_IND_RJ => {
+                let (set, move_type, accept) = self.active_set.run_rj_move(rng);
+                (set, (move_type, accept))
+            },
+            RANGE_RJ..=MAX_IND_LEAP => {
+                let set = self.active_set.base_leap(rng);
+                (set, (4, true))
+            },
+            RANGE_LEAP..=MAX_IND_HMC => {
+                let (set, accept, _) = self.active_set.hmc(momentum_dist, rng);
+                (set, (5, accept))
+            },
+            _ => unreachable!(),
+        };
+
+        self.sparse_count = (self.sparse_count+1) % self.sparse;
+
+        if self.sparse_count == 0 {
+
+            //This order INCLUDES the last possible motif set
+            //and specifically EXCLUDES the initial state
+            self.trace.push(StrippedMotifSet::from(&new_set));
+        }
+
+
+        self.active_set = new_set;
+
+        retval
+
+    }
+
+    //PANICS: if initial_sd is not positive
+    //This function gives back (number of 50 hmc move blocks to stabilize acceptance, sd at which hmc stabilized at about 90% acceptance)
+    pub fn burn_in_momentum<R: Rng + ?Sized>(&mut self, initial_sd: f64, rng: &mut R) -> (usize, f64) {
+        //I'm aiming for acceptance rates of about 0.9. Blocks are about 1000 hmc proposals big, so I'm 
+        //aiming for three blocks in a row to hit between 0.81 and 0.99, within 3 standard errors of 0.9
+
+        let mut dist = Normal::new(0.0, initial_sd).expect("Do not give a non positive sd");
+        //We are taking ownership of this, but will replace it by the end
+        let mut set = &mut self.active_set;
+
+        const BLOCK_LEN: usize = 100;
+        const TARGET_PROP: f64 = 0.9;
+        let min_prop = TARGET_PROP-3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+        let max_prop = TARGET_PROP+3.0*(TARGET_PROP*(1.0-TARGET_PROP)/(BLOCK_LEN as f64)).sqrt();
+
+        let mut all_fine = true;
+
+        let mut num_accept = 0_f64;
+
+        let mut num_blocks: usize = 0;
+
+        let mut sum_props = 0.0_f64;
+        for _ in 0..3 {
+            for _ in 0..BLOCK_LEN {
+                let (s, accept, _) = set.hmc(&dist, rng);
+                *set = s;
+                if accept {num_accept += 1.0;}
             }
+            let prop_accept = num_accept/(BLOCK_LEN as f64);
+            sum_props += prop_accept;
+            all_fine &= ((prop_accept > min_prop) && (prop_accept < max_prop));
+        }
 
-            num_blocks += 1;
+        num_blocks += 1;
 
-            if all_fine { 
-                return (num_blocks, initial_sd);
-            }
+        if all_fine { 
+            return (num_blocks, initial_sd);
+        }
 
-            let mut lowbound;
-            let mut upbound;
+        let mut lowbound;
+        let mut upbound;
 
-            let mut high_give_up = false;
+        let mut high_give_up = false;
 
-            if sum_props/3.0 < TARGET_PROP {
+        if sum_props/3.0 < TARGET_PROP {
 
-                lowbound = initial_sd;
-                let mut found = false;
-                let mut upper_sd = initial_sd;
-                while !found {
-                    num_accept = 0_f64;
-                    sum_props = 0.0_f64;
-                    let mut try_up = upper_sd/8.0;
-                    //upper_sd /= 8.0;
-                    if try_up <= 0.0 {
-                        println!("hitting minimum sd {}. Trying to mitigate.", try_up);
-                        try_up = upper_sd/2.0;
-                    }
-                    if try_up <= 0.0 {
-                        println!("can't mitigate minimum sd {}. Giving up on doing better: finall upper_sd {}", try_up, upper_sd);
-                        found = true;
-                    } else {
-
-                        upper_sd = try_up;
-                        dist = Normal::new(0.0, upper_sd).unwrap();
-                        for _ in 0..3 {
-                            for _ in 0..BLOCK_LEN {
-                                let (s, accept, _) = set.hmc(&dist, rng);
-                                *set = s;
-                                if accept {num_accept += 1.0;}
-                            }
-                            let prop_accept = num_accept/(BLOCK_LEN as f64);
-                            sum_props += prop_accept;
-                        }
-
-                        found = (sum_props/3.0) > max_prop;
-                        num_blocks += 1;
-                    }
+            lowbound = initial_sd;
+            let mut found = false;
+            let mut upper_sd = initial_sd;
+            while !found {
+                num_accept = 0_f64;
+                sum_props = 0.0_f64;
+                let mut try_up = upper_sd/8.0;
+                //upper_sd /= 8.0;
+                if try_up <= 0.0 {
+                    println!("hitting minimum sd {}. Trying to mitigate.", try_up);
+                    try_up = upper_sd/2.0;
                 }
+                if try_up <= 0.0 {
+                    println!("can't mitigate minimum sd {}. Giving up on doing better: finall upper_sd {}", try_up, upper_sd);
+                    found = true;
+                } else {
 
-                upbound = upper_sd;
-
-            } else {
-
-                upbound = initial_sd;
-                let mut found = false;
-                let mut lower_sd = initial_sd;
-                while !found {
-                    num_accept = 0_f64;
-                    sum_props = 0.0_f64;
-                    lower_sd *= 10.0;
-                    dist = Normal::new(0.0, lower_sd).unwrap();
+                    upper_sd = try_up;
+                    dist = Normal::new(0.0, upper_sd).unwrap();
                     for _ in 0..3 {
                         for _ in 0..BLOCK_LEN {
                             let (s, accept, _) = set.hmc(&dist, rng);
@@ -2580,26 +2701,23 @@ impl<'a> MotifSet<'a> {
                         sum_props += prop_accept;
                     }
 
-                    if num_blocks > 1000 {
-                        high_give_up = true;
-                    }
-                    found = !high_give_up && ((sum_props/3.0) < min_prop);
+                    found = (sum_props/3.0) > max_prop;
                     num_blocks += 1;
-
                 }
-
-                lowbound = lower_sd;
-
             }
 
-            println!("finding bounds took {} blocks", num_blocks);
-            let mut found = high_give_up;
-            let mut mid_sd = if found {upbound} else {(lowbound*upbound).sqrt()};
+            upbound = upper_sd;
 
+        } else {
+
+            upbound = initial_sd;
+            let mut found = false;
+            let mut lower_sd = initial_sd;
             while !found {
                 num_accept = 0_f64;
                 sum_props = 0.0_f64;
-                dist = Normal::new(0.0, mid_sd).unwrap();
+                lower_sd *= 10.0;
+                dist = Normal::new(0.0, lower_sd).unwrap();
                 for _ in 0..3 {
                     for _ in 0..BLOCK_LEN {
                         let (s, accept, _) = set.hmc(&dist, rng);
@@ -2610,652 +2728,682 @@ impl<'a> MotifSet<'a> {
                     sum_props += prop_accept;
                 }
 
-                let above_low = (sum_props/3.0) > min_prop;
-                let below_high = (sum_props/3.0) < max_prop;
-                found = above_low && below_high;
-
-                if !found {
-                    if !above_low {
-                        lowbound = mid_sd;
-                    } else {
-                        upbound = mid_sd;
-                    }
+                if num_blocks > 1000 {
+                    high_give_up = true;
                 }
-
-                if (num_blocks > 1000) { 
-                    if !above_low {
-                        mid_sd = lowbound;
-                    } else {
-                        mid_sd = upbound;
-                    }
-                    found = true;
-                } 
-                if !found {
-                    if !above_low {
-                        lowbound = mid_sd;
-                    } else {
-                        upbound = mid_sd;
-                    }
-                    mid_sd = (lowbound*upbound).sqrt();
-                }
+                found = !high_give_up && ((sum_props/3.0) < min_prop);
                 num_blocks += 1;
+
             }
 
-            if high_give_up {
-                warn!("Gave up trying to get ambitious: this is probably ambitious enough without causing acceptance problems");
-            }
-            return (num_blocks, mid_sd);
-
-
-
+            lowbound = lower_sd;
 
         }
 
+        println!("finding bounds took {} blocks", num_blocks);
+        let mut found = high_give_up;
+        let mut mid_sd = if found {upbound} else {(lowbound*upbound).sqrt()};
 
-
-        //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
-        //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
-        //         To ensure the safety of this function, there is a recalculation step that occurs if the 
-        //         sequence or data changes. I assure you, you do not want this recalculation to occur:
-        //         It's going to be very slow
-        pub fn push_set_to_active(&mut self, set: MotifSet<'a>) {
-
-
-            let mut repoint_set = set.clone();
-
-            let recalc_ln_post = (!std::ptr::eq(self.data_ref, repoint_set.data_ref));
-
-            if recalc_ln_post {
-                repoint_set.data_ref = &self.data_ref;
-            }
-
-            if recalc_ln_post {
-                repoint_set.signal = self.data_ref.data().derive_zero();
-                for i in 0..repoint_set.set.len() {
-                    repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data_ref);
+        while !found {
+            num_accept = 0_f64;
+            sum_props = 0.0_f64;
+            dist = Normal::new(0.0, mid_sd).unwrap();
+            for _ in 0..3 {
+                for _ in 0..BLOCK_LEN {
+                    let (s, accept, _) = set.hmc(&dist, rng);
+                    *set = s;
+                    if accept {num_accept += 1.0;}
                 }
-                repoint_set.ln_post = None;
-                repoint_set.ln_posterior();
+                let prop_accept = num_accept/(BLOCK_LEN as f64);
+                sum_props += prop_accept;
             }
 
-
-
-            self.active_set = repoint_set;
-
-
-        }
-
-
-        pub fn push_last_state_from_json<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>,json_file: &str) {
-
-            let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
-
-            let prior_state: MotifSetDef = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
-
-            self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
-
-        }
-
-        pub fn push_last_state_from_bincode<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>,bincode_file: &str) {
-
-
-            let mut bincode_file_handle = fs::File::open(bincode_file).expect("Binarray file MUST be valid!");
-
-            let mut buffer: Vec<u8> = Vec::new();
-
-            bincode_file_handle.read_to_end(&mut buffer);
-
-            let prior_state: MotifSetDef = bincode::deserialize(&buffer).unwrap_or_else(|_| (&bincode::deserialize::<StrippedMotifSet>(&buffer).expect("bincode must be a valid motif set!").reactivate_set(self.data_ref)).into());
-
-            println!("bincode state {:?}", prior_state.set);
-            self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
-
-        }
-
-        //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
-        //      just give you a wrong answer that seems to work
-        pub fn push_set_def<R: Rng + ?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, validate_randomizer: &mut Option<&mut R>, set: MotifSetDef) {
-            self.push_set_to_active(set.get_motif_set(always_recalculate, validate_motif, validate_randomizer,&self.data_ref));
-        }
-
-
-        /* pub fn try_replace_or_create_last<R: Rng + ?Sized>(&mut self, set: StrippedMotifSet) -> Result<(), String>{
-
-           let active_set = set.reactivate_set(self.data_ref);
-
-        //SAFETY: reactivate_set ALWAYS initializes the posterior
-        let Some(posterior) = active_set.ln_post else { unsafe {unreachable_unchecked()} };
-
-        if !(posterior > -f64::INFINITY) {
-        return Err("This motif set is impossible to have, and thus we reject it. The motif trace that called this is unchanged.".to_string());
-        }
-
-        if self.trace.len() == 0 {
-        self.trace.push(AnyMotifSet::Active(active_set));
-        } else {
-
-        //SAFETY: we only hit this branch if the trace has a last position with an element
-        let Some(last_pos) = self.trace.last_mut() else { unsafe {unreachable_unchecked()} };
-         *last_pos = AnyMotifSet::Active(active_set);
-         }
-
-         Ok(())
-         }*/
-
-
-        /*pub fn current_set(&self) -> MotifSet<'a> {
-          self.trace[self.trace.len()-1].give_activated(self.data_ref)
-          }
-
-          pub fn current_set_mut_ptr(&mut self) -> &mut MotifSet<'a> {
-
-          self.trace[self.trace.len()-1].activate(self.data_ref);
-          &mut self.trace[self.trace.len()-1]
-          }
-
-
-          pub fn quiet_last_set(&mut self) {
-
-          if let Some(set_mut_ref) = self.trace.last_mut() {
-          set_mut_ref.store();
-          }
-
-          }*/
-
-        pub fn current_set_to_print(&self) -> StrippedMotifSet {
-            StrippedMotifSet::from(&self.active_set)
-        }
-        pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
-
-            let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
-
-            let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
-
-            let mot_to_save: StrippedMotifSet = match self.trace.get(0) {
-                Some(set) => set.clone(), 
-                None => self.current_set_to_print(),
-            };
-
-            let mut buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
-
-            outfile_handle.write(&buffer).expect("buffer should write");
-        }
-
-        pub fn save_final_state(&self, output_dir: &str, run_name: &str) {
-
-            let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
-
-            if self.trace.last().is_none() {warn!("trace is empty!"); return;}
-
-
-            let last = self.trace.last().unwrap();
-
-            let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
-
-            let mut buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
-
-            outfile_handle.write(&buffer).expect("buffer should write");
-        }
-
-        pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
-
-            let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
-            let mut outfile_handle = fs::File::create(trace_file).expect("Need to give a valid file to write to or inference is pointless");
-
-            let len_trace = self.trace.len();
-
-            //We want to keep the last element in the SetTrace, so that the markov chain can proceed
-            let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).collect();
-
-
-            let mut buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
-                all_data_file: self.all_data_file.clone(),
-                trace: trace, 
-            })).expect("serializable");
-
-
-            //fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
-
-            outfile_handle.write(&buffer).expect("buffer should write");
-
-            self.save_initial_state(output_dir, run_name);
-        }
-
-        pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
-
-            let current_active = &self.active_set;
-
-            let locs = self.data_ref.data().generate_all_locs();
-
-            let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
-
-            let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
-
-            plot.fill(&WHITE).unwrap();
-
-            let mut chart = ChartBuilder::on(&plot)
-                .set_label_area_size(LabelAreaPosition::Left, 40)
-                .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                .caption("Signal Comparison", ("sans-serif", 40))
-                .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
-
-
-            chart.configure_mesh().draw().unwrap();
-
-            chart.draw_series(current_active.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
-
-            let current_resid = current_active.data_ref.data()-&current_active.signal;
-            chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
-
-            let max_draw = current_active.set.len().min(3);
-
-            let colors = [&RED, &GREEN, &CYAN];
-
-            for i in 0..max_draw {
-
-                let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
-                chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
-
-            }
-
-            chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
-
-        }
-
-
-
-        pub fn trace_from_meme<R: Rng + ?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64,  rng: &mut R) {
-
-            let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
-            let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
-
-            let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)").unwrap();
-
-            let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
-
-            if start_matrix_lines.len() == 0 {
-                panic!("Cannot read this file: it is invalid MEME output");
-            }
-
-            let mut set: Vec<Motif> = Vec::new();
-
-            for (mot_num, line) in start_matrix_lines.iter().enumerate() {
-                let captures = re.captures(meme_as_vec[*line]).unwrap();
-                let alphabet_len: usize = captures[1].parse().unwrap();
-
-                assert!(alphabet_len == BASE_L, "MEME alphabet must be the same length as supplied alphabet");
-
-                let motif_len: usize = captures[2].parse().unwrap();
-                assert!((motif_len >= MIN_BASE) && (motif_len <= MAX_BASE), "Motif length must be compatible with supplied minimum and maximum");
-
-
-                let e_value: f64 = captures[3].parse().unwrap();
-
-                if (set.len() > 0) && (e_value > e_value_cutoff) {
-                    break;
+            let above_low = (sum_props/3.0) > min_prop;
+            let below_high = (sum_props/3.0) < max_prop;
+            found = above_low && below_high;
+
+            if !found {
+                if !above_low {
+                    lowbound = mid_sd;
+                } else {
+                    upbound = mid_sd;
                 }
+            }
 
-                let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
-
-                for i in 1..(motif_len+1) {
-                    let mut props: [ f64; BASE_L] = [0.0; BASE_L];
-                    let mut line_split = meme_as_vec[*line+i].split_whitespace();
-                    for j in 0..BASE_L {
-                        props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", *line+i+1).as_str())
-                            .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", *line+i+1).as_str());
-                    }
-
-                    base_vec.push(Base::new(props));
+            if (num_blocks > 1000) { 
+                if !above_low {
+                    mid_sd = lowbound;
+                } else {
+                    mid_sd = upbound;
                 }
-
-                let mut motif = Motif::rand_height_pwm(base_vec, rng);
-
-                let poss_hamming = motif.scramble_to_close_random_valid(seq, &mut Some(rng));
-
-                match poss_hamming {
-                    Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
-                    None => (),
-                };
-
-
-                set.push(motif);    
-
+                found = true;
+            } 
+            if !found {
+                if !above_low {
+                    lowbound = mid_sd;
+                } else {
+                    upbound = mid_sd;
+                }
+                mid_sd = (lowbound*upbound).sqrt();
             }
-
-
-            let mut signal = self.data_ref.data().derive_zero();
-
-            for mot in &set {
-                signal += &(mot.generate_waveform(self.data_ref));
-            }
-
-            let mut full_set = MotifSet {
-                set: set,
-                signal: signal, 
-                ln_post: None, 
-                data_ref: self.data_ref, 
-            };
-
-            let _ = full_set.ln_posterior();
-
-            self.push_set_to_active(full_set);
-
-
+            num_blocks += 1;
         }
+
+        if high_give_up {
+            warn!("Gave up trying to get ambitious: this is probably ambitious enough without causing acceptance problems");
+        }
+        return (num_blocks, mid_sd);
+
+
+
 
     }
+
+
+
+    //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
+    //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
+    //         To ensure the safety of this function, there is a recalculation step that occurs if the 
+    //         sequence or data changes. I assure you, you do not want this recalculation to occur:
+    //         It's going to be very slow
+    pub fn push_set_to_active(&mut self, set: MotifSet<'a>) {
+
+
+        let mut repoint_set = set.clone();
+
+        let recalc_ln_post = (!std::ptr::eq(self.data_ref, repoint_set.data_ref));
+
+        if recalc_ln_post {
+            repoint_set.data_ref = &self.data_ref;
+        }
+
+        if recalc_ln_post {
+            repoint_set.signal = self.data_ref.data().derive_zero();
+            for i in 0..repoint_set.set.len() {
+                repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data_ref);
+            }
+            repoint_set.ln_post = None;
+            repoint_set.ln_posterior();
+        }
+
+
+
+        self.active_set = repoint_set;
+
+
+    }
+
+
+    pub fn push_last_state_from_json<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>,json_file: &str) {
+
+        let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
+
+        let prior_state: MotifSetDef = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
+
+        self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
+
+    }
+
+    pub fn push_last_state_from_bincode<R: Rng + ?Sized>(&mut self, always_recalculate: bool, validate_motif: bool, validate_randomizer: &mut Option<&mut R>,bincode_file: &str) {
+
+
+        let mut bincode_file_handle = fs::File::open(bincode_file).expect("Binarray file MUST be valid!");
+
+        let mut buffer: Vec<u8> = Vec::new();
+
+        bincode_file_handle.read_to_end(&mut buffer);
+
+        let prior_state: MotifSetDef = bincode::deserialize(&buffer).unwrap_or_else(|_| (&bincode::deserialize::<StrippedMotifSet>(&buffer).expect("bincode must be a valid motif set!").reactivate_set(self.data_ref)).into());
+
+        println!("bincode state {:?}", prior_state.set);
+        self.push_set_def(always_recalculate, validate_motif, validate_randomizer, prior_state);
+
+    }
+
+    //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
+    //      just give you a wrong answer that seems to work
+    pub fn push_set_def<R: Rng + ?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, validate_randomizer: &mut Option<&mut R>, set: MotifSetDef) {
+        self.push_set_to_active(set.get_motif_set(always_recalculate, validate_motif, validate_randomizer,&self.data_ref));
+    }
+
+
+    /* pub fn try_replace_or_create_last<R: Rng + ?Sized>(&mut self, set: StrippedMotifSet) -> Result<(), String>{
+
+       let active_set = set.reactivate_set(self.data_ref);
+
+    //SAFETY: reactivate_set ALWAYS initializes the posterior
+    let Some(posterior) = active_set.ln_post else { unsafe {unreachable_unchecked()} };
+
+    if !(posterior > -f64::INFINITY) {
+    return Err("This motif set is impossible to have, and thus we reject it. The motif trace that called this is unchanged.".to_string());
+    }
+
+    if self.trace.len() == 0 {
+    self.trace.push(AnyMotifSet::Active(active_set));
+    } else {
+
+    //SAFETY: we only hit this branch if the trace has a last position with an element
+    let Some(last_pos) = self.trace.last_mut() else { unsafe {unreachable_unchecked()} };
+     *last_pos = AnyMotifSet::Active(active_set);
+     }
+
+     Ok(())
+     }*/
+
+
+    /*pub fn current_set(&self) -> MotifSet<'a> {
+      self.trace[self.trace.len()-1].give_activated(self.data_ref)
+      }
+
+      pub fn current_set_mut_ptr(&mut self) -> &mut MotifSet<'a> {
+
+      self.trace[self.trace.len()-1].activate(self.data_ref);
+      &mut self.trace[self.trace.len()-1]
+      }
+
+
+      pub fn quiet_last_set(&mut self) {
+
+      if let Some(set_mut_ref) = self.trace.last_mut() {
+      set_mut_ref.store();
+      }
+
+      }*/
+
+    pub fn current_set_to_print(&self) -> StrippedMotifSet {
+        StrippedMotifSet::from(&self.active_set)
+    }
+    pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+
+        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+
+        let mot_to_save: StrippedMotifSet = match self.trace.get(0) {
+            Some(set) => set.clone(), 
+            None => self.current_set_to_print(),
+        };
+
+        let mut buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
+    }
+
+    pub fn save_final_state(&self, output_dir: &str, run_name: &str) {
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+
+        if self.trace.last().is_none() {warn!("trace is empty!"); return;}
+
+
+        let last = self.trace.last().unwrap();
+
+        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+
+        let mut buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
+    }
+
+    pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+        let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
+        let mut outfile_handle = fs::File::create(trace_file).expect("Need to give a valid file to write to or inference is pointless");
+
+        let len_trace = self.trace.len();
+
+        //We want to keep the last element in the SetTrace, so that the markov chain can proceed
+        let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).collect();
+
+
+        let mut buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
+            all_data_file: self.all_data_file.clone(),
+            trace: trace, 
+        })).expect("serializable");
+
+
+        //fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
+
+        self.save_initial_state(output_dir, run_name);
+    }
+
+    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+        let current_active = &self.active_set;
+
+        let locs = self.data_ref.data().generate_all_locs();
+
+        let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
+
+        let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
+
+        plot.fill(&WHITE).unwrap();
+
+        let mut chart = ChartBuilder::on(&plot)
+            .set_label_area_size(LabelAreaPosition::Left, 40)
+            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .caption("Signal Comparison", ("sans-serif", 40))
+            .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
+
+
+        chart.configure_mesh().draw().unwrap();
+
+        chart.draw_series(current_active.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
+
+        let current_resid = current_active.data_ref.data()-&current_active.signal;
+        chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
+
+        let max_draw = current_active.set.len().min(3);
+
+        let colors = [&RED, &GREEN, &CYAN];
+
+        for i in 0..max_draw {
+
+            let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
+            chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
+
+        }
+
+        chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
+
+    }
+
+
+
+    pub fn trace_from_meme<R: Rng + ?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64,  rng: &mut R) {
+
+        let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
+        let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
+
+        let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)").unwrap();
+
+        let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
+
+        if start_matrix_lines.len() == 0 {
+            panic!("Cannot read this file: it is invalid MEME output");
+        }
+
+        let mut set: Vec<Motif> = Vec::new();
+
+        for (mot_num, line) in start_matrix_lines.iter().enumerate() {
+            let captures = re.captures(meme_as_vec[*line]).unwrap();
+            let alphabet_len: usize = captures[1].parse().unwrap();
+
+            assert!(alphabet_len == BASE_L, "MEME alphabet must be the same length as supplied alphabet");
+
+            let motif_len: usize = captures[2].parse().unwrap();
+            assert!((motif_len >= MIN_BASE) && (motif_len <= MAX_BASE), "Motif length must be compatible with supplied minimum and maximum");
+
+
+            let e_value: f64 = captures[3].parse().unwrap();
+
+            if (set.len() > 0) && (e_value > e_value_cutoff) {
+                break;
+            }
+
+            let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
+
+            for i in 1..(motif_len+1) {
+                let mut props: [ f64; BASE_L] = [0.0; BASE_L];
+                let mut line_split = meme_as_vec[*line+i].split_whitespace();
+                for j in 0..BASE_L {
+                    props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", *line+i+1).as_str())
+                        .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", *line+i+1).as_str());
+                }
+
+                base_vec.push(Base::new(props));
+            }
+
+            let mut motif = Motif::rand_height_pwm(base_vec, rng);
+
+            let poss_hamming = motif.scramble_to_close_random_valid(seq, &mut Some(rng));
+
+            match poss_hamming {
+                Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
+                None => (),
+            };
+
+
+            set.push(motif);    
+
+        }
+
+
+        let mut signal = self.data_ref.data().derive_zero();
+
+        for mot in &set {
+            signal += &(mot.generate_waveform(self.data_ref));
+        }
+
+        let mut full_set = MotifSet {
+            set: set,
+            signal: signal, 
+            ln_post: None, 
+            data_ref: self.data_ref, 
+        };
+
+        let _ = full_set.ln_posterior();
+
+        self.push_set_to_active(full_set);
+
+
+    }
+
+}
 
 #[derive(Serialize, Deserialize, Clone)]
-    pub struct SetTraceDef {
+pub struct SetTraceDef {
 
-        trace: Vec<StrippedMotifSet>,
-        all_data_file: String,
+    trace: Vec<StrippedMotifSet>,
+    all_data_file: String,
+
+}
+
+
+
+
+impl SetTraceDef {
+
+    //Panics: all MotifSetDefs in the trace must be of the same dimension and spacing as the data.
+    //        We also check to make sure that the first set's posterior density is accurate
+    pub fn get_set_trace<'a, R: Rng + ?Sized>(mut self, data_ref: &'a AllDataUse, rng: &mut R, sparse: Option<usize>) -> SetTrace<'a> {
+
+        //We only validate the ln likelihood for the active motif
+
+
+
+        let last_state = match self.trace.pop() {
+            Some(state) => state.reactivate_set(data_ref),
+            None => {
+                warn!("Your trace has no sets! Initializing!");
+                MotifSet::rand_with_one(data_ref, rng)
+            },
+        };
+
+
+        SetTrace {
+            all_data_file: self.all_data_file.clone(),
+            trace: self.trace,
+            data_ref: data_ref,
+            active_set: last_state,
+            sparse: sparse.unwrap_or(10),
+            sparse_count: 0,
+        }
+
 
     }
 
-
-
-
-    impl SetTraceDef {
-
-        //Panics: all MotifSetDefs in the trace must be of the same dimension and spacing as the data.
-        //        We also check to make sure that the first set's posterior density is accurate
-        pub fn get_set_trace<'a, R: Rng + ?Sized>(mut self, data_ref: &'a AllDataUse, rng: &mut R, sparse: Option<usize>) -> SetTrace<'a> {
-
-            //We only validate the ln likelihood for the active motif
-
-
-
-            let last_state = match self.trace.pop() {
-                Some(state) => state.reactivate_set(data_ref),
-                None => {
-                    warn!("Your trace has no sets! Initializing!");
-                    MotifSet::rand_with_one(data_ref, rng)
-                },
-            };
-
-
-            SetTrace {
-                all_data_file: self.all_data_file.clone(),
-                trace: self.trace,
-                data_ref: data_ref,
-                active_set: last_state,
-                sparse: sparse.unwrap_or(10),
-                sparse_count: 0,
-            }
-
-
+    pub fn reduce(&mut self, max_elements: usize) {
+        if self.trace.len() >= max_elements {
+            let _ = self.trace.drain(max_elements..);
         }
+    }
+    pub fn len(&self) -> usize {
+        self.trace.len()
+    }
 
-        pub fn reduce(&mut self, max_elements: usize) {
-            if self.trace.len() >= max_elements {
-                let _ = self.trace.drain(max_elements..);
-            }
-        }
-        pub fn len(&self) -> usize {
-            self.trace.len()
-        }
+    pub fn ln_posterior_trace(&self) -> Vec<f64> {
+        self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
+    }
 
-        pub fn ln_posterior_trace(&self) -> Vec<f64> {
-            self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
-        }
+    pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
 
-        pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>()
 
-            self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>()
+    }
 
-        }
-
-        pub fn motif_num_trace(&self) -> Vec<f64> {
-            self.trace.par_iter().map(|a| a.set.len() as f64).collect::<Vec<_>>()
-        }
-
-
-        pub fn wave_dist_trace(&self, waypost: &AllDataUse) -> Vec<f64> {
-            self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
-        }
-
-        pub fn data_name(&self) -> &str {
-            &self.all_data_file
-        }
-
-        //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
-        pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {
-
-            let spacing = self.trace.len()/num_motifs;
-
-            let picks = (0..(self.trace.len()/spacing)).map(|a| a*spacing); 
-
-            let set_picks: Vec<&StrippedMotifSet> = picks.map(|a| &(self.trace[a])).collect();
-
-            let pwms: Vec<Motif> = set_picks.iter().map(|a| a.set.choose(rng).expect("No motif set should be empty").clone()).collect();
-
-            pwms
-        }
-
-        pub fn trace_min_dist(&self, reference_motif: &Motif) -> Vec<f64> {
-
-            self.trace.iter().map(|mot_set| {
-
-                mot_set.set.iter().map(|mot| mot.distance_function(&reference_motif).0)
-                    .min_by(|a,b| a.partial_cmp(b).expect("No NANs should be present in distances"))
-                    .expect("Motif sets all need at least one motif")
-
-            }).collect::<Vec<f64>>()
-
-        }
-
-        pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, tail_start: usize, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
-
-            self.trace[(self.len()-tail_start)..self.len()].iter().map(|mot_set| {
-
-                mot_set.set.iter().map(|mot| (mot.clone(),mot.distance_function(&reference_motif)))
-                    .min_by(|a,b| a.1.0.partial_cmp(&b.1.0).expect("No NANs should be present in distances"))
-                    .expect("Motif sets all need at least one motif")
-
-
-            }).filter(|(_, (b, _, _))| *b < cutoff).collect::<Vec<_>>()
-
-        }
-
-        pub fn save_best_trace(&self, buffer: &mut Vec<u8>, output_dir: &str, run_name: &str) {
-
-            let mut try_bincode = fs::File::open(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file");
-            let _ = try_bincode.read_to_end(buffer);
-
-            let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
-
-            let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
-            let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
-
-            let current_active = self.trace[index_best].clone().reactivate_set(&data_ref);
-
-            let locs = data_ref.data().generate_all_locs();
-
-            let signal_file: String = format!("{}/{}_occupancy_signal_highest_posterior_density.png",output_dir,run_name);
-
-            let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
-
-            plot.fill(&WHITE).unwrap();
-
-            let mut chart = ChartBuilder::on(&plot)
-                .set_label_area_size(LabelAreaPosition::Left, 40)
-                .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                .caption("Signal Comparison", ("sans-serif", 40))
-                .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
-
-
-            chart.configure_mesh().draw().unwrap();
-
-            chart.draw_series(current_active.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
-
-            let current_resid = current_active.data_ref.data()-&current_active.signal;
-            chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
-
-            let max_draw = current_active.set.len().min(3);
-
-            let colors = [&RED, &GREEN, &CYAN];
-
-            for i in 0..max_draw {
-
-                let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
-                chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
-
-            }
-
-            chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
-
-        }
-
-        pub fn append(&mut self, mut attachment: SetTraceDef) {
-            self.trace.append(&mut attachment.trace);
-        }
-
-        pub fn index_into(&self, range: std::ops::Range<usize>) -> &[StrippedMotifSet] {
-            &self.trace[range]
-        }
+    pub fn motif_num_trace(&self) -> Vec<f64> {
+        self.trace.par_iter().map(|a| a.set.len() as f64).collect::<Vec<_>>()
     }
 
 
+    pub fn wave_dist_trace(&self, waypost: &AllDataUse) -> Vec<f64> {
+        self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
+    }
+
+    pub fn data_name(&self) -> &str {
+        &self.all_data_file
+    }
+
+    //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
+    pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {
+
+        let spacing = self.trace.len()/num_motifs;
+
+        let picks = (0..(self.trace.len()/spacing)).map(|a| a*spacing); 
+
+        let set_picks: Vec<&StrippedMotifSet> = picks.map(|a| &(self.trace[a])).collect();
+
+        let pwms: Vec<Motif> = set_picks.iter().map(|a| a.set.choose(rng).expect("No motif set should be empty").clone()).collect();
+
+        pwms
+    }
+
+    pub fn trace_min_dist(&self, reference_motif: &Motif) -> Vec<f64> {
+
+        self.trace.iter().map(|mot_set| {
+
+            mot_set.set.iter().map(|mot| mot.distance_function(&reference_motif).0)
+                .min_by(|a,b| a.partial_cmp(b).expect("No NANs should be present in distances"))
+                .expect("Motif sets all need at least one motif")
+
+        }).collect::<Vec<f64>>()
+
+    }
+
+    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, tail_start: usize, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
+
+        self.trace[(self.len()-tail_start)..self.len()].iter().map(|mot_set| {
+
+            mot_set.set.iter().map(|mot| (mot.clone(),mot.distance_function(&reference_motif)))
+                .min_by(|a,b| a.1.0.partial_cmp(&b.1.0).expect("No NANs should be present in distances"))
+                .expect("Motif sets all need at least one motif")
 
 
-    //BEGIN TRUNCATED LOGNORMAL
+        }).filter(|(_, (b, _, _))| *b < cutoff).collect::<Vec<_>>()
+
+    }
+
+    pub fn save_best_trace(&self, buffer: &mut Vec<u8>, output_dir: &str, run_name: &str) {
+
+        let mut try_bincode = fs::File::open(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+        let _ = try_bincode.read_to_end(buffer);
+
+        let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
+
+        let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
+        let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
+
+        let current_active = self.trace[index_best].clone().reactivate_set(&data_ref);
+
+        let locs = data_ref.data().generate_all_locs();
+
+        let signal_file: String = format!("{}/{}_occupancy_signal_highest_posterior_density.png",output_dir,run_name);
+
+        let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
+
+        plot.fill(&WHITE).unwrap();
+
+        let mut chart = ChartBuilder::on(&plot)
+            .set_label_area_size(LabelAreaPosition::Left, 40)
+            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .caption("Signal Comparison", ("sans-serif", 40))
+            .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
+
+
+        chart.configure_mesh().draw().unwrap();
+
+        chart.draw_series(current_active.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
+
+        let current_resid = current_active.data_ref.data()-&current_active.signal;
+        chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
+
+        let max_draw = current_active.set.len().min(3);
+
+        let colors = [&RED, &GREEN, &CYAN];
+
+        for i in 0..max_draw {
+
+            let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
+            chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
+
+        }
+
+        chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
+
+    }
+
+    pub fn append(&mut self, mut attachment: SetTraceDef) {
+        self.trace.append(&mut attachment.trace);
+    }
+
+    pub fn index_into(&self, range: std::ops::Range<usize>) -> &[StrippedMotifSet] {
+        &self.trace[range]
+    }
+}
+
+
+
+
+//BEGIN TRUNCATED LOGNORMAL
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-    pub struct TruncatedLogNormal {
-        location: f64,
-        scale: f64,
-        min: f64, 
-        max: f64,
-        ref_dist: LogNormal,
-    }
+pub struct TruncatedLogNormal {
+    location: f64,
+    scale: f64,
+    min: f64, 
+    max: f64,
+    ref_dist: LogNormal,
+}
 
-    impl TruncatedLogNormal {
+impl TruncatedLogNormal {
 
-        pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal, StatsError> {
-            if location.is_nan() || scale.is_nan() || scale <= 0.0 || (min > max) || (max < 0.0) {
-                Err(StatsError::BadParams)
-            } else {
-                let min = if min >= 0.0 {min} else {0.0} ;
-                let ref_dist = LogNormal::new(location, scale).unwrap();
-                Ok(TruncatedLogNormal { location: location, scale: scale, min: min, max: max, ref_dist: ref_dist })
-            }
-        }
-
-        pub fn d_ln_pdf(&self, x: f64) -> f64 {
-            if x < self.min || x > self.max {
-                0.0
-            } else {
-                -(x.ln()+self.scale.powi(2)-self.location)/(x*self.scale.powi(2))
-            }
-        }
-
-        fn d_ln_pdf_d_hmc(&self, x: f64) -> f64 {
-
-            if x < self.min || x > self.max {
-                unreachable!("The height translation from hmc height seems to be going awry");
-            } else {
-                self.d_ln_pdf(x)//*(x-self.min)*(self.max-x)/(SPREAD_HMC_CONV*(self.max-self.min))
-            }
-
+    pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal, StatsError> {
+        if location.is_nan() || scale.is_nan() || scale <= 0.0 || (min > max) || (max < 0.0) {
+            Err(StatsError::BadParams)
+        } else {
+            let min = if min >= 0.0 {min} else {0.0} ;
+            let ref_dist = LogNormal::new(location, scale).unwrap();
+            Ok(TruncatedLogNormal { location: location, scale: scale, min: min, max: max, ref_dist: ref_dist })
         }
     }
 
-    impl ::rand::distributions::Distribution<f64> for TruncatedLogNormal {
-
-        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-
-            let norm: Normal = Normal::new(self.location, self.scale).unwrap();
-            let mut sample: f64 = norm.sample(rng).exp();
-            let mut invalid: bool = (sample > self.max) | (sample < self.min);
-            while invalid {
-                sample = norm.sample(rng).exp();
-                invalid = (sample > self.max) | (sample < self.min);
-            }
-            sample
+    pub fn d_ln_pdf(&self, x: f64) -> f64 {
+        if x < self.min || x > self.max {
+            0.0
+        } else {
+            -(x.ln()+self.scale.powi(2)-self.location)/(x*self.scale.powi(2))
         }
     }
 
-    impl Min<f64> for TruncatedLogNormal {
-        fn min(&self) -> f64 {
-            self.min
+    fn d_ln_pdf_d_hmc(&self, x: f64) -> f64 {
+
+        if x < self.min || x > self.max {
+            unreachable!("The height translation from hmc height seems to be going awry");
+        } else {
+            self.d_ln_pdf(x)//*(x-self.min)*(self.max-x)/(SPREAD_HMC_CONV*(self.max-self.min))
+        }
+
+    }
+}
+
+impl ::rand::distributions::Distribution<f64> for TruncatedLogNormal {
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
+
+        let norm: Normal = Normal::new(self.location, self.scale).unwrap();
+        let mut sample: f64 = norm.sample(rng).exp();
+        let mut invalid: bool = (sample > self.max) | (sample < self.min);
+        while invalid {
+            sample = norm.sample(rng).exp();
+            invalid = (sample > self.max) | (sample < self.min);
+        }
+        sample
+    }
+}
+
+impl Min<f64> for TruncatedLogNormal {
+    fn min(&self) -> f64 {
+        self.min
+    }
+}
+
+impl Max<f64> for TruncatedLogNormal {
+    fn max(&self) -> f64 {
+        self.max
+    }
+}
+
+impl ContinuousCDF<f64, f64> for TruncatedLogNormal {
+
+    fn cdf(&self, x: f64) -> f64 {
+        if x <= self.min {
+            0.0
+        } else if x >= self.max {
+            1.0
+        } else {
+
+            self.ref_dist.cdf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
         }
     }
 
-    impl Max<f64> for TruncatedLogNormal {
-        fn max(&self) -> f64 {
-            self.max
+    fn sf(&self, x: f64) -> f64 {
+        if x <= self.min {
+            1.0
+        } else if x >= self.max() {
+            0.0
+        } else {
+            self.ref_dist.sf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
+        }
+    }
+}
+
+
+impl Continuous<f64, f64> for TruncatedLogNormal {
+
+    fn pdf(&self, x: f64) -> f64 {
+        if x < self.min || x > self.max {
+            0.0
+        } else {
+            let d = (x.ln() - self.location) / self.scale;
+            let usual_density = (-0.5 * d * d).exp() / (x * consts::SQRT_2PI * self.scale);
+            let scale_density = self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min);
+
+            usual_density/scale_density
+
         }
     }
 
-    impl ContinuousCDF<f64, f64> for TruncatedLogNormal {
+    fn ln_pdf(&self, x: f64) -> f64 {
+        if x < self.min || x > self.max {
+            f64::NEG_INFINITY
+        } else {
+            let d = (x.ln() - self.location) / self.scale;
+            let usual_density = (-0.5 * d * d) - consts::LN_SQRT_2PI - (x * self.scale).ln();
+            let scale_density = (self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min)).ln();
 
-        fn cdf(&self, x: f64) -> f64 {
-            if x <= self.min {
-                0.0
-            } else if x >= self.max {
-                1.0
-            } else {
-
-                self.ref_dist.cdf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
-            }
-        }
-
-        fn sf(&self, x: f64) -> f64 {
-            if x <= self.min {
-                1.0
-            } else if x >= self.max() {
-                0.0
-            } else {
-                self.ref_dist.sf(x)/(self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min))
-            }
+            usual_density-scale_density
         }
     }
+}
 
 
-    impl Continuous<f64, f64> for TruncatedLogNormal {
+impl ContinuousLnCDF<f64, f64> for TruncatedLogNormal {
 
-        fn pdf(&self, x: f64) -> f64 {
-            if x < self.min || x > self.max {
-                0.0
-            } else {
-                let d = (x.ln() - self.location) / self.scale;
-                let usual_density = (-0.5 * d * d).exp() / (x * consts::SQRT_2PI * self.scale);
-                let scale_density = self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min);
-
-                usual_density/scale_density
-
-            }
-        }
-
-        fn ln_pdf(&self, x: f64) -> f64 {
-            if x < self.min || x > self.max {
-                f64::NEG_INFINITY
-            } else {
-                let d = (x.ln() - self.location) / self.scale;
-                let usual_density = (-0.5 * d * d) - consts::LN_SQRT_2PI - (x * self.scale).ln();
-                let scale_density = (self.ref_dist.cdf(self.max)-self.ref_dist.cdf(self.min)).ln();
-
-                usual_density-scale_density
-            }
-        }
+    fn ln_cdf(&self, x: f64) -> f64{
+        self.cdf(x).ln()
     }
 
-
-    impl ContinuousLnCDF<f64, f64> for TruncatedLogNormal {
-
-        fn ln_cdf(&self, x: f64) -> f64{
-            self.cdf(x).ln()
-        }
-
-        fn ln_sf(&self, x: f64) -> f64 {
-            self.sf(x).ln()
-        }
+    fn ln_sf(&self, x: f64) -> f64 {
+        self.sf(x).ln()
     }
+}
 
 
 
-    //}
+//}
 
 #[cfg(test)]
 mod tester{
@@ -3276,7 +3424,7 @@ mod tester{
     use crate::{DIRICHLET_PWM, PROPOSE_EXTEND, MOMENTUM_DIST};
 
 
-    
+
 
     fn produce_bps_and_pos(seq_motif: &Vec<Bp>) -> (Vec<Bp>, Vec<usize>) {
 
@@ -3411,7 +3559,7 @@ mod tester{
 
         println!("{:?}", jacob);
         println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
-        b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
+                 b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
         let simp = [0.1_f64, -0.1, -0.2];
         let simp_b = Base::simplex_to_base(&simp);
@@ -3646,7 +3794,7 @@ mod tester{
             println!("bp0: {}, bp1: {}, dbp: {}, analytical dbp: {}", prop_bp, prop_bp2, (prop_bp2-prop_bp)/h, 1.0);
             let ratio = (prop_bp2-prop_bp)/h;
             println!("{} {} {} {} diffs", unsafe{mot2.pwm()[p][Bp::A]-mot.pwm()[p][Bp::A]}, unsafe{mot2.pwm()[p][Bp::C]-mot.pwm()[p][Bp::C]},
-            unsafe{mot2.pwm()[p][Bp::G]-mot.pwm()[p][Bp::G]}, unsafe{mot2.pwm()[p][Bp::T]-mot.pwm()[p][Bp::T]});       
+                     unsafe{mot2.pwm()[p][Bp::G]-mot.pwm()[p][Bp::G]}, unsafe{mot2.pwm()[p][Bp::T]-mot.pwm()[p][Bp::T]});       
             while (i < (w2.len()-2)) && ((calc == 0.) || (ana == 0.)) {
                 calc = (w2[i]-w1[i])/h;
                 ana = wc[i];
