@@ -94,9 +94,9 @@ pub fn main() {
         } else {
             format!("{}/{}_{}_custom_scale_{:.1}", out_dir.clone(), base_file,UPPER_LETTERS[chain], scale_thresh.unwrap())
         };
-        println!("Base str {}", base_str);
-        //let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
-        let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"0\\d{6}.bin")).unwrap();
+        println!("Base str {} min chain {}", base_str, min_chain);
+        let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
+        //let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"0\\d{6}.bin")).unwrap();
         let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
         
         let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -126,7 +126,7 @@ pub fn main() {
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
-            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_{}00d{{5}}.bin", bead, '\\').as_str())).unwrap();
+            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_\\d{{7}}.bin", bead).as_str())).unwrap();
             let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
             let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -136,6 +136,7 @@ pub fn main() {
             let iter_files = chain_files.iter();
 
             for file_name in iter_files {
+                println!("{file_name}");
                 buffer.clear();
                 fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer);
                 let interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"); 
@@ -225,7 +226,7 @@ pub fn main() {
         println!("Min len {}", min_len);
     }
 
-    let cluster_per_chain: usize = min_len.min(10000);
+    let cluster_per_chain: usize = min_len.min(1000);
 
     let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
@@ -257,10 +258,11 @@ pub fn main() {
     for (i, medoid) in meds.iter().enumerate() {
         println!("Medoid {}: \n {:?}", i, medoid);
         println!("Rhat medoid {}: {}", i, rhat(&set_trace_collections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
+        println!("Medoid: \n {:?}", clustering_motifs[*medoid]);
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let mot_size = set_trace_collections[0].len() as f64;
-        let distance_cutoff = mot_size*0.5753378-0.0*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
+        let distance_cutoff = 10.0;//mot_size*0.5753378-0.0*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
         let trace_scoop = set_trace_collections.iter().map(|a| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
             num_good_motifs+= set_extracts.len();

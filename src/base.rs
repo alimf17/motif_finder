@@ -341,7 +341,7 @@ impl Base {
 
             None => self.props.iter().map(|a| a.ln().powi(2)).sum::<f64>()-0.25*self.props.iter().map(|a| a.ln()).sum::<f64>().powi(2),
             Some(other) => {
-                self.props.iter().zip(other.props.iter()).map(|(a,b)| (a.ln()-b.ln()).powi(2)).sum::<f64>()-0.25*self.props.iter().map(|a| a.ln()).sum::<f64>()*other.props.iter().map(|a| a.ln()).sum::<f64>()
+                self.props.iter().zip(other.props.iter()).map(|(a,b)| (a.ln()-b.ln()).powi(2)).sum::<f64>()-0.25*(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
             },
         }
 
@@ -1445,10 +1445,14 @@ impl Motif {
     /// ```
     pub fn distance_function(&self, other_mot: &Motif) -> (f64, isize, bool) {
         let rev = other_mot.rev_complement();
-        let best_forward = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&other_mot.pwm, a), a, false))
+        let length_offset: isize = ((self.len() as isize) -1)/2 - ((other_mot.len() as isize) -1)/2;
+        /*let best_forward = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&other_mot.pwm, a), a, false))
             .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();
         let best_reverse = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&rev, a), a, true))
-            .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();
+            .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();*/
+
+        let best_forward = (self.little_distance(&other_mot.pwm, length_offset), length_offset, false);
+        let best_reverse = (self.little_distance(&rev, length_offset), length_offset, true);
 
         let best = if best_reverse.0 < best_forward.0 { best_reverse } else {best_forward};
 
@@ -3291,6 +3295,21 @@ mod tester{
         (bps, pos)
     }
 
+
+    #[test]
+    fn distance_fallibility() {
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..10000 {
+
+            let base_a = Base::rand_new(&mut rng);
+            let base_b = Base::rand_new(&mut rng);
+            let dist_1 = base_a.dist_sq(Some(&base_b));
+            let dist_2 = base_b.dist_sq(Some(&base_a));
+            println!("{base_a:?} {base_b:?} {dist_1} {dist_2}");
+        }
+
+    }
 
     #[test]
     fn distances_test() {
