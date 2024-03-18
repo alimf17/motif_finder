@@ -119,6 +119,14 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
+static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
+
+const L_SD_VECTOR_SPACE: f64 = 1.0;
+
+const SD_LEAST_MOVE: f64 = 1.0;
+
+const HEIGHT_MOVE_SD: f64 = 1.0;
+
 const PROB_POS_PEAK: f64 = 0.9;
 
 //This controls how much shuffling we do for the secondary base shuffling move
@@ -425,6 +433,39 @@ impl Base {
               (-base_as_vec[0]+base_as_vec[1]+base_as_vec[2]).exp()];
 
         Base::new(unnormalized_base)
+    }
+
+    pub fn moved_base<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
+
+        let mut new_base_vect = self.base_to_vect();
+
+        let mut signs_base_vect: [f64; BASE_L-1] = core::array::from_fn(|a| new_base_vect[a].signum());
+
+        let mut largest_abs_to_smallest: [(f64, usize); BASE_L-1] = core::array::from_fn(|a| (new_base_vect[a].abs(), a));
+
+        largest_abs_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
+
+        let mut large_abs_ratio = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
+
+        let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
+
+        large_abs_ratio *= (NORMAL_DIST.sample(rng)*L_SD_VECTOR_SPACE).exp();
+
+        if large_abs_ratio < 1.0 { large_abs_ratio = 1.0/large_abs_ratio; }
+
+        small_abs_ratio *= (NORMAL_DIST.sample(rng)*L_SD_VECTOR_SPACE).exp();
+        
+        if small_abs_ratio < 1.0 { small_abs_ratio = 1.0/small_abs_ratio; }
+
+        new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*SD_LEAST_MOVE;
+
+        new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1]*signs_base_vect[largest_abs_to_smallest[1].1];
+
+        new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1]*signs_base_vect[largest_abs_to_smallest[0].1];
+
+        Self::vect_to_base(&new_base_vect)
+
+
     }
 
     //Panic: if given a point outside of the base terahedron, this function will panic 
@@ -1871,6 +1912,7 @@ impl<'a> MotifSet<'a> {
         self.ln_posterior()
     }
 
+
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
@@ -2119,6 +2161,40 @@ impl<'a> MotifSet<'a> {
         }
 
         current_set
+
+    }
+
+
+    fn propose_ordered_motif_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        replacement.pwm = replacement.pwm.iter().map(|a| a.moved_base(rng)).collect();
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+    }
+
+    fn propose_height_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        replacement.peak_height += NORMAL_DIST.sample(rng)*HEIGHT_MOVE_SD;
+
+        replacement.peak_height = replacement.peak_height.signum()*reflect_abs_height(replacement.peak_height.abs());
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
 
     }
 
