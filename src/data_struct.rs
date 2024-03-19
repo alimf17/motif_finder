@@ -1,4 +1,4 @@
-use std::{f64, fs, fmt, error};
+use std::{f64, fs, fmt};
 use std::io::{Read, Write};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -8,7 +8,7 @@ use core::f64::consts::PI;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel};
 use crate::sequence::{Sequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, Motif, StrippedMotifSet, SetTrace, InitializeSet};
+use crate::base::{BPS, BASE_L, StrippedMotifSet, SetTrace, InitializeSet};
 
 use thiserror::Error;
 
@@ -167,7 +167,7 @@ impl AllData {
         
         let Ok(buffer) = bincode::serialize(&full_data) else { return Err(AllProcessingError::WayTooBig);};
 
-        let mut poss_fi = fs::File::create(file_out.as_str());
+        let poss_fi = fs::File::create(file_out.as_str());
 
         match poss_fi {
             Ok(mut fi) => if fi.write(&buffer).is_err() {warn!("Something went wrong with writing to the file. We can still do inference, but the data set won't be completely saved.") }
@@ -923,7 +923,7 @@ impl AllData {
     }
 
 
-    fn compute_autocorrelation_coeffs(data: &Vec<Vec<f64>>, mut num_coeffs: usize) -> Vec<f64>{
+    pub fn compute_autocorrelation_coeffs(data: &Vec<Vec<f64>>, mut num_coeffs: usize) -> Vec<f64>{
 
         let min_data_len = data.iter().map(|a| a.len()).min().expect("Why are you trying to get autocorrelations from no data?");
 
@@ -1218,11 +1218,11 @@ impl<'a> AllDataUse<'a> {
 
 
         
-        let mut real_noises = noises.clone().into_iter().filter(|&a| *a >= 0.0).map(|&a| a).collect::<Vec<f64>>();
+        let mut real_noises = noises.into_iter().filter(|&a| *a >= 0.0).map(|&a| a).collect::<Vec<f64>>();
 
         let max_shuffle = base_set.set_iter().map(|a| a.len()).max().expect("Don't start with a comparison set that has no motifs");
 
-        let mut real_shuffles = shuffles.clone().into_iter().filter(|&a| *a <= max_shuffle).map(|&a| a).collect::<Vec<_>>();
+        let mut real_shuffles = shuffles.into_iter().filter(|&a| *a <= max_shuffle).map(|&a| a).collect::<Vec<_>>();
 
         if real_shuffles.len() == 0 { real_shuffles = vec![0]; }
         if real_noises.len() == 0 { real_noises = vec![0.0] };
@@ -1420,7 +1420,7 @@ impl UpgradeToErr for Option<DataFileBadFormat> {
     fn add_problem_line(&mut self, empty_line: Option<u64>, locationless_line: Option<u64>, dataless_line: Option<u64>) {
 
         if self.is_none() { *self = Some(DataFileBadFormat::new(false));}
-        let mut inside = self.as_mut().expect("already returned if this was null");
+        let inside = self.as_mut().expect("already returned if this was null");
         if let Some(empty) = empty_line { inside.empty_lines.push(empty);} 
         if let Some(locationless) = locationless_line { inside.no_location_lines.push(locationless); }
         if let Some(dataless) = dataless_line { inside.no_data_lines.push(dataless); }

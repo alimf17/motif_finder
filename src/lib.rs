@@ -8,7 +8,7 @@ use crate::modified_t::SymmetricBaseDirichlet;
 
 use std::sync::RwLock;
 
-use once_cell::sync::{OnceCell,Lazy};
+use once_cell::sync::{OnceCell};
 use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;

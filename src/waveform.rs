@@ -227,8 +227,8 @@ impl<'a> Waveform<'a> {
        
         let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
 
-        let min_kern_bp: usize = max(0, place_bp) as usize;
-        let nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
+        let _min_kern_bp: usize = max(0, place_bp) as usize;
+        let _nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
  
         //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
         //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
@@ -342,6 +342,16 @@ impl<'a> Waveform<'a> {
 
     }
 
+    //Panics: if other_wave doesn't point to the same AllDataUse as self
+    pub fn rmse_with_wave(&self, other_wave: &Waveform) -> f64 {
+
+        let residual = self-other_wave;
+
+        let length: f64 = residual.wave.len() as f64;
+
+        (residual.wave.into_iter().map(|a| a.powi(2)).sum::<f64>()/length).sqrt()
+
+    }
 
 
     pub fn produce_noise<'b>(&self, data_ref: &'b AllDataUse) -> Noise<'b> {

@@ -341,45 +341,32 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 }
 
 
-pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, isize, bool))>) -> Array3<f64> {
+pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, bool))>) -> Array3<f64> {
 
     let mut min_offset: isize = isize::MAX;
     let mut max_offset_plus_len: isize = isize::MIN;
 
     let num_samples = best_motifs.len();
     let pwms_offsets = best_motifs.into_iter()
-                                  .map(|(a, (_, b, c))| {
-                                      min_offset = min_offset.min(b);
-                                      max_offset_plus_len = max_offset_plus_len.max(b+(a.len() as isize));
-                                      (if c {a.rev_complement()} else {a.pwm()}, b)
-                                  }).collect::<Vec<(Vec<Base>, isize)>>();
+                                  .map(|(a, (_, c))| {
+                                      if c {a.rev_complement()} else {a.pwm()}
+                                  }).collect::<Vec<Vec<Base>>>();
 
     let neutral: f64 = 0.0;
 
-    let num_bases = (max_offset_plus_len-min_offset) as usize;
 
+    let mut samples = Array3::<f64>::zeros([num_samples, MAX_BASE, BASE_L-1]);
 
-    let mut samples = Array3::<f64>::zeros([num_samples, num_bases, BASE_L-1]);
+    for (k, pwm) in pwms_offsets.into_iter().enumerate() {
 
-    for (k, (pwm, offset)) in pwms_offsets.into_iter().enumerate() {
-
-        for j in 0..num_bases {
+        for j in 0..pwm.len() {
 
             //let mut slice = samples.slice_mut(s![k,j,..]);  //I went with this because it's the fastest possible assignment.
                                                             //It will slow down calculations of credible intervals and means,
                                                             //But I do that once, not 10s of thousands of times. I did not
                                                             //benchmark this, though
-
-            let ind = (j as isize)-(offset-min_offset);
-
-
-            if ind < 0 || ind >= (pwm.len() as isize) {
-                for i in 0..(BASE_L-1) {samples[[k,j,i]] = neutral;}
-            } else {
-                let ind = ind as usize;
-                let probs = pwm[ind].as_simplex();
-                for i in 0..(BASE_L-1) {samples[[k,j,i]] = probs[i];}
-            }
+            let probs = pwm[j].as_simplex();
+            for i in 0..(BASE_L-1) {samples[[k,j,i]] = probs[i];}
         }
 
     }
@@ -542,36 +529,6 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
 
 
 
-    /*
-    //We know that the number of cells scales with 1/INTERVAL_CELL_LENGTH cubed. 8.*SQRT_3/27. is
-    //the volume of the tetrahedron.
-    let mut actual_cells: Vec<(usize, usize, usize)> = Vec::with_capacity((8.*SQRT_3/27.*INTERVAL_CELL_LENGTH.powi(-3)).ceil() as usize); 
-
-
-    //Establishes which indices actually are in the tetrahedron
-    for z_ind in 0..z_steps{
-        let z = zs[z_ind];
-        let x_lo_thresh = SQRT_2*z/4-SQRT_2/4;
-        let x_hi_thresh =  1./SQRT_2-z/SQRT_2;
-        for x_ind in 0..x_steps {
-            let x = xs[x_ind];
-            if (x >= x_lo_thresh) && (x <= x_hi_thresh) {
-                let y_lo_thresh =  (z-1.)/(SQRT_2*SQRT_3)+x/SQRT_3;
-                let y_hi_thresh = -(z-1.)/(SQRT_2*SQRT_3)-x/SQRT_3;
-                for y_ind in 0..ysteps {
-                    let y = ys[y_ind];
-                    if (y >= y_lo_thresh) && (y <= y_hi_thresh) {
-                        actual_cells.push((x_ind, y_ind, z_ind));
-                    }
-                }
-            }
-
-        }
-    }
-
-    //Actual cells can no longer mutate
-    let actual_cells = actual_cells;
-    */              
     
     //This will yield a vector where the ith position corresponds to the cells of the
     //credible region for the ith base
@@ -617,41 +574,8 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
         (region, posterior_mean)
 
     }).collect::<Vec<_>>();
-    /*
-    let mut means = Array2::<f64>::zeros([num_bases, BASE_L-1]);
-    let mut lower_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
-    let mut upper_ci = Array2::<f64>::zeros([num_bases, BASE_L-1]);
-        
-        
-    for j in 0..num_bases {
-        for i in 0..(BASE_L-1) {
-
-            let mut data = samples.slice(s![..,j, i]).clone().to_vec();
-            data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-
-            let mut min_range_start: usize = 0;
-            let mut min_range: f64 = f64::INFINITY;
-
-            for d in 0..(data.len()-num_interval) {
-
-                let range = data[d+num_interval]-data[d];
-                if range < min_range {
-                    min_range_start = d;
-                    min_range = range;
-                }
-
-            }
-
-            lower_ci[[j,i]] = data[min_range_start];
-            upper_ci[[j,i]] = data[min_range_start+num_interval];
-            means[[j, i]] = data.mean(); //This consumes the data clone
-        }
-    }
 
 
-    [lower_ci, means, upper_ci]
-
-    */
 
     credible_cells_vec
 

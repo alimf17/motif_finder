@@ -1,18 +1,18 @@
 //pub mod bases {
 use std::{f64, fmt, fs};
-use std::error::Error;
+
 use std::ops::{Index, IndexMut};
-use std::hint::unreachable_unchecked;
+
 use std::io::{Read, Write};
 //use std::time::{Duration, Instant};
 
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
-use crate::waveform::{Kernel, Waveform, WaveformDef, Noise, Background};
+use crate::waveform::{Kernel, Waveform, WaveformDef, Noise};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
-use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
-use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, MOMENTUM_DIST, HMC_TRACE_STEPS, HMC_EPSILON};
+use crate::modified_t::{ContinuousLnCDF};
+use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, HMC_TRACE_STEPS, HMC_EPSILON};
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
 
@@ -124,6 +124,10 @@ static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 const L_SD_VECTOR_SPACE: f64 = 1.0;
 
 const SD_LEAST_MOVE: f64 = 1.0;
+
+const L_SD_VECTOR_SPACE_SINGLE: f64 = 1.0;
+
+const SD_LEAST_MOVE_SINGLE: f64 = 1.0;
 
 const HEIGHT_MOVE_SD: f64 = 1.0;
 
@@ -389,8 +393,9 @@ impl Base {
     }
 
     pub fn as_probabilities(&self) -> [f64; BASE_L] {
-        let magnitude: f64 = self.props.iter().sum();
-        self.props.iter().map(|a| a/magnitude).collect::<Vec<f64>>().try_into().expect("I'm never worried about error here because all Base are guarenteed to be length BASE_L")
+        let summed = self.props.iter().sum::<f64>();
+        let ret: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/summed); // self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
+        ret
     }
 
     pub fn as_simplex(&self) -> [f64; BASE_L-1] {
@@ -435,11 +440,14 @@ impl Base {
         Base::new(unnormalized_base)
     }
 
-    pub fn moved_base<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
+    //If ratio_sd and small_sd are negative, the move generated is just the opposite
+    //which gives a valid result. Hence, no erroring out. You SHOULDN'T use negatives
+    //because that's out of convention for no reason, but it won't break.
+    pub fn moved_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Base {
 
         let mut new_base_vect = self.base_to_vect();
 
-        let mut signs_base_vect: [f64; BASE_L-1] = core::array::from_fn(|a| new_base_vect[a].signum());
+        let signs_base_vect: [f64; BASE_L-1] = core::array::from_fn(|a| new_base_vect[a].signum());
 
         let mut largest_abs_to_smallest: [(f64, usize); BASE_L-1] = core::array::from_fn(|a| (new_base_vect[a].abs(), a));
 
@@ -449,15 +457,15 @@ impl Base {
 
         let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
 
-        large_abs_ratio *= (NORMAL_DIST.sample(rng)*L_SD_VECTOR_SPACE).exp();
+        large_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
 
         if large_abs_ratio < 1.0 { large_abs_ratio = 1.0/large_abs_ratio; }
 
-        small_abs_ratio *= (NORMAL_DIST.sample(rng)*L_SD_VECTOR_SPACE).exp();
+        small_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
         
         if small_abs_ratio < 1.0 { small_abs_ratio = 1.0/small_abs_ratio; }
 
-        new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*SD_LEAST_MOVE;
+        new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*small_sd;
 
         new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1]*signs_base_vect[largest_abs_to_smallest[1].1];
 
@@ -575,12 +583,6 @@ impl Base {
     }
     pub fn safe_bind(&self, bp: usize) -> f64 {
         self.props[bp]
-    }
-
-    pub fn to_unit_sum(&self) -> [f64; BASE_L] {
-        let summed = self.props.iter().sum::<f64>();
-        let ret: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/summed); // self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
-        ret
     }
 
     pub fn seqlogo_heights(&self) -> [(usize, f64); BASE_L] {
@@ -1578,23 +1580,12 @@ impl Motif {
     /// new_b_vec.push(Base::rand_new(&mut rng));
     /// let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
     /// println!("new {:?} old {:?}", newmot, m);
-    /// let dtry = m.distance_function(&newmot);
-    /// println!("dtry {:?}", dtry);
-    /// println!("distance trial {} {} {} {}", dtry.0, m.pwm()[0].dist_sq(None), m.pwm()[1].dist_sq(None), m.pwm()[0].dist_sq(None)+ m.pwm()[1].dist_sq(None));
-    /// assert!((dtry.0-(m.pwm()[0].dist_sq(None)+(m.pwm()[1].dist_sq(None)))).abs() < 1e-16);//TODO: THIS SEEMS TO FAIL LEGIT
-    /// assert!(dtry.1 == 2);
-    /// assert!(dtry.2);
     /// ```
-    pub fn distance_function(&self, other_mot: &Motif) -> (f64, isize, bool) {
+    pub fn distance_function(&self, other_mot: &Motif) -> (f64, bool) {
         let rev = other_mot.rev_complement();
-        let length_offset: isize = ((self.len() as isize) -1)/2 - ((other_mot.len() as isize) -1)/2;
-        /*let best_forward = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&other_mot.pwm, a), a, false))
-            .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();
-        let best_reverse = ((-((self.len()-1) as isize))..((other_mot.len()-1) as isize)).map(|a| (self.little_distance(&rev, a), a, true))
-            .min_by(|x, y| x.0.partial_cmp(&y.0).expect("No NANs should be possible")).unwrap();*/
 
-        let best_forward = (self.little_distance(&other_mot.pwm, length_offset), length_offset, false);
-        let best_reverse = (self.little_distance(&rev, length_offset), length_offset, true);
+        let best_forward = (self.little_distance(&other_mot.pwm), false);
+        let best_reverse = (self.little_distance(&rev), true);
 
         let best = if best_reverse.0 < best_forward.0 { best_reverse } else {best_forward};
 
@@ -1602,11 +1593,9 @@ impl Motif {
 
     }
 
-    fn little_distance(&self, other_mot: &Vec<Base>, alignment: isize) -> f64 {
+    fn little_distance(&self, other_mot: &Vec<Base>) -> f64 {
 
-        let (mod_len_a, mod_len_b) = if alignment < 0 {(0_usize, (-alignment) as usize)} else {(alignment as usize, 0_usize)};
-
-        let total_len = (self.len()+mod_len_a).max(other_mot.len()+mod_len_b);
+        let total_len = (self.len()).max(other_mot.len());
 
         let (pwm_1, pwm_2) = (&self.pwm, other_mot);
 
@@ -1614,8 +1603,8 @@ impl Motif {
 
         for ind in 0..total_len {
 
-            let b1 = if (ind < mod_len_a) || (ind >= (pwm_1.len()+mod_len_a)) {None} else {Some(&pwm_1[ind-mod_len_a])};
-            let b2 = if (ind < mod_len_b) || (ind >= (pwm_2.len()+mod_len_b)) {None} else {Some(&pwm_2[ind-mod_len_b])};
+            let b1 = pwm_1.get(ind); 
+            let b2 = pwm_2.get(ind);
 
             
             distance += match b1 {
@@ -2164,6 +2153,22 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    fn propose_ordered_base_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        let base_change = rng.gen_range(0..replacement.pwm.len());
+
+        replacement.pwm[base_change] = replacement.pwm[base_change].moved_base(L_SD_VECTOR_SPACE_SINGLE, SD_LEAST_MOVE_SINGLE, rng);
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+    }
 
     fn propose_ordered_motif_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
 
@@ -2173,12 +2178,13 @@ impl<'a> MotifSet<'a> {
 
         let mut replacement = new_set.set[c_id].clone();
 
-        replacement.pwm = replacement.pwm.iter().map(|a| a.moved_base(rng)).collect();
+        replacement.pwm = replacement.pwm.iter().map(|a| a.moved_base(L_SD_VECTOR_SPACE, SD_LEAST_MOVE, rng)).collect();
 
         let ln_post = new_set.replace_motif(replacement, c_id);
 
         Some((new_set, ln_post))
     }
+
 
     fn propose_height_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
 
@@ -2282,8 +2288,8 @@ impl<'a> MotifSet<'a> {
             }
 
 
-            let mut start = 0;
-            let mut next_start = 0;
+            let _start = 0;
+            let _next_start = 0;
             //for k in 0..self.set.len() {
             //next_start += self.set[k].len()*(BASE_L-1)+1;
             //let mut new_mot = unsafe{ prior_set.set[k].add_momentum(HMC_EPSILON, &momentum_apply[start..next_start], false)};
@@ -2296,10 +2302,10 @@ impl<'a> MotifSet<'a> {
             //new_set.recalc_signal();
             //
 
-            let mut new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, false)};
+            let mut new_mot = unsafe{ prior_set.set[k].add_momentum(*HMC_EPSILON.read().expect("no writes expected now"), &momentum_apply, false)};
 
             if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
-                new_mot = unsafe{ prior_set.set[k].add_momentum((*HMC_EPSILON.read().expect("no writes expected now")), &momentum_apply, true)};
+                new_mot = unsafe{ prior_set.set[k].add_momentum(*HMC_EPSILON.read().expect("no writes expected now"), &momentum_apply, true)};
             }
 
             let _ = new_set.replace_motif(new_mot, k);
@@ -2363,8 +2369,8 @@ impl<'a> MotifSet<'a> {
     //The actual kinetic energy is p·M^(-1)p+ln(||M||)+constant
     //But that doesn't matter. I'm only every calculating kinetic energy 
     //as a difference, so I can omit +ln(||M||)+constant
-    fn net_kinetic_energy(momentum: &[f64], squared_genome_size: f64, momentum_var: f64) -> f64 {
-        let l_momentum = momentum.len();
+    fn net_kinetic_energy(momentum: &[f64], _squared_genome_size: f64, _momentum_var: f64) -> f64 {
+        let _l_momentum = momentum.len();
         //if l_momentum = 0 {return 0.0;}
 
         let mut ke: f64 = 0.0;
@@ -2710,7 +2716,7 @@ impl<'a> SetTrace<'a> {
 
         let mut dist = Normal::new(0.0, initial_sd).expect("Do not give a non positive sd");
         //We are taking ownership of this, but will replace it by the end
-        let mut set = &mut self.active_set;
+        let set = &mut self.active_set;
 
         const BLOCK_LEN: usize = 100;
         const TARGET_PROP: f64 = 0.9;
@@ -2732,7 +2738,7 @@ impl<'a> SetTrace<'a> {
             }
             let prop_accept = num_accept/(BLOCK_LEN as f64);
             sum_props += prop_accept;
-            all_fine &= ((prop_accept > min_prop) && (prop_accept < max_prop));
+            all_fine &= (prop_accept > min_prop) && (prop_accept < max_prop);
         }
 
         num_blocks += 1;
@@ -2846,7 +2852,7 @@ impl<'a> SetTrace<'a> {
                 }
             }
 
-            if (num_blocks > 1000) { 
+            if num_blocks > 1000 { 
                 if !above_low {
                     mid_sd = lowbound;
                 } else {
@@ -2887,7 +2893,7 @@ impl<'a> SetTrace<'a> {
 
         let mut repoint_set = set.clone();
 
-        let recalc_ln_post = (!std::ptr::eq(self.data_ref, repoint_set.data_ref));
+        let recalc_ln_post = !std::ptr::eq(self.data_ref, repoint_set.data_ref);
 
         if recalc_ln_post {
             repoint_set.data_ref = &self.data_ref;
@@ -2927,7 +2933,7 @@ impl<'a> SetTrace<'a> {
 
         let mut buffer: Vec<u8> = Vec::new();
 
-        bincode_file_handle.read_to_end(&mut buffer);
+        bincode_file_handle.read_to_end(&mut buffer).expect("Something killed this buffer and it shouldn't have");
 
         let prior_state: MotifSetDef = bincode::deserialize(&buffer).unwrap_or_else(|_| (&bincode::deserialize::<StrippedMotifSet>(&buffer).expect("bincode must be a valid motif set!").reactivate_set(self.data_ref)).into());
 
@@ -3000,7 +3006,7 @@ impl<'a> SetTrace<'a> {
             None => self.current_set_to_print(),
         };
 
-        let mut buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
+        let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
 
         outfile_handle.write(&buffer).expect("buffer should write");
     }
@@ -3016,7 +3022,7 @@ impl<'a> SetTrace<'a> {
 
         let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
 
-        let mut buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
+        let buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
 
         outfile_handle.write(&buffer).expect("buffer should write");
     }
@@ -3032,7 +3038,7 @@ impl<'a> SetTrace<'a> {
         let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).collect();
 
 
-        let mut buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
+        let buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
             all_data_file: self.all_data_file.clone(),
             trace: trace, 
         })).expect("serializable");
@@ -3269,7 +3275,7 @@ impl SetTraceDef {
 
     }
 
-    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, tail_start: usize, cutoff: f64) -> Vec<(Motif, (f64, isize, bool))> {
+    pub fn extract_best_motif_per_set(&self, reference_motif: &Motif, tail_start: usize, cutoff: f64) -> Vec<(Motif, (f64, bool))> {
 
         self.trace[(self.len()-tail_start)..self.len()].iter().map(|mot_set| {
 
@@ -3278,7 +3284,7 @@ impl SetTraceDef {
                 .expect("Motif sets all need at least one motif")
 
 
-        }).filter(|(_, (b, _, _))| *b < cutoff).collect::<Vec<_>>()
+        }).filter(|(_, (b, _))| *b < cutoff).collect::<Vec<_>>()
 
     }
 
@@ -3541,26 +3547,16 @@ mod tester{
         let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &mut rng);
         let dself = m.distance_function(&m);
         assert!(dself.0.abs() < 1e-16);
-        assert!(dself.1 == 0);
-        assert!(!dself.2);
+        assert!(!dself.1);
         let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
         assert!(drev.0.abs() < 1e-16);
-        assert!(drev.1 == 0);
-        assert!(drev.2);
+        assert!(drev.1);
         let mut new_b_vec: Vec<Base> = Vec::with_capacity(m.len()+2);
         new_b_vec.append(&mut m.rev_complement());
         new_b_vec.push(Base::rand_new(&mut rng));
         new_b_vec.push(Base::rand_new(&mut rng));
         let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
         println!("new {:?} old {:?}", newmot, m);
-        let dtry = m.distance_function(&newmot);
-
-        println!("-2 try {} +2 try {} 0 try {}", m.little_distance(&newmot.rev_complement(), -2), m.little_distance(&newmot.rev_complement(), 2), m.little_distance(&newmot.rev_complement(), 0));
-        println!("dtry {:?}", dtry);
-        println!("distance trial {} {} {} {}", dtry.0.powi(2), newmot.pwm()[m.len()].dist_sq(None), newmot.pwm()[m.len()+1].dist_sq(None), newmot.pwm()[m.len()].dist_sq(None)+ newmot.pwm()[m.len()+1].dist_sq(None)-dtry.0.powi(2));
-        assert!((dtry.0.powi(2)-(newmot.pwm()[m.len()].dist_sq(None)+(newmot.pwm()[m.len()+1].dist_sq(None)))).abs() < 1e-10);//TODO: THIS SEEMS TO FAIL LEGIT
-        assert!(dtry.1 == 2);
-        assert!(dtry.2);
     }
 
     #[test]
