@@ -161,14 +161,90 @@ pub fn main() {
     all_dat_file.read_to_end(&mut buffer);
     let all_dat: AllData = bincode::deserialize(&buffer).expect("Big trouble if we're saving invalid data files");
     let all_dat_use: AllDataUse = AllDataUse::new(&all_dat).expect("Big trouble if we're saving invalid data files");
-
+ 
 
     //set_trace_collections is now the chains we want
+    
+    let reference_motifs: Vec<Motif> = set_trace_collections.iter().map(|a| a.initial_set_pwm()).collect();
+
+
+    let distances_file = format!("{}_distances_to_refs.png",base_file);
+    let autocorrs_file = format!("{}_distance_autocorrelations.png", base_file);
+
+    let distances_plot = BitMapBackend::new(distances_file.as_str(), (2600, 2600)).into_drawing_area();
+    let autocorrelation_plot = BitMapBackend::new(autocorrs_file.as_str(), (1350, 1350)).into_drawing_area();
+
+    distances_plot.fill(&full_palette::WHITE).unwrap();
+    autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
+
+    let mut autocorrelations_ctx = ChartBuilder::on(&distances_plot)
+                               .caption("Autocorrelations of each trace", ("Times New Roman", 30))
+                               .set_label_area_size(LabelAreaPosition::Left, 40)
+                               .set_label_area_size(LabelAreaPosition::Bottom, 40)
+                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1_f64)
+                               .unwrap();
+
+    autocorrelations_ctx.configure_mesh()
+                               .x_desc("Lag (in units of step save period)")
+                               .y_desc("Autocorrelation coefficient")
+                               .draw().unwrap();
+
+
+
+
+    let distances_panels = distances_plot.split_evenly((2, (reference_motifs.len()+1)/2));
+    let mut distances_ctxes = distances_panels.iter().enumerate().map(|(i,a)| ChartBuilder::on(a)
+                                                                      .caption(format!("Distance from Reference {}", i).as_str(), ("Times New Roman", 30))
+                                                                      .set_label_area_size(LabelAreaPosition::Left, 40)
+                                                                      .set_label_area_size(LabelAreaPosition::Bottom, 40)
+                                                                      .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..10_f64)
+                                                                      .unwrap()
+                                                                      ).collect::<Vec<_>>(); 
+
+    for ctx in distances_ctxes.iter_mut() { ctx.configure_mesh()
+                                               .x_desc("Saved steps")
+                                               .y_desc("Mean of motif set distance to reference")
+                                               .draw().unwrap(); }
 
     for (chain, collection) in set_trace_collections.iter().enumerate() {
+
         let chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
-        collection.save_best_trace(&mut buffer, &out_dir, &chain_name);//, data: &Waveform, background: &Background)
+        
+        collection.save_best_trace(&mut buffer, &out_dir, &chain_name);
+    
+        //TODO: This makes a vector V of length reference_motifs, of vectors of length equal 
+        //      to each collection. V[i][j] is the mean distance of the motifs in collection's
+        //      jth set to the ith reference motif. I eventually want to: 
+        //          1-Create a plot for each ith REFERENCE motif, with lines from each of the collections of its distances
+        //          2-Calculate autocorrelations for each REFERENCE motif and plot them as well
+        let distance_traces = collection.create_distance_traces(&reference_motifs);
+
+        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, 100);
+
+        let style = ShapeStyle{ color: (*PALETTE[chain]).into(), filled: true, stroke_width: 0};
+
+        let color = unsafe{*PALETTE.as_ptr().add(chain)};
+
+        let letter = UPPER_LETTERS[chain];
+
+        for (i, trace) in distance_traces.iter().enumerate() {
+            distances_ctxes[i].draw_series(trace.iter().enumerate().map(|(i, p)| Circle::new((i,*p), 5, style.clone())))
+                              .unwrap().label(format!("{}", letter).as_str())
+                              .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
+                              
+        }
+
+        autocorrelations_ctx.draw_series(collection_autocorrelation.iter().enumerate().map(|(i, p)| Circle::new((i,*p), 5, ShapeStyle{ color: (*PALETTE[chain]).into(), filled : true, stroke_width : 0})))
+                                                                   .unwrap().label(format!("{}", UPPER_LETTERS[chain]).as_str())
+                                                                   .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
+
+
     }
+
+    autocorrelations_ctx.configure_series_labels().draw().unwrap();
+    for ctx in distances_ctxes.iter_mut() { ctx.configure_series_labels().draw().unwrap(); }
+
+
     std::mem::drop(buffer);
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);

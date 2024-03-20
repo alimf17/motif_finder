@@ -3249,6 +3249,10 @@ impl SetTraceDef {
         &self.all_data_file
     }
 
+    pub fn initial_set_pwm(&self) -> Motif {
+        self.trace[0].set[0].clone()
+    }
+
     //PWMs are chosen by making a random choice of SET, and a random choice of ONE motif per set
     pub fn ret_rand_motifs<R: Rng + ?Sized>(&self, num_motifs: usize, rng: &mut R) -> Vec<Motif> {
 
@@ -3285,6 +3289,35 @@ impl SetTraceDef {
 
 
         }).filter(|(_, (b, _))| *b < cutoff).collect::<Vec<_>>()
+
+    }
+
+    pub fn create_distance_traces(&self, reference_mots: &Vec<Motif>) -> Vec<Vec<f64>> {
+
+        let mut distances: Vec<Vec<f64>> = vec![vec![0_f64; self.trace.len()] ; reference_mots.len()];
+
+
+        for (i, trace_set) in self.trace.iter().enumerate() {
+
+            for j in 0..reference_mots.len() {
+
+                let inv_num_mot = 1.0/(trace_set.set.len() as f64);
+
+                let mean_dist = trace_set.set.iter().map(|a| a.distance_function(&reference_mots[j]).0).sum::<f64>()*inv_num_mot;
+
+
+                //SAFETY: j is always in bound of distances and i in bounds of distances[j] by construction
+                //        I'm just not convinced the compiler will notice 
+                unsafe {
+                    *distances.get_unchecked_mut(j).get_unchecked_mut(i) = mean_dist;
+                }
+
+            }
+
+        }
+
+        distances
+
 
     }
 
