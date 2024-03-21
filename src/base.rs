@@ -242,8 +242,8 @@ impl Base {
 
         let mut props = props;
 
-        #[cfg(test)]
-        println!("Base props {:?}", props);
+        //#[cfg(test)]
+        //println!("Base props {:?}", props);
 
         let mut any_neg: bool = false;
 
@@ -384,9 +384,9 @@ impl Base {
         
         match base {
 
-            None => self.props.iter().map(|a| a.ln().powi(2)).sum::<f64>()-0.25*self.props.iter().map(|a| a.ln()).sum::<f64>().powi(2),
+            None => 4.0*self.props.iter().map(|a| a.ln().powi(2)).sum::<f64>()-self.props.iter().map(|a| a.ln()).sum::<f64>().powi(2),
             Some(other) => {
-                self.props.iter().zip(other.props.iter()).map(|(a,b)| (a.ln()-b.ln()).powi(2)).sum::<f64>()-0.25*(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
+                4.0*self.props.iter().zip(other.props.iter()).map(|(a,b)| (a.ln()-b.ln()).powi(2)).sum::<f64>()-(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
             },
         }
 
@@ -417,7 +417,7 @@ impl Base {
     //"Scalar multiplication" is elementwise powering to the scalar and then renormalize
     //And the metric is the Aitchison metric
     //This vector space is isometric to R3 under the transformation specified in the functions
-    //Where if p = 1/(2*(1+e)) and q = e/p
+    //Where if p = 1/(2*(1+e)) and q = e*p
     //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
     pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
@@ -432,10 +432,10 @@ impl Base {
 
 
         let unnormalized_base: [f64; BASE_L] = 
-            [(-(base_as_vec[0]+base_as_vec[1]+base_as_vec[2])).exp(), 
-              ( base_as_vec[0]+base_as_vec[1]-base_as_vec[2]).exp(),
-              ( base_as_vec[0]-base_as_vec[1]+base_as_vec[2]).exp(),
-              (-base_as_vec[0]+base_as_vec[1]+base_as_vec[2]).exp()];
+            [((-(base_as_vec[0]+base_as_vec[1]+base_as_vec[2]))*0.25).exp(), 
+             ((( base_as_vec[0]+base_as_vec[1]-base_as_vec[2]))*0.25).exp(),
+             ((( base_as_vec[0]-base_as_vec[1]+base_as_vec[2]))*0.25).exp(),
+             (((-base_as_vec[0]+base_as_vec[1]+base_as_vec[2]))*0.25).exp()];
 
         Base::new(unnormalized_base)
     }
@@ -531,7 +531,7 @@ impl Base {
     fn d_base_d_vect(&self) ->  [[f64; BASE_L-1]; BASE_L-1] {
         
         let other_bases = self.all_non_best();
-        let proto_column: [f64; BASE_L-1] = core::array::from_fn(|a| 2.0 * self[other_bases[a]]);
+        let proto_column: [f64; BASE_L-1] = core::array::from_fn(|a| 0.5 * self[other_bases[a]]);
 
         let mut grad = [proto_column.clone(), proto_column.clone(), proto_column.clone()];
 
@@ -562,9 +562,9 @@ impl Base {
 
         let probs = self.as_probabilities();
  
-        [ 4.0*(probs[0]-probs[1]-probs[2]+probs[3]), 
-          4.0*(probs[0]-probs[1]+probs[2]-probs[3]),
-          4.0*(probs[0]+probs[1]-probs[2]-probs[3])]
+        [ probs[0]-probs[1]-probs[2]+probs[3], 
+          probs[0]-probs[1]+probs[2]-probs[3],
+          probs[0]+probs[1]-probs[2]-probs[3]]
     }
 
     fn max( arr: &[f64]) -> f64 {
@@ -587,10 +587,49 @@ impl Base {
 
     }
 
+    fn check_vec_kept_best_bp(vec_res: &[f64; BASE_L-1], best_base: Bp) -> [f64; BASE_L-1] {
+
+        match best_base {
+               Bp::A => [  vec_res[0]+vec_res[1] ,   vec_res[1]+vec_res[2] ,   vec_res[2]+vec_res[0] ],
+               Bp::C => [-(vec_res[0]+vec_res[1]),  -vec_res[1]+vec_res[2] ,   vec_res[2]-vec_res[0] ],
+               Bp::G => [ -vec_res[0]+vec_res[1] ,   vec_res[1]-vec_res[2] , -(vec_res[2]+vec_res[0])],
+               Bp::T => [  vec_res[0]-vec_res[1] , -(vec_res[1]+vec_res[2]),  -vec_res[2]+vec_res[0] ],
+        }
+    }
+
+
+
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.base_to_vect();
-       let vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
+       let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
+       
+       if confine_base {
+           let best_base = self.best_base();
+
+           let mut conds_check = Self::check_vec_kept_best_bp(&vec_res, best_base); 
+           let mut conds: [bool; BASE_L-1] = core::array::from_fn(|a| conds_check[a] > 0.);
+           let mut failed = conds.iter().any(|&a| a);
+
+           while failed {
+               let next_reflect = conds_check.iter().enumerate().max_by(|(_, &a), (_, b)| a.partial_cmp(b).unwrap()).expect("conds_check is not empty").0;
+               conds_check = match next_reflect {
+                   0 => { //If A or C
+                       if (best_base as usize) < 2 {[-vec_res[1], -vec_res[0], vec_res[2]]} else {[vec_res[1], vec_res[0], vec_res[2]]}
+                   }, 
+                   1 => {
+                       if (best_base == Bp::A) || (best_base == Bp::T) {[vec_res[0], -vec_res[2], -vec_res[1]]} else {[vec_res[0], vec_res[2], vec_res[1]]}
+                   }, 
+                   2 => { //If A or G
+                       if (best_base as usize) & 1 == 0 {[-vec_res[2], vec_res[1],-vec_res[0]]} else {[vec_res[2], vec_res[1],vec_res[0]]}
+                   }, 
+                   _ => unreachable!(),
+               };
+
+               let mut conds: [bool; BASE_L-1] = core::array::from_fn(|a| conds_check[a] > 0.);
+               let mut failed = conds.iter().any(|&a| a);
+           }
+       }
        Base::vect_to_base(&vec_res)
 
     }
@@ -3553,7 +3592,7 @@ mod tester{
     use crate::waveform::*;
     use rand::distributions::{Distribution, Uniform};
     use crate::{DIRICHLET_PWM, PROPOSE_EXTEND, MOMENTUM_DIST};
-
+    use crate::SymmetricBaseDirichlet;
 
 
 
@@ -3659,39 +3698,39 @@ mod tester{
         let mut rng = rand::thread_rng();
         let b = Base::rand_new(&mut rng);
 
-        let simplex = b.as_simplex();
+        let simplex = b.base_to_vect();
 
-        let mod_b = Base::simplex_to_base(&simplex);
+        let mod_b = Base::vect_to_base(&simplex);
 
         println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
         let mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
 
 
-        let jacob = b.d_base_d_simplex();
+        let jacob = b.d_base_d_vect();
 
         let b0 = b.add_in_hmc([1e-6, 0.0, 0.0], false);
         let b1 =  b.add_in_hmc([0.0, 1e-6, 0.0], false);
         let b2 =  b.add_in_hmc([0.0, 0.0, 1e-6], false);
 
-        println!("{:?} {:?} {} {} {}", b.as_simplex(), b0.as_simplex(), b0.as_simplex()[0]-b.as_simplex()[0],  b0.as_simplex()[1]-b.as_simplex()[1],  b0.as_simplex()[2]-b.as_simplex()[2]);
-        println!("{:?} {:?} {} {} {}", b.as_simplex(), b1.as_simplex(), b1.as_simplex()[0]-b.as_simplex()[0],  b1.as_simplex()[1]-b.as_simplex()[1],  b1.as_simplex()[2]-b.as_simplex()[2]);
-        println!("{:?} {:?} {} {} {}", b.as_simplex(), b2.as_simplex(), b2.as_simplex()[0]-b.as_simplex()[0],  b2.as_simplex()[1]-b.as_simplex()[1],  b2.as_simplex()[2]-b.as_simplex()[2]);
+        println!("{:?} {:?} {} {} {}", b.base_to_vect(), b0.base_to_vect(), b0.base_to_vect()[0]-b.base_to_vect()[0],  b0.base_to_vect()[1]-b.base_to_vect()[1],  b0.base_to_vect()[2]-b.base_to_vect()[2]);
+        println!("{:?} {:?} {} {} {}", b.base_to_vect(), b1.base_to_vect(), b1.base_to_vect()[0]-b.base_to_vect()[0],  b1.base_to_vect()[1]-b.base_to_vect()[1],  b1.base_to_vect()[2]-b.base_to_vect()[2]);
+        println!("{:?} {:?} {} {} {}", b.base_to_vect(), b2.base_to_vect(), b2.base_to_vect()[0]-b.base_to_vect()[0],  b2.base_to_vect()[1]-b.base_to_vect()[1],  b2.base_to_vect()[2]-b.base_to_vect()[2]);
 
         println!("{:?}", jacob);
         println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
                  b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
         let simp = [0.1_f64, -0.1, -0.2];
-        let simp_b = Base::simplex_to_base(&simp);
+        let simp_b = Base::vect_to_base(&simp);
 
         let b3a = simp_b.add_in_hmc([0.0, 0.0, -1./30.], false);
         let b3 = simp_b.add_in_hmc([0.0, 0.0, -5./30.], false);
 
-        let sim_b3a = b3a.as_simplex();
-        let sim_b3 = b3.as_simplex();
+        let sim_b3a = b3a.base_to_vect();
+        let sim_b3 = b3.base_to_vect();
 
-        println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.as_simplex(), b3a, b3.as_simplex(), b3);
+        println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.base_to_vect(), b3a, b3.base_to_vect(), b3);
 
         assert!((simp[0]-sim_b3a[0]).abs() < 1e-6, "0th element changes with no reflection");
         assert!((simp[0]-sim_b3[0] ).abs() < 1e-6, "0th element changes with a reflection");
@@ -3721,7 +3760,7 @@ mod tester{
         println!("pre ref");
         let confine_end = confine_start.add_in_hmc(mom_confine_ref, true);
 
-        let confine_end_simp = confine_end.as_simplex();
+        let confine_end_simp = confine_end.base_to_vect();
 
         //let should_start = confine_end.add_in_hmc(confine_flip, true);
         println!("end simp {:?} prop_end_simp {:?}", confine_end_simp, [5_f64/9., 0., SQRT_2/3.-(2.*SQRT_2)/9.]);
@@ -3740,7 +3779,7 @@ mod tester{
         for i in 0..100000 {
             let b = random_base_dist.sample(&mut rng);
             println!("Base {:?}", b);
-            let f = b.as_simplex();
+            let f = b.base_to_vect();
             println!("back to simplex {:?}", f);
             println!("base once more {:?}", Base::simplex_to_base(&f));
         }
@@ -3752,7 +3791,7 @@ mod tester{
 
         println!("Base tr {:?}", b);
 
-        let s2 = b.as_simplex();
+        let s2 = b.base_to_vect();
         println!("simplex again {:?}", s2);
         println!("base once more {:?}",Base::simplex_to_base(&s2));
 
@@ -3769,13 +3808,13 @@ mod tester{
             let mut b = Base::simplex_to_base(&p);
             for _ in 0..10 {
                 println!("Base {:?}", Base::simplex_to_base(&p));
-                let f = b.as_simplex();
+                let f = b.base_to_vect();
                 println!("back to simplex {:?}", f);
                 b = Base::simplex_to_base(&f);
                 println!("base once more {:?}", b);
 
             }
-            let mut to_add = b.as_simplex();
+            let mut to_add = b.base_to_vect();
             let _ = to_add.iter_mut().map(|a| {*a = *a/100.;}).collect::<Vec<_>>();
 
             println!("trying to add {:?}", b.add_in_hmc(to_add, true));
@@ -4511,9 +4550,10 @@ mod tester{
         assert!(b == b.clone());
 
         let b_mag: f64 = b.show().iter().sum();
-        let supposed_default_dist = (b.as_simplex()).iter().map(|a| a.powi(2)).sum::<f64>();
+        let supposed_default_dist = (b.base_to_vect()).iter().map(|a| a.powi(2)).sum::<f64>();
 
-        assert!(supposed_default_dist == b.dist_sq(None));
+        println!("{supposed_default_dist}, {}", b.dist_sq(None));
+        assert!((supposed_default_dist - b.dist_sq(None)).abs() < 1e-7);
 
         //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist_sq(Some(&b.to_gbase().to_base())));
         //assert!(b == b.to_gbase().to_base());
