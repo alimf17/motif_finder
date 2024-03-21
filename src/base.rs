@@ -528,6 +528,45 @@ impl Base {
 
     }
 
+    fn d_base_d_vect(&self) ->  [[f64; BASE_L-1]; BASE_L-1] {
+        
+        let other_bases = self.all_non_best();
+        let proto_column: [f64; BASE_L-1] = core::array::from_fn(|a| 2.0 * self[other_bases[a]]);
+
+        let mut grad = [proto_column.clone(), proto_column.clone(), proto_column.clone()];
+
+        let (zeros, neg_cols) = match self.best_base() {
+            Bp::A => ([2_usize, 1, 0], None),
+            Bp::C => ([1, 2, 0], Some([0_usize, 1])),
+            Bp::G => ([2, 0, 1], Some([0_usize, 2])),
+            Bp::T => ([0, 2, 1], Some([1_usize, 2])),
+        };
+
+        for i in 0..(BASE_L-1) {
+            grad[i][zeros[i]] = 0.0;
+        }
+
+        if let Some(negs) = neg_cols {
+            for i in 0..(BASE_L-1) {
+                grad[negs[0]][i] *= -1.0;
+                grad[negs[1]][i] *= -1.0;
+            }
+        }
+        
+        grad
+
+
+    }
+ 
+    fn d_base_prior_d_hmc(&self) -> [f64; BASE_L-1] {
+
+        let probs = self.as_probabilities();
+ 
+        [ 4.0*(probs[0]-probs[1]-probs[2]+probs[3]), 
+          4.0*(probs[0]-probs[1]+probs[2]-probs[3]),
+          4.0*(probs[0]+probs[1]-probs[2]-probs[3])]
+    }
+
     fn max( arr: &[f64]) -> f64 {
         arr.iter().fold(f64::NAN, |x, y| x.max(*y))
     }
@@ -550,8 +589,9 @@ impl Base {
 
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
-       let tetra = self.as_simplex();
-       Base::simplex_to_base(&reflect_tetra(tetra, addend, confine_base))
+       let tetra = self.base_to_vect();
+       let vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
+       Base::vect_to_base(&vec_res)
 
     }
 
@@ -1060,19 +1100,8 @@ impl Motif {
 
         let mut new_mot = self.clone();
 
-        //if momentum[0] != 0.0 {
-        let mut h = self.peak_height.abs();
-        h += eps*momentum[0];
-        h = reflect_abs_height(h);
-        //h = MIN_HEIGHT+((MAX_HEIGHT-MIN_HEIGHT)/(1.0+((-h/SPREAD_HMC_CONV).exp())));
-        new_mot.peak_height = self.peak_height.signum()*h;
-
-        //}
-
         for i in 0..self.len() {
-
-            //let slice: [f64; BASE_L-1] = (1..(BASE_L)).map(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps).collect::<Vec<_>>().try_into().unwrap();
-            let slice: [f64; BASE_L-1] = core::array::from_fn(|a| *(momentum.get_unchecked(i*(BASE_L-1)+(a+1)))*eps); 
+            let slice: [f64; BASE_L-1] = core::array::from_fn(|a| *(momentum.get_unchecked(i*(BASE_L-1)+a))*eps); 
             new_mot.pwm[i] = self.pwm[i].add_in_hmc(slice, confine_base);
         }
 
@@ -1505,48 +1534,41 @@ impl Motif {
 
         let binds = self.return_bind_score(data_ref.data().seq());
 
-        let n = 1+self.len()*(BASE_L-1);
+        let n = self.len()*(BASE_L-1);
 
 
         let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_par_iter().map(|i| {
             //let mut d_ad_like_d_grad_form: Vec<f64> = (0..n).into_iter().map(|i| { //}
-            if i == 0 {
-                let d_noise_d_h = self.no_height_waveform_from_binds(&binds, data_ref).account_auto(data_ref.background_ref());
-                (d_ad_like_d_ad_stat * ((&d_noise_d_h * d_ad_stat_d_noise))) + self.d_height_prior_d_hmc()
-            } else {
-                let index = i-1;
-                let base_id = index/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
-                let mut bp_usize = index % (BASE_L-1);
-                bp_usize += if bp_usize >= (self.pwm[base_id].best_base() as usize) {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
-                                                                                                  //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
-                                                                                                  //This is important, because statically guarentees the safety of using rel_bind
+            let base_id = i/(BASE_L-1); //Remember, this is integer division, which Rust rounds down
+            let mut bp_usize = i % (BASE_L-1);
+            bp_usize += if bp_usize >= (self.pwm[base_id].best_base() as usize) {1} else {0}; //If best_base == BASE_L-1, then we access bp = 0, 1, .., BASE_L-2. 
+                                                                                              //At this point, base_id already goes to the next base, skipping bp = BASE_L-1
+                                                                                              //This is important, because statically guarentees the safety of using rel_bind
 
-                let bp = Bp::usize_to_bp(bp_usize); //SAFETY: constraints on bp_usize ensure that this is always safe
-                let result =
-                    (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, data_ref)
-                       .account_auto(data_ref.background_ref()))* d_ad_stat_d_noise) * d_ad_like_d_ad_stat;
+            let bp = Bp::usize_to_bp(bp_usize); //SAFETY: constraints on bp_usize ensure that this is always safe
+            let result =
+                (&(self.only_pos_waveform_from_binds(&binds, bp, base_id, data_ref)
+                   .account_auto(data_ref.background_ref()))* d_ad_stat_d_noise) * d_ad_like_d_ad_stat;
 
-                result
-            }
+            result
         }).collect();
 
-        //let grad_raw_ptrs = (0..self.len()).map(|i| d_ad_like_d_grad_form.as_mut_ptr().add(i*(BASE_L-1)+1)).collect::<Vec<_>>();
-
-        let _ = d_ad_like_d_grad_form.par_rchunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| {
-            //let _ = d_ad_like_d_grad_form.chunks_exact_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| { //}
+        //Note: we do rely on the momentum being a length of exactly self.len()*(BASE_L-1)
+        let _ = d_ad_like_d_grad_form.par_chunks_mut(BASE_L-1).enumerate().map(|(i, grad_chunk)| {
+            //let _ = d_ad_like_d_grad_form.chunks_mut(BASE_L-1).rev().enumerate().map(|(i, grad_chunk)| { //}
             //SAFETY: the proper construction of this index construction guarentees the safety of both copies and edits later
             //let index_into: Vec<usize> = (0..(BASE_L-1)).collect();//(0..(BASE_L-1)).map(|j| 1+i*(BASE_L-1)+j).collect::<Vec<usize>>();
 
             let best_bp = self.pwm[i].best_base();
-            let mut bp_inds: Vec<Bp> = BP_ARRAY.to_vec(); 
-            bp_inds.retain(|&b| b != best_bp);
+
+            let prior_grad = self.pwm[i].d_base_prior_d_hmc();
 
             let ln_like_grads: [f64; BASE_L-1] = core::array::from_fn(|k| *(grad_chunk.get_unchecked(k)));//index_into.iter().map(|&k| *grad_chunk.get_unchecked(k)).collect::<Vec<_>>().try_into().unwrap();
 
-            let simplex_grad = self.pwm[i].d_base_d_simplex();
+            let vect_grad = self.pwm[i].d_base_d_vect();
             for k in 0..(BASE_L-1) {
 
-                *grad_chunk.get_unchecked_mut(k) = ln_like_grads.iter().zip(simplex_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();
+                *grad_chunk.get_unchecked_mut(k) = ln_like_grads.iter().zip(vect_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>() + ln_like_grads[k];
             }
         }).collect::<Vec<_>>();
 
@@ -2246,17 +2268,11 @@ impl<'a> MotifSet<'a> {
 
         //let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
 
-        let total_len = 1+(BASE_L-1)*self.set[k].len();
+        let total_len = (BASE_L-1)*self.set[k].len();
 
         let mut momentum: Vec<f64> = (0..total_len).map(|_| momentum_dist.sample(rng)).collect();
 
-        let height_scale: f64 = self.data_ref.number_bp() as f64;
-
-        let square_height_scale: f64 = height_scale*height_scale;
-
         let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
-
-        momentum[0] /= height_scale;//Peak height needs to move more slowly than other parameters
 
         let mut prior_set = self.clone();
 
@@ -2342,13 +2358,13 @@ impl<'a> MotifSet<'a> {
         //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
         //self.ln_post
 
-        let delta_kinetic_energy = Self::net_kinetic_energy(&momentum, square_height_scale, variance)
-            -Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance);
+        let delta_kinetic_energy = Self::net_kinetic_energy(&momentum)
+            -Self::net_kinetic_energy(&momentum_apply);
 
         let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
 
         if cfg!(test) {
-            println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum, square_height_scale, variance), Self::net_kinetic_energy(&momentum_apply, square_height_scale, variance));
+            println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum), Self::net_kinetic_energy(&momentum_apply));
             println!("first mom {:?}\n Second mom {:?}", &momentum_apply, &momentum);
 
             println!("d kin {} d pot {}", delta_kinetic_energy, delta_potential_energy)
@@ -2369,7 +2385,7 @@ impl<'a> MotifSet<'a> {
     //The actual kinetic energy is p·M^(-1)p+ln(||M||)+constant
     //But that doesn't matter. I'm only every calculating kinetic energy 
     //as a difference, so I can omit +ln(||M||)+constant
-    fn net_kinetic_energy(momentum: &[f64], _squared_genome_size: f64, _momentum_var: f64) -> f64 {
+    fn net_kinetic_energy(momentum: &[f64]) -> f64 {
         let _l_momentum = momentum.len();
         //if l_momentum = 0 {return 0.0;}
 
@@ -2399,7 +2415,7 @@ impl<'a> MotifSet<'a> {
 
         let gradient: Vec<f64> = (self.set).iter().enumerate().map(|(k,a)| {
 
-            let len_gradient_form = 1+a.len()*(BASE_L-1);
+            let len_gradient_form = a.len()*(BASE_L-1);
 
             let motif_grad: Vec<f64> = (0..len_gradient_form).into_par_iter().map(|i| {
 
