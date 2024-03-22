@@ -154,6 +154,18 @@ pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
+//This is 2^(-61), or 0x3c20000000000000 converted to f64.
+//We have to use unsafe transmute instead of from_bits because from_bits
+//is not stably const yet. Yes, this is obnoxious. 
+//I picked this so that it has NO impact on values greater than about 0.01
+//So our Base to vector and back sequence isn't technically COMPLETELY inversible
+//But this is needed to prevent issues with "perfect" bases like [1.0, 0.0, 0.0, 0.0]
+//Which have vector values that are all infinite.
+//SAFETY: u64 bit patterns are laid out identically to f64 on all platforms
+//        and technically, all valid u64s are valid f64s. Edge cases exist for NaN and Inf
+//        But 2^(-61) is neither of those, and it's not subnormal, either. 
+pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c20000000000000) }; 
+
 //BEGIN BASE
 
 #[repr(usize)]
@@ -421,7 +433,7 @@ impl Base {
     //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
     pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
-        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| self.props[a].ln());
+        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.props[a]+VEC_PAD_EPS).ln());
 
         [ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
           -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
@@ -431,11 +443,14 @@ impl Base {
     pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
 
 
+        //This clamp exists to make sure that we don't over or underflow exp and break things
+        let sanitized_base: [f64; BASE_L-1] = core::array::from_fn(|a| base_as_vec[a].clamp(-943., 943.));
+
         let unnormalized_base: [f64; BASE_L] = 
-            [((-(base_as_vec[0]+base_as_vec[1]+base_as_vec[2]))*0.25).exp(), 
-             ((( base_as_vec[0]+base_as_vec[1]-base_as_vec[2]))*0.25).exp(),
-             ((( base_as_vec[0]-base_as_vec[1]+base_as_vec[2]))*0.25).exp(),
-             (((-base_as_vec[0]+base_as_vec[1]+base_as_vec[2]))*0.25).exp()];
+            [((-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2]))*0.25).exp(), 
+             ((( sanitized_base[0]+sanitized_base[1]-sanitized_base[2]))*0.25).exp(),
+             ((( sanitized_base[0]-sanitized_base[1]+sanitized_base[2]))*0.25).exp(),
+             (((-sanitized_base[0]+sanitized_base[1]+sanitized_base[2]))*0.25).exp()];
 
         Base::new(unnormalized_base)
     }
@@ -603,7 +618,6 @@ impl Base {
 
        let tetra = self.base_to_vect();
        let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
-       
        if confine_base {
            let best_base = self.best_base();
 
@@ -613,7 +627,7 @@ impl Base {
 
            while failed {
                let next_reflect = conds_check.iter().enumerate().max_by(|(_, &a), (_, b)| a.partial_cmp(b).unwrap()).expect("conds_check is not empty").0;
-               conds_check = match next_reflect {
+               vec_res = match next_reflect {
                    0 => { //If A or C
                        if (best_base as usize) < 2 {[-vec_res[1], -vec_res[0], vec_res[2]]} else {[vec_res[1], vec_res[0], vec_res[2]]}
                    }, 
@@ -625,9 +639,10 @@ impl Base {
                    }, 
                    _ => unreachable!(),
                };
-
-               let mut conds: [bool; BASE_L-1] = core::array::from_fn(|a| conds_check[a] > 0.);
-               let mut failed = conds.iter().any(|&a| a);
+               
+               conds_check = Self::check_vec_kept_best_bp(&vec_res, best_base);
+               conds = core::array::from_fn(|a| conds_check[a] > 0.);
+               failed = conds.iter().any(|&a| a);
            }
        }
        Base::vect_to_base(&vec_res)
@@ -3695,6 +3710,7 @@ mod tester{
 
     #[test]
     fn simplex_test() {
+        println!("start");
         let mut rng = rand::thread_rng();
         let b = Base::rand_new(&mut rng);
 
@@ -3717,15 +3733,16 @@ mod tester{
         println!("{:?} {:?} {} {} {}", b.base_to_vect(), b1.base_to_vect(), b1.base_to_vect()[0]-b.base_to_vect()[0],  b1.base_to_vect()[1]-b.base_to_vect()[1],  b1.base_to_vect()[2]-b.base_to_vect()[2]);
         println!("{:?} {:?} {} {} {}", b.base_to_vect(), b2.base_to_vect(), b2.base_to_vect()[0]-b.base_to_vect()[0],  b2.base_to_vect()[1]-b.base_to_vect()[1],  b2.base_to_vect()[2]-b.base_to_vect()[2]);
 
+        
         println!("{:?}", jacob);
         println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
                  b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
-        let simp = [0.1_f64, -0.1, -0.2];
+        let simp = [0.1_f64, -0.15, -0.11];
         let simp_b = Base::vect_to_base(&simp);
 
-        let b3a = simp_b.add_in_hmc([0.0, 0.0, -1./30.], false);
-        let b3 = simp_b.add_in_hmc([0.0, 0.0, -5./30.], false);
+        let b3a = simp_b.add_in_hmc([0.0, 0.0, 0.02], false);
+        let b3 = simp_b.add_in_hmc([0.0, 0.0, 0.02], true);
 
         let sim_b3a = b3a.base_to_vect();
         let sim_b3 = b3.base_to_vect();
@@ -3733,13 +3750,14 @@ mod tester{
         println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.base_to_vect(), b3a, b3.base_to_vect(), b3);
 
         assert!((simp[0]-sim_b3a[0]).abs() < 1e-6, "0th element changes with no reflection");
-        assert!((simp[0]-sim_b3[0] ).abs() < 1e-6, "0th element changes with a reflection");
+        assert!((0.09-sim_b3[0] ).abs() < 1e-6, "0th element changes with a reflection");
 
         assert!((simp[1]-sim_b3a[1]).abs() < 1e-6, "1st element changes with no reflection");
         assert!((simp[1]-sim_b3[1] ).abs() < 1e-6, "1st element changes with a reflection");
 
-        assert!((-0.23333333333333333333333333-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
-        assert!((-0.3-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
+        println!("{:?} {:?}", sim_b3a, sim_b3);
+        assert!((-0.09-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
+        assert!((-simp[0]-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
 
         let b_a = b.add_in_hmc([10.0, -10.0, 1./3.], false);
 
@@ -3778,22 +3796,22 @@ mod tester{
 
         for i in 0..100000 {
             let b = random_base_dist.sample(&mut rng);
-            println!("Base {:?}", b);
+            println!("Base {i} {:?}", b);
             let f = b.base_to_vect();
             println!("back to simplex {:?}", f);
-            println!("base once more {:?}", Base::simplex_to_base(&f));
+            println!("base once more {:?}", Base::vect_to_base(&f));
         }
 
         let s = [-SQRT_2/3., -0.01, -0.3333333333333];
         println!("simplex {:?}", s);
 
-        let b = Base::simplex_to_base(&s);
+        let b = Base::vect_to_base(&s);
 
         println!("Base tr {:?}", b);
 
         let s2 = b.base_to_vect();
         println!("simplex again {:?}", s2);
-        println!("base once more {:?}",Base::simplex_to_base(&s2));
+        println!("base once more {:?}",Base::vect_to_base(&s2));
 
         let b3 = b.add_in_hmc([0.00001*(-1.0), 0.0, 0.0], false);
         println!("b3 {:?}", b3);
@@ -3805,12 +3823,12 @@ mod tester{
         for p in SIMPLEX_VERTICES_POINTS {
 
             println!("point {:?}", p);
-            let mut b = Base::simplex_to_base(&p);
+            let mut b = Base::vect_to_base(&p);
             for _ in 0..10 {
-                println!("Base {:?}", Base::simplex_to_base(&p));
+                println!("Base {:?}", Base::vect_to_base(&p));
                 let f = b.base_to_vect();
                 println!("back to simplex {:?}", f);
-                b = Base::simplex_to_base(&f);
+                b = Base::vect_to_base(&f);
                 println!("base once more {:?}", b);
 
             }
