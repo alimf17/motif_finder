@@ -553,10 +553,16 @@ impl Base {
         let (zeros, neg_cols) = match self.best_base() {
             Bp::A => ([2_usize, 1, 0], None),
             Bp::C => ([1, 2, 0], Some([0_usize, 1])),
-            Bp::G => ([2, 0, 1], Some([0_usize, 2])),
-            Bp::T => ([0, 2, 1], Some([1_usize, 2])),
+            Bp::G => ([1, 0, 2], Some([0_usize, 2])),
+            Bp::T => ([0, 1, 2], Some([1_usize, 2])),
         };
 
+        /*let (zeros, neg_cols) = match self.best_base() {
+            Bp::A => ([2_usize, 1, 0], None),
+            Bp::C => ([2, 0, 1], Some([0_usize, 1])),
+            Bp::G => ([1, 2, 0], Some([0_usize, 2])),
+            Bp::T => ([0, 2, 1], Some([1_usize, 2])),
+        };*/
         for i in 0..(BASE_L-1) {
             grad[i][zeros[i]] = 0.0;
         }
@@ -1622,7 +1628,7 @@ impl Motif {
             let vect_grad = self.pwm[i].d_base_d_vect();
             for k in 0..(BASE_L-1) {
 
-                *grad_chunk.get_unchecked_mut(k) = ln_like_grads.iter().zip(vect_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>() + ln_like_grads[k];
+                *grad_chunk.get_unchecked_mut(k) = ln_like_grads.iter().zip(vect_grad[k].iter()).map(|(&a, &b)| a*b).sum::<f64>();// - prior_grad[k];
             }
         }).collect::<Vec<_>>();
 
@@ -2286,7 +2292,7 @@ impl<'a> MotifSet<'a> {
         let noise = self.signal.produce_noise(self.data_ref);
         let d_ad_stat_d_noise = noise.ad_grad();
         let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
-        let mut len_grad: usize = self.set.len();
+        let mut len_grad: usize = 0;
 
         for i in 0..self.set.len() {
             len_grad += self.set[i].len()*(BASE_L-1);
@@ -2299,7 +2305,7 @@ impl<'a> MotifSet<'a> {
         for i in 0..self.set.len() {
 
             let motif = &self.set[i];
-            let compute_to = finished_compute+(motif.len() * (BASE_L-1) +1);
+            let compute_to = finished_compute+(motif.len() * (BASE_L-1));
             let motif_grad = &mut gradient[finished_compute..compute_to];
             //SAFETY: we know that we derived our noise from the same data waveform that we used for d_ad_stat_d_noise 
             let grad_vec = unsafe { motif.parallel_single_motif_grad(self.data_ref, &d_ad_stat_d_noise, d_ad_like_d_ad_stat)};
@@ -4021,18 +4027,21 @@ mod tester{
         println!("blocked diff wave {}. RMSD {}. Set: {:?}", total_blocked_diff,total_blocked_diff/(diff_blocked.read_wave().len() as f64), added_to_motif_set_block);
 
         let mut grad_reses: Vec<Result<(), String>> = Vec::with_capacity(analytical_grad.len());
-        println!("{} {} {} {}", analytical_grad.len(), mot.len()*(BASE_L-1)+1, mot_a.len()*(BASE_L-1)+1, mot.len()*(BASE_L-1)+1+mot_a.len()*(BASE_L-1)+1);
-        println!("Analytical    Numerical    Difference(abs)    Quotient    Prior par");
+        println!("{} {} {} {}", analytical_grad.len(), mot.len()*(BASE_L-1), mot_a.len()*(BASE_L-1), mot.len()*(BASE_L-1)+mot_a.len()*(BASE_L-1));
+        println!("  Analytical    Numerical    Difference(abs)    Quotient    Prior par");
+
+        let priors = mot.pwm.iter().map(|a| a.d_base_prior_d_hmc()).flatten().collect::<Vec<_>>();
+        let priora = mot_a.pwm.iter().map(|a| a.d_base_prior_d_hmc()).flatten().collect::<Vec<_>>();
+
+        for (i,b) in mot.pwm.iter().enumerate() { println!("{i}th base {:?} with jacobian {:?}", b,  b.d_base_d_vect());}
+        for (i,b) in mot_a.pwm.iter().enumerate() { println!("{i}th base {:?} with jacobian {:?}", b, b.d_base_d_vect());}
+
         for i in 0..analytical_grad.len() {
-            if i == 0 || i == ((BASE_L-1)*mot.len()+1) {
-                println!("height!");
-                let mot_ref = if i == 0 { &mot } else {&mot_a};
-                println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], mot_ref.d_height_prior_d_hmc());
-            } else if i < ((BASE_L-1)*mot.len()+1) {
-                println!("{} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
+              if i < ((BASE_L-1)*mot.len()) {
+                println!("{} {} {} {} {} {}",i,  analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), priors[i]);
             } else {
-                println!("{} {:?}", pos_a[i-((BASE_L-1)*mot.len()+2)], bps_a[i-((BASE_L-1)*mot.len()+2)]);
-                println!("{} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]));
+                println!("{} {:?}", pos_a[i-((BASE_L-1)*mot.len())], bps_a[i-((BASE_L-1)*mot.len())]);
+                println!("{} {} {} {} {} {}",i, analytical_grad[i], numerical_grad[i], numerical_grad[i]-analytical_grad[i], ((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]), priora[i-((BASE_L-1)*mot.len())]);
             }
             //let success = if (numerical_grad[i].abs() != 0.) {(((numerical_grad[i]-analytical_grad[i])/numerical_grad[i]).abs() < 1e-2)} else {(numerical_grad[i]-analytical_grad[i]).abs() < 1e-3};
             let success = ((numerical_grad[i]-analytical_grad[i]).abs() < 5e-2) ||  ((numerical_grad[i]-analytical_grad[i]).abs()/numerical_grad[i] < 2e-3);
