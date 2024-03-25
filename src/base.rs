@@ -138,6 +138,9 @@ const PROB_POS_PEAK: f64 = 0.9;
 //4^SHUFFLE_BASES PWMs
 const SHUFFLE_BASES: usize = 4;
 
+const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
+
+
 /*
 static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
 
@@ -433,24 +436,31 @@ impl Base {
     //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
     pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
-        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.props[a]+VEC_PAD_EPS).ln());
+        //let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.props[a]+VEC_PAD_EPS).ln());
+        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| {
+            let b = (self.props[a]).ln();
+            if b.is_infinite() { b.signum()*(MAX_VECT_COORD)} else {b}
+        });
 
-        [ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
+        println!("ln v {:?}", ln_vec);
+        Base::reflect_triple_to_finite([ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
           -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
-          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]]
+          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]])
     }
 
     pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
 
 
         //This clamp exists to make sure that we don't over or underflow exp and break things
-        let sanitized_base: [f64; BASE_L-1] = core::array::from_fn(|a| base_as_vec[a].clamp(-943., 943.));
+        let sanitized_base: [f64; BASE_L-1] = core::array::from_fn(|a| Self::keep_coord_in_finite(base_as_vec[a]));//.clamp(-943., 943.));
+
+        let normalize = sanitized_base.iter().map(|a| a.abs()).sum::<f64>();
 
         let unnormalized_base: [f64; BASE_L] = 
-            [((-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2]))*0.25).exp(), 
-             ((( sanitized_base[0]+sanitized_base[1]-sanitized_base[2]))*0.25).exp(),
-             ((( sanitized_base[0]-sanitized_base[1]+sanitized_base[2]))*0.25).exp(),
-             (((-sanitized_base[0]+sanitized_base[1]+sanitized_base[2]))*0.25).exp()];
+            [((-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp(), 
+             ((( sanitized_base[0]+sanitized_base[1]-sanitized_base[2])-normalize)*0.25).exp(),
+             ((( sanitized_base[0]-sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp(),
+             (((-sanitized_base[0]+sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp()];
 
         Base::new(unnormalized_base)
     }
@@ -468,6 +478,7 @@ impl Base {
 
         largest_abs_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
 
+        println!("abses {:?}", largest_abs_to_smallest);
         let mut large_abs_ratio = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
 
         let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
@@ -619,11 +630,26 @@ impl Base {
     }
 
 
+    fn keep_coord_in_finite(attempt: f64) -> f64 {
+
+        if attempt.abs() <= MAX_VECT_COORD { return attempt; }
+            
+        if attempt.is_infinite() { return (attempt.signum()*MAX_VECT_COORD); }
+            
+        let shift = ((attempt+MAX_VECT_COORD)/(2.0*MAX_VECT_COORD)).floor();
+        println!("ttt {} {}", attempt, (attempt-2.0*MAX_VECT_COORD*shift)*(-1_f64).powi(shift as i32));
+        (attempt-2.0*MAX_VECT_COORD*shift)*(-1_f64).powi(shift as i32)
+    }
+
+
+    fn reflect_triple_to_finite(triple: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
+        core::array::from_fn(|a| Self::keep_coord_in_finite(triple[a]) ) 
+    }
 
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.base_to_vect();
-       let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
+       let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| Self::keep_coord_in_finite(tetra[a]+addend[a]));
        if confine_base {
            let best_base = self.best_base();
 
@@ -1650,12 +1676,10 @@ impl Motif {
     /// let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &mut rng);
     /// let dself = m.distance_function(&m);
     /// assert!(dself.0.abs() < 1e-16);
-    /// assert!(dself.1 == 0);
-    /// assert!(!dself.2);
+    /// assert!(!dself.1);
     /// let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
     /// assert!(drev.0.abs() < 1e-16);
-    /// assert!(drev.1 == 0);
-    /// assert!(drev.2);
+    /// assert!(drev.1);
     /// let mut new_b_vec: Vec<Base> = Vec::with_capacity(m.len()+2);
     /// new_b_vec.append(&mut m.rev_complement());
     /// new_b_vec.push(Base::rand_new(&mut rng));
@@ -3724,7 +3748,7 @@ mod tester{
 
         let mod_b = Base::vect_to_base(&simplex);
 
-        println!("{:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
+        println!("st {:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
         let mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
 
@@ -4367,6 +4391,43 @@ mod tester{
         //-ln(density of proposing the particular growth), while the 
         //lapd of reverse moves is +ln(density of proposing the reversing growth)
 
+
+        let single_base_scale = motif_set.propose_ordered_base_move(&mut rng);
+
+        assert!(single_base_scale.is_some()); //scaling a single base should always make possible motifs
+
+        let (single_mot, ln_prop) = single_base_scale.unwrap();
+
+        assert!(single_mot.set.len() == motif_set.set.len());
+        let mut found_change: bool = false;
+        for i in 0..motif_set.set.len() {
+            assert!(motif_set.set[i].peak_height() == single_mot.set[i].peak_height());
+            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            if found_change {
+                panic!("multiple motifs changed in single base scale move!");
+            } else if !unchanged { 
+                found_change = true; 
+ 
+                let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
+
+                println!("{}", changed_bases.len());
+                assert!(changed_bases.len() == 1);
+
+                let old_base = motif_set.set[i].pwm[changed_bases[0]].clone();
+                let new_base = single_mot.set[i].pwm[changed_bases[0]].clone();
+
+                println!("{:?} {:?}", old_base, new_base);
+                let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
+                let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
+
+                old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+                new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+
+                let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+
+                assert!(order_maintained);
+            }
+        }
 
         //propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)>
 
