@@ -419,8 +419,6 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 
 pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, bool))>) -> Array3<f64> {
 
-    let mut min_offset: isize = isize::MAX;
-    let mut max_offset_plus_len: isize = isize::MIN;
 
     let num_samples = best_motifs.len();
     let pwms_offsets = best_motifs.into_iter()

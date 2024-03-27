@@ -2110,6 +2110,7 @@ impl<'a> MotifSet<'a> {
     //For borrow checker reasons, this will only work if the motif calling already has a generated likelihood
     //And I can't have it do it here
     //If you use this on a motif without such a likelihood, it will panic
+    // (rmse, likelihood_diff, pwm_dists_and_height_diffs)
     pub fn run_rj_move<R: Rng + ?Sized>(&self, rng: &mut R) -> (Self, usize, bool) {
 
         let which_rj = rng.gen_range(0..4);
@@ -2137,11 +2138,13 @@ impl<'a> MotifSet<'a> {
             Some((new_mot, modded_ln_like)) => {
                 let accepted = Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng);
                 //println!("old ln P {}, modded ln P {}, move {:?}, accepted: {}", self.ln_post.unwrap(), modded_ln_like, RJ_MOVE_NAMES[which_rj], accepted);
-                if accepted {
+                /*if accepted {
                     (new_mot, which_rj, true)
                 } else { 
                     (self.clone(), which_rj, false)
-                }
+                }*/
+
+                (new_mot, which_rj, accepted)
             }
         }
 
@@ -2320,6 +2323,61 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        let base_change = rng.gen_range(0..replacement.pwm.len());
+
+        let Some(attempt_new) = replacement.pwm[base_change].moved_base(ratio_sd, linear_sd, rng) else { return None;};
+
+        replacement.pwm[base_change] = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+    }
+
+    fn propose_ordered_motif_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd, linear_sd, rng)).collect::<Option<Vec<Base>>>() else {return None;};
+
+        replacement.pwm = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+    }
+
+
+    fn propose_height_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, height_sd: f64 ) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        replacement.peak_height += NORMAL_DIST.sample(rng)*height_sd;
+
+        replacement.peak_height = replacement.peak_height.signum()*reflect_abs_height(replacement.peak_height.abs());
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+
+    }
+
 
     fn gradient(&self) -> Vec<f64> {
 
@@ -2465,12 +2523,16 @@ impl<'a> MotifSet<'a> {
         }
 
 
+        /*
         if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
             (prior_set, true, delta_potential_energy+delta_kinetic_energy)
         } else {
             //println!("rejected. the old mot is {:?}, and the diff is {}", self, delta_potential_energy+delta_kinetic_energy);
             (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
         }
+        */
+
+        (prior_set, Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng), delta_potential_energy+delta_kinetic_energy)
 
 
 
@@ -2534,7 +2596,23 @@ impl<'a> MotifSet<'a> {
     }
 
 
+    fn measure_movement(&mut self, proposal: &mut Self) -> (f64, f64, Vec<(f64, f64)>) {
 
+        let rmse = self.signal.rmse_with_wave(&proposal.signal);
+        let likelihood_diff = proposal.ln_posterior()-self.ln_posterior();
+        if self.set.len() != proposal.set.len() {
+            return (rmse, likelihood_diff, vec![]);
+        }
+
+        let mut pwm_dists_and_height_diffs: Vec<(f64, f64)> = Vec::with_capacity(self.set.len());
+
+        for i in 0..self.set.len() {
+            pwm_dists_and_height_diffs.push((self.set[i].distance_function(&proposal.set[i]).0, (proposal.set[i].peak_height-self.set[i].peak_height).abs()));
+        }
+        
+        (rmse, likelihood_diff, pwm_dists_and_height_diffs)
+
+    }
 
 
 
@@ -2789,7 +2867,8 @@ impl<'a> SetTrace<'a> {
 
             0..=MAX_IND_RJ => {
                 let (set, move_type, accept) = self.active_set.run_rj_move(rng);
-                (set, (move_type, accept))
+                if accept { (set, (move_type, accept)) } else { (self.active_set.clone(), (move_type, accept)) }
+                //(set, (move_type, accept))
             },
             RANGE_RJ..=MAX_IND_LEAP => {
                 let set = self.active_set.base_leap(rng);
@@ -2797,7 +2876,7 @@ impl<'a> SetTrace<'a> {
             },
             RANGE_LEAP..=MAX_IND_HMC => {
                 let (set, accept, _) = self.active_set.hmc(momentum_dist, rng);
-                (set, (5, accept))
+                if accept { (set, (5, accept)) } else { (self.active_set.clone(), (5, accept)) }
             },
             _ => unreachable!(),
         };
@@ -2843,8 +2922,7 @@ impl<'a> SetTrace<'a> {
         for _ in 0..3 {
             for _ in 0..BLOCK_LEN {
                 let (s, accept, _) = set.hmc(&dist, rng);
-                *set = s;
-                if accept {num_accept += 1.0;}
+                if accept {*set = s; num_accept += 1.0;}
             }
             let prop_accept = num_accept/(BLOCK_LEN as f64);
             sum_props += prop_accept;
@@ -2886,8 +2964,7 @@ impl<'a> SetTrace<'a> {
                     for _ in 0..3 {
                         for _ in 0..BLOCK_LEN {
                             let (s, accept, _) = set.hmc(&dist, rng);
-                            *set = s;
-                            if accept {num_accept += 1.0;}
+                            if accept {*set = s; num_accept += 1.0;}
                         }
                         let prop_accept = num_accept/(BLOCK_LEN as f64);
                         sum_props += prop_accept;
@@ -2913,8 +2990,7 @@ impl<'a> SetTrace<'a> {
                 for _ in 0..3 {
                     for _ in 0..BLOCK_LEN {
                         let (s, accept, _) = set.hmc(&dist, rng);
-                        *set = s;
-                        if accept {num_accept += 1.0;}
+                        if accept {*set = s; num_accept += 1.0;}
                     }
                     let prop_accept = num_accept/(BLOCK_LEN as f64);
                     sum_props += prop_accept;
@@ -2943,8 +3019,7 @@ impl<'a> SetTrace<'a> {
             for _ in 0..3 {
                 for _ in 0..BLOCK_LEN {
                     let (s, accept, _) = set.hmc(&dist, rng);
-                    *set = s;
-                    if accept {num_accept += 1.0;}
+                    if accept {*set = s; num_accept += 1.0;}
                 }
                 let prop_accept = num_accept/(BLOCK_LEN as f64);
                 sum_props += prop_accept;
@@ -4666,7 +4741,9 @@ mod tester{
         }
         for i in 0..100 {
             let (step_set, selected_move, accepted) = motif_set.run_rj_move(&mut rng);
-            match accepted {
+            
+            //For when run_rj_move gives a clone of the old set when rejecting, rather than telling us what could have been
+            /*match accepted {
 
                 //Yes, I'm asserting float equality here: this should be a clone, not a recalculation
                 false => assert!(motif_set.calc_ln_post() == step_set.calc_ln_post(), "Not cloning old set when rejecting move?!"),
@@ -4687,7 +4764,28 @@ mod tester{
                     },
                     _ => assert!(false, "Picking an impossible move!"),
                 };},
-            };
+            };*/
+
+            if accepted {
+                println!("{selected_move} accepted"); 
+                match selected_move {
+                    0 => assert!(step_set.set.len() == motif_set.set.len()+1, "birth not birthing"),
+                    1 => assert!(step_set.set.len() == motif_set.set.len()-1, "death not deathing"),
+                    2 => {
+                        assert!(step_set.set.len() == motif_set.set.len(), "extend not maintaining");
+                        assert!(step_set.set.iter().zip(motif_set.set.iter())
+                                .map(|(a,b)| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()+1))
+                                .fold(true, |acc, y| acc && y), "extend messed up extending" );
+                    },
+                    3 => {
+                        assert!(step_set.set.len() == motif_set.set.len(), "contract not maintaining");
+                        assert!(step_set.set.iter().zip(motif_set.set.iter())
+                                .map(|(a,b)| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()-1))
+                                .fold(true, |acc, y| acc && y), "contract messed up contracting" );
+                    },
+                    _ => assert!(false, "Picking an impossible move!"),
+                };
+            }
         }
     }
 
