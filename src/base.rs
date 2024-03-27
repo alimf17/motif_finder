@@ -47,7 +47,7 @@ pub const SQRT_3: f64 = 1.73205080757;
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
 
-pub const BASE_PRIOR_DENS: f64 = 1./6.; //Set to 1/Gamma(BASE_L)
+pub const BASE_PRIOR_DENS: f64 = 6.; //Set to 1/Gamma(BASE_L)
 
 pub const VERTICES: [[f64; BASE_L-1]; BASE_L] = [[2.*SQRT_2/3., 0., -1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
 
@@ -442,7 +442,6 @@ impl Base {
             if b.is_infinite() { b.signum()*(MAX_VECT_COORD)} else {b}
         });
 
-        println!("ln v {:?}", ln_vec);
         Base::reflect_triple_to_finite([ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
           -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
           -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]])
@@ -468,7 +467,7 @@ impl Base {
     //If ratio_sd and small_sd are negative, the move generated is just the opposite
     //which gives a valid result. Hence, no erroring out. You SHOULDN'T use negatives
     //because that's out of convention for no reason, but it won't break.
-    pub fn moved_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Base {
+    pub fn moved_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Option<Base> {
 
         let mut new_base_vect = self.base_to_vect();
 
@@ -478,27 +477,35 @@ impl Base {
 
         largest_abs_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
 
-        println!("abses {:?}", largest_abs_to_smallest);
         let mut large_abs_ratio = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
 
         let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
 
+        println!("pre ratios {} {}", large_abs_ratio, small_abs_ratio);
         large_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
 
+        println!("attempt large {}", large_abs_ratio);
         if large_abs_ratio < 1.0 { large_abs_ratio = 1.0/large_abs_ratio; }
 
+        println!("final large {}", large_abs_ratio);
         small_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
         
+        println!("attempt small {}", small_abs_ratio);
+
         if small_abs_ratio < 1.0 { small_abs_ratio = 1.0/small_abs_ratio; }
+        println!("final small {}", small_abs_ratio);
 
         new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*small_sd;
 
-        new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1]*signs_base_vect[largest_abs_to_smallest[1].1];
+        new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1].abs()*signs_base_vect[largest_abs_to_smallest[1].1];
 
-        new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1]*signs_base_vect[largest_abs_to_smallest[0].1];
+        new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1].abs()*signs_base_vect[largest_abs_to_smallest[0].1];
 
-        Self::vect_to_base(&new_base_vect)
+        println!("old vect {:?}, new vect {:?}", self.base_to_vect(), new_base_vect);
 
+        if new_base_vect.iter().any(|&a| a.abs() > MAX_VECT_COORD) { return None;}
+        
+        Some(Self::vect_to_base(&new_base_vect))
 
     }
 
@@ -637,7 +644,6 @@ impl Base {
         if attempt.is_infinite() { return (attempt.signum()*MAX_VECT_COORD); }
             
         let shift = ((attempt+MAX_VECT_COORD)/(2.0*MAX_VECT_COORD)).floor();
-        println!("ttt {} {}", attempt, (attempt-2.0*MAX_VECT_COORD*shift)*(-1_f64).powi(shift as i32));
         (attempt-2.0*MAX_VECT_COORD*shift)*(-1_f64).powi(shift as i32)
     }
 
@@ -2269,7 +2275,9 @@ impl<'a> MotifSet<'a> {
 
         let base_change = rng.gen_range(0..replacement.pwm.len());
 
-        replacement.pwm[base_change] = replacement.pwm[base_change].moved_base(L_SD_VECTOR_SPACE_SINGLE, SD_LEAST_MOVE_SINGLE, rng);
+        let Some(attempt_new) = replacement.pwm[base_change].moved_base(L_SD_VECTOR_SPACE_SINGLE, SD_LEAST_MOVE_SINGLE, rng) else { return None;};
+
+        replacement.pwm[base_change] = attempt_new;
 
         let ln_post = new_set.replace_motif(replacement, c_id);
 
@@ -2284,7 +2292,9 @@ impl<'a> MotifSet<'a> {
 
         let mut replacement = new_set.set[c_id].clone();
 
-        replacement.pwm = replacement.pwm.iter().map(|a| a.moved_base(L_SD_VECTOR_SPACE, SD_LEAST_MOVE, rng)).collect();
+        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(L_SD_VECTOR_SPACE, SD_LEAST_MOVE, rng)).collect::<Option<Vec<Base>>>() else {return None;};
+
+        replacement.pwm = attempt_new;
 
         let ln_post = new_set.replace_motif(replacement, c_id);
 
@@ -3822,7 +3832,7 @@ mod tester{
         //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
 
 
-        let random_base_dist = SymmetricBaseDirichlet::new(0.001).expect("obviously valid");
+        let random_base_dist = SymmetricBaseDirichlet::new(0.1).expect("obviously valid");
 
         for i in 0..100000 {
             let b = random_base_dist.sample(&mut rng);
@@ -4392,43 +4402,106 @@ mod tester{
         //lapd of reverse moves is +ln(density of proposing the reversing growth)
 
 
-        let single_base_scale = motif_set.propose_ordered_base_move(&mut rng);
+        let mut failures = 0_usize;
 
-        assert!(single_base_scale.is_some()); //scaling a single base should always make possible motifs
+        let (single_mot, ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move(&mut rng) { break r; } else {failures+=1;}};
 
-        let (single_mot, ln_prop) = single_base_scale.unwrap();
-
+        println!("failed in single base move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());
         let mut found_change: bool = false;
         for i in 0..motif_set.set.len() {
             assert!(motif_set.set[i].peak_height() == single_mot.set[i].peak_height());
             let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
-            if found_change {
-                panic!("multiple motifs changed in single base scale move!");
-            } else if !unchanged { 
-                found_change = true; 
- 
-                let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
+            if !unchanged {
+                if found_change {
+                    panic!("multiple motifs changed in single base scale move!");
+                } else { 
+                    found_change = true; 
 
-                println!("{}", changed_bases.len());
-                assert!(changed_bases.len() == 1);
+                    let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
 
-                let old_base = motif_set.set[i].pwm[changed_bases[0]].clone();
-                let new_base = single_mot.set[i].pwm[changed_bases[0]].clone();
+                    println!("{}", changed_bases.len());
+                    assert!(changed_bases.len() == 1);
 
-                println!("{:?} {:?}", old_base, new_base);
-                let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
-                let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
+                    let old_base = motif_set.set[i].pwm[changed_bases[0]].clone();
+                    let new_base = single_mot.set[i].pwm[changed_bases[0]].clone();
 
-                old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
-                new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+                    println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
+                    let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
+                    let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
 
-                let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+                    old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+                    new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
 
-                assert!(order_maintained);
+                    let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+
+                    assert!(order_maintained);
+                }
             }
         }
 
+
+        let mut failures = 0_usize;
+        let (single_mot, ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move(&mut rng) { break r; } else {failures+=1;}};
+
+        println!("failed in single motif move {} times before succeeding", failures);
+        assert!(single_mot.set.len() == motif_set.set.len());
+        let mut found_change: bool = false;
+        for i in 0..motif_set.set.len() {
+            assert!(motif_set.set[i].peak_height() == single_mot.set[i].peak_height());
+            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            if !unchanged {
+                if found_change {
+                    panic!("multiple motifs changed in single base scale move!");
+                } else { 
+                    found_change = true; 
+
+                    let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
+
+                    println!("{}", changed_bases.len());
+
+                    for j in 0..changed_bases.len(){
+                        let old_base = motif_set.set[i].pwm[changed_bases[j]].clone();
+                        let new_base = single_mot.set[i].pwm[changed_bases[j]].clone();
+
+                        println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
+                        let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
+                        let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
+
+                        old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+                        new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+
+                        let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+
+                        assert!(order_maintained);
+                    }
+                }
+            }
+        }
+        
+
+        let single_height = motif_set.propose_height_move(&mut rng);
+
+        assert!(single_height.is_some()); //scaling a single base should always make possible motifs
+
+        let (single_mot, ln_prop) = single_height.unwrap();
+
+        assert!(single_mot.set.len() == motif_set.set.len());
+        let mut found_change: bool = false;
+        for i in 0..motif_set.set.len() {
+            let height_unchanged = motif_set.set[i].peak_height() == single_mot.set[i].peak_height();
+
+            if found_change { 
+                assert!(height_unchanged, "Multiple heights changing");
+            } else  {
+                if !height_unchanged { found_change = true; }
+            }
+
+            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            assert!(unchanged, "Changing motif during height move!");
+        }
+
+        assert!(found_change, "no height changed during height move!");
         //propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)>
 
         let birthed = motif_set.propose_new_motif(&mut rng);
