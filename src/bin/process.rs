@@ -338,7 +338,7 @@ pub fn main() {
         let mut num_good_motifs: usize = 0; 
         let mut good_motifs_count: Vec<usize> = vec![0];
         let mot_size = set_trace_collections[0].len() as f64;
-        let distance_cutoff = 10.0;//mot_size*0.5753378-0.0*0.239545*mot_size.sqrt();//I picked this to be two standard deviations below the sum of independent mot_size independent weibulls with k = 2.5776088 and lambda = 0.6479129
+        let distance_cutoff = f64::INFINITY;
         let trace_scoop = set_trace_collections.iter().map(|a| {
             let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
             num_good_motifs+= set_extracts.len();
@@ -439,8 +439,10 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, bool))>) -> Array3<f6
                                                             //It will slow down calculations of credible intervals and means,
                                                             //But I do that once, not 10s of thousands of times. I did not
                                                             //benchmark this, though
+            let begin = if (MAX_BASE & 1 == 0) {(MAX_BASE-pwm.len())/2} else {(MAX_BASE+1-pwm.len())/2 }; //This should be optimized away
+
             let probs = pwm[j].as_simplex();
-            for i in 0..(BASE_L-1) {samples[[k,j,i]] = probs[i];}
+            for i in 0..(BASE_L-1) {samples[[k,j+(MAX_BASE-pwm.len())/2,i]] = probs[i];}
         }
 
     }

@@ -535,6 +535,25 @@ impl Base {
 
     }
 
+    pub fn simplex_to_vect(simplex_coords: &[f64; BASE_L-1]) -> [f64; BASE_L-1] {
+
+        let pre_ln_1p: [f64; BASE_L] = [2.*SQRT_2*simplex_coords[0]-simplex_coords[2], 
+                                         -SQRT_2*simplex_coords[0]+SQRT_2*SQRT_3*simplex_coords[1]-simplex_coords[2],
+                                         -SQRT_2*simplex_coords[0]-SQRT_2*SQRT_3*simplex_coords[1]-simplex_coords[2],
+                                         3.*simplex_coords[2] ];
+
+        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| pre_ln_1p[a].ln_1p());
+
+        [ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3],
+          -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
+          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]]
+
+    }
+
+    pub fn vect_to_simplex(vect_coords: &[f64; BASE_L-1]) -> [f64; BASE_L-1] {
+        Self::vect_to_base(vect_coords).as_simplex()
+    }
+
     //This result is given in column major order
     fn d_base_d_simplex(&self) -> [[f64; BASE_L-1]; BASE_L-1] {
 
@@ -2414,7 +2433,7 @@ impl<'a> MotifSet<'a> {
     }
 
     //MOVE TO CALL 
-    pub fn hmc<R: Rng + ?Sized>(&self, momentum_dist: &Normal, rng: &mut R) ->  (Self, bool, f64) {
+/*    pub fn hmc<R: Rng + ?Sized>(&self, momentum_dist: &Normal, rng: &mut R) ->  (Self, bool, f64) {
 
         let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
 
@@ -2496,6 +2515,97 @@ impl<'a> MotifSet<'a> {
 
             //We want gradient_old to take ownership of the gradient_new values, and gradient_old's prior values to be released
             //Same with prior_set and new_set
+            gradient_old = gradient_new;
+            prior_set = new_set;
+
+        }
+
+
+
+        //Our M-H cutoff is exp(-(new hamiltonian-old hamiltonian))
+        //ie exp(old_hamiltonian-new hamiltonian)
+        //hamiltonian = kinetic+potential, and potential = -ln posterior
+        //So, the delta_kinetic_energy is (momentum^2-momentum_apply^2)/2
+        //And the delta_potential_energy is prior_set ln_post (which is the proposed posterior) -
+        //self.ln_post
+
+        let delta_kinetic_energy = Self::net_kinetic_energy(&momentum)
+            -Self::net_kinetic_energy(&momentum_apply);
+
+        let delta_potential_energy = prior_set.ln_posterior()-self.ln_post.unwrap();
+
+        if cfg!(test) {
+            println!("Pot A {} Pot B {} Kin A {} Kin B {}", self.ln_post.unwrap(), prior_set.ln_posterior(), Self::net_kinetic_energy(&momentum), Self::net_kinetic_energy(&momentum_apply));
+            println!("first mom {:?}\n Second mom {:?}", &momentum_apply, &momentum);
+
+            println!("d kin {} d pot {}", delta_kinetic_energy, delta_potential_energy)
+        }
+
+
+        /*
+        if Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng){
+            (prior_set, true, delta_potential_energy+delta_kinetic_energy)
+        } else {
+            //println!("rejected. the old mot is {:?}, and the diff is {}", self, delta_potential_energy+delta_kinetic_energy);
+            (self.clone(), false,delta_potential_energy+delta_kinetic_energy)
+        }
+        */
+
+        (prior_set, Self::accept_test(0.0, delta_kinetic_energy+delta_potential_energy, rng), delta_potential_energy+delta_kinetic_energy)
+
+
+
+    }
+*/
+
+
+    pub fn hmc<R: Rng + ?Sized>(&self, momentum_size: f64, number_steps: usize, epsilon: f64, rng: &mut R) ->  (Self, bool, f64) {
+
+        let k = (0..self.set.len()).choose(rng).expect("We do not allow empty sets");
+
+        //let total_len = self.set.len() + (0..self.set.len()).map(|i| self.set[i].len()*(BASE_L-1)).sum::<usize>();
+
+        let total_len = (BASE_L-1)*self.set[k].len();
+
+        let mut momentum: Vec<f64> = (0..total_len).map(|_| NORMAL_DIST.sample(rng)*momentum_size).collect();
+
+        let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
+
+        let mut prior_set = self.clone();
+
+        let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data_ref);
+
+        let mut momentum_apply = momentum.clone();
+
+
+        for _ in 0..number_steps {
+
+            let mut new_set = self.clone();
+            new_set.ln_post = None;
+
+
+            for i in 0..momentum_apply.len(){
+                momentum_apply[i] += (epsilon*gradient_old[i])/2.0;
+            }
+
+
+            let _start = 0;
+            let _next_start = 0;
+
+            let mut new_mot = unsafe{ prior_set.set[k].add_momentum(epsilon, &momentum_apply, false)};
+
+            if !self.data_ref.data().seq().kmer_in_seq(&new_set.set[k].best_motif()) {
+                new_mot = unsafe{ prior_set.set[k].add_momentum(epsilon, &momentum_apply, true)};
+            }
+
+            let _ = new_set.replace_motif(new_mot, k);
+
+            let gradient_new = new_set.set[k].safe_single_motif_grad(&new_set.signal, self.data_ref);
+
+            for i in 0..momentum_apply.len() {
+                momentum_apply[i] += (epsilon*gradient_new[i])/2.0;
+            }
+
             gradient_old = gradient_new;
             prior_set = new_set;
 
@@ -2854,7 +2964,7 @@ impl<'a> SetTrace<'a> {
     //Panics: if self.trace is empty
     //Suggested defaults: 1.0, 1 or 2, 2^(some negative integer power between 5 and 10), 5-20, 80. But fiddle with this for acceptance rates
     //You should aim for your HMC to accept maybe 80-90% of the time. Changing RJ acceptances is hard, but you should hope for like 20%ish
-    pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
+    /*pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize,bool) { //1 for each of the RJ moves, plus one for hmc
 
 
 
@@ -2894,6 +3004,10 @@ impl<'a> SetTrace<'a> {
         self.active_set = new_set;
 
         retval
+
+    }*/
+
+    pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize, bool) {
 
     }
 
