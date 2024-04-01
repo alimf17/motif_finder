@@ -226,7 +226,7 @@ fn main() {
     let mut attempts_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
     let mut successes_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
     let mut immediate_failures_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
-    let mut distances_per_attempted_move = vec![Vec::<[f64; 4]>::with_capacity(num_advances/20); eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+    let mut distances_per_attempted_move = vec![Vec::<([f64; 4], bool)>::with_capacity(num_advances/20); eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
 
     //for step in 0..10000 {
  
@@ -235,18 +235,128 @@ fn main() {
                               &mut attempts_per_move, &mut successes_per_move, &mut immediate_failures_per_move, 
                               &mut distances_per_attempted_move, &mut rng);
 
-        /*if step % 10 == 0 {
-            println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
-                println!("Not really changing motif???");
-                println!("{:?}", current_trace.current_set_to_print());
-        }*/
-        if step % save_step == 0 {
+        if step % 100 == 0 {
+
+            println!("Step {}", step);
+            let mut ind: usize = 0;
+            for i in 0..eps_sizes.len(){
+                for j in 0..momentum_sds.len() {
+                    ind += 1; 
+                    println!("HMC with epsilon {} and momentum {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                             eps_sizes[i], momentum_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
+                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                }
+            }
+            for i in 0..base_ratio_sds.len(){
+                for j in 0..base_linear_sds.len() {
+                    ind += 1; 
+                    println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                             base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
+                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                }
+            }
+            for i in 0..base_ratio_sds.len(){
+                for j in 0..base_linear_sds.len() {
+                    ind += 1; 
+                    println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                             base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
+                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                }
+            }
+            for i in 0..height_sds.len() {
+                ind += 1; 
+                println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                         height_sds[i], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
+                         (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+            }
+            ind += 1;
+            println!("New motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
+                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
+                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Kill motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
+                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
+                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+       
+            ind += 1;
+            println!("Extend motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
+                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
+                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Contract motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
+                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
+                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Base leap move (always accepts). Times {}.", attempts_per_move[ind]);
+            ind += 1;
+            println!("Secondary shuffle move (always accepts). Times {}.", attempts_per_move[ind]);
+
+            if ((step % 1000) == 0) || (step+1 == num_advances){
+                let mut ind = 0_usize;
+                //TODO: 
+                //Move histograms:
+                //Each histogram needs 8 panels apiece, split into two batches of four:
+                //      one for acccepted moves, the other for attempted failures.
+                //      1) RMSE, 2) Finite likelihood differences (with a blur of text indicating proportion of infinities)
+                //      3) Euclidean distance of heights 4) Euclidean distances of PWMs
+
+                //All necessary data is found in the distances_per_attempted_move: Vec<Vec<([f64; 4], bool)>>
+
+                //HMC histogram needs #epses*#momenta super panels
+                for i in 0..eps_sizes.len(){
+                    for j in 0..momentum_sds.len() {
+                        ind += 1;
+                        //TODO: Generate histograms for accepted and failed
+                    }
+                }
+                //Base move and motif move each need #base ratio sds * #base linear sds
+                for i in 0..base_ratio_sds.len(){
+                    for j in 0..base_linear_sds.len() {
+                        ind += 1;
+                        //TODO: Generate histograms for accepted and failed
+                    }
+                }
+                for i in 0..base_ratio_sds.len(){
+                    for j in 0..base_linear_sds.len() {
+                        ind += 1;
+                        //TODO: Generate histograms for accepted and failed
+                    }
+                }
+                //Height moves needs # of height sds
+                for i in 0..height_sds.len() {
+                    ind += 1;
+                    //TODO: Generate histograms for accepted and failed
+                }
+                //RJ birth and death do NOT need the euclidean height and PWM differences
+                ind += 1;
+                //TODO: Generate histograms for accepted and failed
+                ind += 1;
+                //TODO: Generate histograms for accepted and failed
+
+                //PWM expand and contract are fairly normal, all things considered
+                ind += 1;
+                //TODO: Generate histograms for accepted and failed
+                ind += 1;
+                //TODO: Generate histograms for accepted and failed
+
+                //The two gibbs moves do not need failure panels
+                ind += 1;
+                //TODO: Generate histograms for accepted
+                ind += 1;
+                //TODO: Generate histograms for accepted
+            }
+        }
+        if (step+1) % save_step == 0 {
             
             current_trace.save_trace(output_dir, &run_name, step);
-            
-            if step != 0 {
-                current_trace.save_and_drop_history(output_dir, &run_name, step);
-            }
+            current_trace.save_and_drop_history(output_dir, &run_name, step);
+
+
+
+
         }
 
     }

@@ -2752,7 +2752,7 @@ impl<'a> MotifSet<'a> {
             height_dists_sq += (proposal.set[i].peak_height-self.set[i].peak_height).powi(2);
         }
         
-        [rmse, likelihood_diff, height_dists_sq, pwm_dists_sq]
+        [rmse, likelihood_diff, height_dists_sq.sqrt(), pwm_dists_sq.sqrt()]
     }
 
 
@@ -3044,7 +3044,7 @@ impl<'a> SetTrace<'a> {
     //        eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_move_sds.len()+6
     pub fn advance<R: Rng + ?Sized>(&mut self, eps_sizes: &[f64], momentum_sds: &[f64], base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64], 
                                     attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize], 
-                                    distances_per_attempted_move: &mut [Vec<[f64; 4]>], rng: &mut R) {
+                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>], rng: &mut R) {
 
         //Number of possible HMCs + number of base scalings + number of possible height moves+number of possible RJ moves+number of shuffle/leap moves
 
@@ -3127,7 +3127,7 @@ impl<'a> SetTrace<'a> {
                 self.active_set.clone()
             }
             Some(mut actual_set) => {
-                distances_per_attempted_move[select_move].push(self.active_set.measure_movement(&mut actual_set));
+                distances_per_attempted_move[select_move].push((self.active_set.measure_movement(&mut actual_set), accept));
                 if accept{
                     successes_per_move[select_move] += 1;
                     actual_set
