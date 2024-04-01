@@ -140,6 +140,7 @@ const SHUFFLE_BASES: usize = 4;
 
 const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
+const REDUCE_MOTIF_SCALE_MOVE: [f64; MAX_BASE+1-MIN_BASE] = [0.024800, 0.021573, 0.019085, 0.017109, 0.015503, 0.014171, 0.013049, 0.012091, 0.011264, 0.010543, 0.0099079, 0.0093451, 0.0088427];
 
 /*
 static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
@@ -2169,6 +2170,33 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    //Panics: if which_rj >= number of rj moves encoded here
+    fn run_rj_move_known<R: Rng + ?Sized>(&self, which_rj: usize, rng: &mut R) -> (Option<Self>, bool) {
+
+        let proposal: Option<(Self, f64)> = match which_rj {
+
+            0 => self.propose_new_motif(rng),
+            1 => self.propose_kill_motif(rng),
+            2 => self.propose_extend_motif(rng),
+            3 => self.propose_contract_motif(rng),
+            _ => panic!("You're trying to make a move run when it doesn't exist.")
+        };
+
+
+        match proposal {
+
+            None => {
+                //println!("Failed move {}", which_rj);
+                (None, false)
+            },
+            Some((new_mot, modded_ln_like)) => {
+                let accepted = Self::accept_test(self.ln_post.unwrap(), modded_ln_like, rng);
+                (Some(new_mot), accepted)
+            }
+        }
+    }
+
+
 
     //MOVE TO CALL
     pub fn base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Self {
@@ -2363,13 +2391,16 @@ impl<'a> MotifSet<'a> {
 
     fn propose_ordered_motif_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
+
         let mut new_set = self.derive_set();
 
         let c_id = rng.gen_range(0..self.set.len());
 
         let mut replacement = new_set.set[c_id].clone();
+        
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE];
 
-        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd, linear_sd, rng)).collect::<Option<Vec<Base>>>() else {return None;};
+        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd*scaler, linear_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
         replacement.pwm = attempt_new;
 
@@ -2569,8 +2600,6 @@ impl<'a> MotifSet<'a> {
 
         let mut momentum: Vec<f64> = (0..total_len).map(|_| NORMAL_DIST.sample(rng)*momentum_size).collect();
 
-        let variance: f64 = momentum_dist.variance().expect("Normal Distributions always have a variance");
-
         let mut prior_set = self.clone();
 
         let mut gradient_old = prior_set.set[k].safe_single_motif_grad(&self.signal, self.data_ref);
@@ -2706,22 +2735,24 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    fn measure_movement(&mut self, proposal: &mut Self) -> (f64, f64, Vec<(f64, f64)>) {
+    fn measure_movement(&mut self, proposal: &mut Self) -> [f64; 4] {
 
         let rmse = self.signal.rmse_with_wave(&proposal.signal);
         let likelihood_diff = proposal.ln_posterior()-self.ln_posterior();
         if self.set.len() != proposal.set.len() {
-            return (rmse, likelihood_diff, vec![]);
+            return [rmse, likelihood_diff, 0.0, 0.0];
         }
 
-        let mut pwm_dists_and_height_diffs: Vec<(f64, f64)> = Vec::with_capacity(self.set.len());
+
+        let mut height_dists_sq = 0_f64;
+        let mut pwm_dists_sq = 0_f64;
 
         for i in 0..self.set.len() {
-            pwm_dists_and_height_diffs.push((self.set[i].distance_function(&proposal.set[i]).0, (proposal.set[i].peak_height-self.set[i].peak_height).abs()));
+            pwm_dists_sq += self.set[i].distance_function(&proposal.set[i]).0.powi(2); 
+            height_dists_sq += (proposal.set[i].peak_height-self.set[i].peak_height).powi(2);
         }
         
-        (rmse, likelihood_diff, pwm_dists_and_height_diffs)
-
+        [rmse, likelihood_diff, height_dists_sq, pwm_dists_sq]
     }
 
 
@@ -3007,7 +3038,115 @@ impl<'a> SetTrace<'a> {
 
     }*/
 
-    pub fn advance<R: Rng + ?Sized>(&mut self, momentum_dist: &Normal, rng: &mut R) -> (usize, bool) {
+
+    //Panics: if any of eps_sizes, momentum_sds, base_ratio_sds, base_linear_sds, or height_move_sds are of length 0
+    //        or if any of the *per_move vectors are not as least as long as 
+    //        eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_move_sds.len()+6
+    pub fn advance<R: Rng + ?Sized>(&mut self, eps_sizes: &[f64], momentum_sds: &[f64], base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64], 
+                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize], 
+                                    distances_per_attempted_move: &mut [Vec<[f64; 4]>], rng: &mut R) {
+
+        //Number of possible HMCs + number of base scalings + number of possible height moves+number of possible RJ moves+number of shuffle/leap moves
+
+
+        let move_vec: Vec<usize> = vec![eps_sizes.len()*momentum_sds.len(), base_ratio_sds.len()*base_linear_sds.len(), 
+                                            base_ratio_sds.len()*base_linear_sds.len(), height_move_sds.len(), 4, 1, 1]; 
+
+        let split_arr = [Some(momentum_sds.len()), Some(base_linear_sds.len()), Some(base_linear_sds.len()), None, None, None, None];
+
+        let acc_vec = move_vec.iter().scan(0, |s, a| {*s += *a; Some(*s)}).collect::<Vec<usize>>();
+
+        let select_move: usize = rng.gen_range(0..*acc_vec.last().expect("We have at least two elements in this, guarenteed"));
+
+        let (which_move, which_variant): (usize, usize) = match acc_vec.iter().rposition(|&x| select_move <= x) { Some(i) => (i+1, select_move-acc_vec[i]), None => (0, select_move) };
+
+        let (first, maybe_sec) = match split_arr[which_move] { Some(split) => (which_variant/split, Some(which_variant % split)), None => (which_variant, None) };
+
+        //Can't use non const values in match statements. Using a bajillion if-elses 
+        
+        let (potential_set, accept) = match which_move {
+        
+            0 => {
+                let eps = eps_sizes[first];
+                let momentum = momentum_sds[maybe_sec.expect("this move has two pars")];
+                let (s, a, _) = self.active_set.hmc(momentum, 2, eps, rng);
+                (Some(s), a)
+            },
+            1 =>  {
+                let ratio_s = base_ratio_sds[first];
+                let liney_s = base_linear_sds[maybe_sec.expect("This move has two pars")];
+                match self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s) {
+                    None => {
+                        (None, false)
+                    },
+                    Some((mut new_mot, modded_ln_like)) => {
+                        let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, rng);
+                        (Some(new_mot), accepted)
+                    }
+                }
+            }, 
+            2 =>  {
+                let ratio_s = base_ratio_sds[first];
+                let liney_s = base_linear_sds[maybe_sec.expect("This move has two pars")];
+                match self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s) {
+                    None => {
+                        (None, false)
+                    },
+                    Some((mut new_mot, modded_ln_like)) => {
+                        let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, rng);
+                        (Some(new_mot), accepted)
+                    }
+                }
+            },
+            3 => {
+                let height_sd = height_move_sds[first];
+                match self.active_set.propose_height_move_custom(rng, height_sd) {
+                    None => (None, false),
+                    Some((mut new_mot, modded_ln_like)) => {
+                        let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, rng);
+                        (Some(new_mot), accepted)
+                    }
+                }
+            },
+            4 => self.active_set.run_rj_move_known(first, rng),
+            5 => (Some(self.active_set.base_leap(rng)), true),
+            6 => (Some(self.active_set.secondary_shuffle(rng)), true),
+            _ => unreachable!(),
+
+        };
+      
+        //attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
+        //                            distances_per_attempted_move
+
+        attempts_per_move[select_move] += 1; 
+        if accept { successes_per_move[select_move] += 1; }
+
+        let set_to_add = match potential_set {
+            None => {
+                immediate_failures_per_move[select_move] += 1;
+                self.active_set.clone()
+            }
+            Some(mut actual_set) => {
+                distances_per_attempted_move[select_move].push(self.active_set.measure_movement(&mut actual_set));
+                if accept{
+                    successes_per_move[select_move] += 1;
+                    actual_set
+                } else { self.active_set.clone() }
+            }
+        };
+
+        self.sparse_count = (self.sparse_count+1) % self.sparse;
+
+        if self.sparse_count == 0 {
+
+            //This order INCLUDES the last possible motif set
+            //and specifically EXCLUDES the initial state
+            self.trace.push(StrippedMotifSet::from(&set_to_add));
+        }
+
+
+        self.active_set = set_to_add;
+
 
     }
 
@@ -3035,7 +3174,7 @@ impl<'a> SetTrace<'a> {
         let mut sum_props = 0.0_f64;
         for _ in 0..3 {
             for _ in 0..BLOCK_LEN {
-                let (s, accept, _) = set.hmc(&dist, rng);
+                let (s, accept, _) = set.hmc(initial_sd, 2, 0.4, rng);
                 if accept {*set = s; num_accept += 1.0;}
             }
             let prop_accept = num_accept/(BLOCK_LEN as f64);
@@ -3077,7 +3216,7 @@ impl<'a> SetTrace<'a> {
                     dist = Normal::new(0.0, upper_sd).unwrap();
                     for _ in 0..3 {
                         for _ in 0..BLOCK_LEN {
-                            let (s, accept, _) = set.hmc(&dist, rng);
+                            let (s, accept, _) = set.hmc(upper_sd, 3, 0.4, rng);
                             if accept {*set = s; num_accept += 1.0;}
                         }
                         let prop_accept = num_accept/(BLOCK_LEN as f64);
@@ -3103,7 +3242,7 @@ impl<'a> SetTrace<'a> {
                 dist = Normal::new(0.0, lower_sd).unwrap();
                 for _ in 0..3 {
                     for _ in 0..BLOCK_LEN {
-                        let (s, accept, _) = set.hmc(&dist, rng);
+                        let (s, accept, _) = set.hmc(lower_sd, 3, 0.4, rng);
                         if accept {*set = s; num_accept += 1.0;}
                     }
                     let prop_accept = num_accept/(BLOCK_LEN as f64);
@@ -3132,7 +3271,7 @@ impl<'a> SetTrace<'a> {
             dist = Normal::new(0.0, mid_sd).unwrap();
             for _ in 0..3 {
                 for _ in 0..BLOCK_LEN {
-                    let (s, accept, _) = set.hmc(&dist, rng);
+                    let (s, accept, _) = set.hmc(mid_sd, 3, 0.4, rng);
                     if accept {*set = s; num_accept += 1.0;}
                 }
                 let prop_accept = num_accept/(BLOCK_LEN as f64);

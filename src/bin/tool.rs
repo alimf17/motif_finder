@@ -214,32 +214,32 @@ fn main() {
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
-    let mut acceptances: [usize;6]= [0;6];
-    let mut trials: [usize;6] = [0;6];
-    let mut rates: [f64; 6] = [0.;6];
-
     let mut track_hmc: usize = 0;
 
     let start_inference_time = Instant::now();
 
+    let eps_sizes = [0.04_f64, 0.004, 0.0004];
+    let momentum_sds = [0.1, 1_f64, 10.];
+    let base_ratio_sds = [0.1_f64, 0.5, 1.];
+    let base_linear_sds = [0.1_f64, 0.5, 1.];
+    let height_sds = [0.1, 1_f64, 2.0];
+    let mut attempts_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+    let mut successes_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+    let mut immediate_failures_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+    let mut distances_per_attempted_move = vec![Vec::<[f64; 4]>::with_capacity(num_advances/20); eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+
     //for step in 0..10000 {
  
     for step in 0..num_advances {
-        let (selected_move, accepted) = current_trace.advance(MOMENTUM_DIST.get().expect("No more writing"), &mut rng);
+        current_trace.advance(&eps_sizes, &momentum_sds, &base_ratio_sds, &base_linear_sds, &height_sds, 
+                              &mut attempts_per_move, &mut successes_per_move, &mut immediate_failures_per_move, 
+                              &mut distances_per_attempted_move, &mut rng);
 
-        trials[selected_move] += 1;
-        if accepted {acceptances[selected_move] += 1;}
-        rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
-
-        //println!("Step {} ", step);
-        if step % 10 == 0 {
+        /*if step % 10 == 0 {
             println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
-            if (acceptances[5]-track_hmc) == 0 {
                 println!("Not really changing motif???");
                 println!("{:?}", current_trace.current_set_to_print());
-            }
-            track_hmc=acceptances[5];
-        }
+        }*/
         if step % save_step == 0 {
             
             current_trace.save_trace(output_dir, &run_name, step);
