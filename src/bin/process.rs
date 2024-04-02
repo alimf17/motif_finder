@@ -524,7 +524,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         println!("Creating credible region at {} samples", credible);
         
  
-        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| Base::simplex_to_base(tetrahedral_mean).seqlogo_heights()).collect();
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| Base::vect_to_base(tetrahedral_mean).seqlogo_heights()).collect();
 
         draw_pwm(&prep_pwm, &format!("{}_pwm.png", file_name));
         //This draws the credible region
@@ -642,9 +642,14 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
             index += 1;
         }
 
-        let region = cells_and_counts.drain(0..index).map(|(a, _)| (xs[a.0], ys[a.1], zs[a.2])).collect::<Vec<(f64, f64, f64)>>();
+        let region = cells_and_counts.drain(0..index).map(|(a, _)| (xs[a.0], ys[a.1], zs[a.2])).filter(|a| a.0.is_finite() && a.1.is_finite() && a.2.is_finite()).collect::<Vec<(f64, f64, f64)>>();
 
-        let space_region = region.iter().map(|&(a,b,c)| Base::simplex_to_vect(&[a,b,c])).collect::<Vec<[f64;3]>>();
+        println!("region sampler {:?}", &region[0..(10.min(region.len()-1))]);
+        let space_region = region.iter().map(|&(a,b,c)| Base::simplex_to_vect(&[a,b,c])).filter(|a| a[0].is_finite() && a[1].is_finite() && a[2].is_finite()).collect::<Vec<[f64;3]>>();
+        println!("space sampler {:?}", &space_region[0..(10.min(region.len()-1))]);
+        
+        let index = space_region.len();
+
         let posterior_sum = space_region.iter().fold((0.0, 0.0, 0.0), |acc, x| (acc.0+x[0], acc.1+x[1], acc.2+x[2]));
         let posterior_mean = [posterior_sum.0/(index as f64), posterior_sum.1/(index as f64), posterior_sum.2/(index as f64)];
 
