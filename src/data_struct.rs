@@ -937,11 +937,13 @@ impl AllData {
 
         for lag in 1..coeffs.len() {
 
+            let mean = data.iter().map(|a| a.iter().sum::<f64>()).sum::<f64>()/(data.len() as f64);
             let domain_iter = data.iter().map(|a| a[0..(a.len()-lag)].to_vec()).flatten();
             let range_iter  = data.iter().map(|a| a[lag..(a.len())].to_vec()).flatten();
 
-            let denominator = domain_iter.clone().map(|d| d.powi(2)).sum::<f64>();
-            let numerator = domain_iter.zip(range_iter).map(|(d, r)| d*r).sum::<f64>();
+            //We're assuming the lengths in the numerator and denominator cancel out
+            let denominator = domain_iter.clone().map(|d| (d-mean).powi(2)).sum::<f64>();
+            let numerator = domain_iter.zip(range_iter).map(|(d, r)| (d-mean)*(r-mean)).sum::<f64>();
 
             coeffs[lag] = numerator/denominator;
         }

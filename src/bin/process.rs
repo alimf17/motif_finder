@@ -168,8 +168,9 @@ pub fn main() {
     let reference_motifs: Vec<Motif> = set_trace_collections.iter().map(|a| a.initial_set_pwm()).collect();
 
 
-    let distances_file = format!("{}_distances_to_refs.png",base_file);
-    let autocorrs_file = format!("{}_distance_autocorrelations.png", base_file);
+    let distances_file = format!("{}/{}_distances_to_refs.png",out_dir.clone(), base_file);
+    let autocorrs_file = format!("{}/{}_distance_autocorrelations.png",out_dir.clone(), base_file);
+    
 
     let distances_plot = BitMapBackend::new(distances_file.as_str(), (2600, 2600)).into_drawing_area();
     let autocorrelation_plot = BitMapBackend::new(autocorrs_file.as_str(), (1350, 1350)).into_drawing_area();
@@ -177,11 +178,11 @@ pub fn main() {
     distances_plot.fill(&full_palette::WHITE).unwrap();
     autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
 
-    let mut autocorrelations_ctx = ChartBuilder::on(&distances_plot)
+    let mut autocorrelations_ctx = ChartBuilder::on(&autocorrelation_plot)
                                .caption("Autocorrelations of each trace", ("Times New Roman", 30))
                                .set_label_area_size(LabelAreaPosition::Left, 40)
                                .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1_f64)
+                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1.5_f64)
                                .unwrap();
 
     autocorrelations_ctx.configure_mesh()
@@ -197,7 +198,7 @@ pub fn main() {
                                                                       .caption(format!("Distance from Reference {}", i).as_str(), ("Times New Roman", 30))
                                                                       .set_label_area_size(LabelAreaPosition::Left, 40)
                                                                       .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                                                                      .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..10_f64)
+                                                                      .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..100_f64)
                                                                       .unwrap()
                                                                       ).collect::<Vec<_>>(); 
 
@@ -219,7 +220,9 @@ pub fn main() {
         //          2-Calculate autocorrelations for each REFERENCE motif and plot them as well
         let distance_traces = collection.create_distance_traces(&reference_motifs);
 
-        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, 100);
+        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, 1000);
+
+        println!("Collection Autocorrelation: {:?}", collection_autocorrelation);
 
         let style = ShapeStyle{ color: (*PALETTE[chain]).into(), filled: true, stroke_width: 0};
 
