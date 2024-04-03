@@ -179,7 +179,7 @@ pub fn main() {
     autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
 
     let mut autocorrelations_ctx = ChartBuilder::on(&autocorrelation_plot)
-                               .caption("Autocorrelations of each trace", ("Times New Roman", 30))
+                               .caption("Autocorrelations of each trace's distances", ("Times New Roman", 30))
                                .set_label_area_size(LabelAreaPosition::Left, 40)
                                .set_label_area_size(LabelAreaPosition::Bottom, 40)
                                .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1.5_f64)
@@ -247,6 +247,25 @@ pub fn main() {
     autocorrelations_ctx.configure_series_labels().draw().unwrap();
     for ctx in distances_ctxes.iter_mut() { ctx.configure_series_labels().draw().unwrap(); }
 
+    let autocorrs_file = format!("{}/{}_ln_post_autocorrelations.png",out_dir.clone(), base_file);
+    
+
+    let autocorrelation_plot = BitMapBackend::new(autocorrs_file.as_str(), (1350, 1350)).into_drawing_area();
+
+    autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
+
+    let mut autocorrelations_post = ChartBuilder::on(&autocorrelation_plot)
+                               .caption("Autocorrelations of each trace's ln posterior density", ("Times New Roman", 30))
+                               .set_label_area_size(LabelAreaPosition::Left, 40)
+                               .set_label_area_size(LabelAreaPosition::Bottom, 40)
+                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1.5_f64)
+                               .unwrap();
+
+    autocorrelations_post.configure_mesh()
+                               .x_desc("Lag (in units of step save period)")
+                               .y_desc("Autocorrelation coefficient")
+                               .draw().unwrap();
+
 
     std::mem::drop(buffer);
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
@@ -264,8 +283,17 @@ pub fn main() {
         None,).unwrap();
         let daaa = res.data().iter().map(|(a, b)| (a.val(), b.val().powi(2)/(4.0*16384.))).collect::<Vec<_>>();
         //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());*/
-        plot_post.line(format!("Chain {}", letter), tracey.into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    };
+        plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&vec![tracey.clone()], 1000);
+
+        let color = unsafe{*PALETTE.as_ptr().add(i)};
+        autocorrelations_post.draw_series(collection_autocorrelation.iter().enumerate().map(|(j, p)| Circle::new((j,*p), 5, ShapeStyle{ color: (*PALETTE[i]).into(), filled : true, stroke_width : 0})))
+                                                                   .unwrap().label(format!("{}", UPPER_LETTERS[i]).as_str())
+                                                                   .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
+
+    }
+    autocorrelations_post.configure_series_labels().draw().unwrap();
+
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
     let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");

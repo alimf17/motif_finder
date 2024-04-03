@@ -937,15 +937,22 @@ impl AllData {
 
         for lag in 1..coeffs.len() {
 
-            let mean = data.iter().map(|a| a.iter().sum::<f64>()).sum::<f64>()/(data.len() as f64);
-            let domain_iter = data.iter().map(|a| a[0..(a.len()-lag)].to_vec()).flatten();
-            let range_iter  = data.iter().map(|a| a[lag..(a.len())].to_vec()).flatten();
 
-            //We're assuming the lengths in the numerator and denominator cancel out
-            let denominator = domain_iter.clone().map(|d| (d-mean).powi(2)).sum::<f64>();
-            let numerator = domain_iter.zip(range_iter).map(|(d, r)| (d-mean)*(r-mean)).sum::<f64>();
 
-            coeffs[lag] = numerator/denominator;
+            let domain_vecs  = data.iter().map(|a| a[0..(a.len()-lag)].to_vec());
+            let range_vecs   = data.iter().map(|a| a[lag..(a.len())].to_vec());
+
+            let len_domain_and_range = domain_vecs.clone().map(|a| a.len()).sum::<usize>() as f64;
+
+            let domain_mean = domain_vecs.clone().map(|a| a.iter().sum::<f64>()).sum::<f64>()/len_domain_and_range;
+            let range_mean = range_vecs.clone().map(|a| a.iter().sum::<f64>()).sum::<f64>()/len_domain_and_range;
+
+            let domain_var = domain_vecs.clone().map(|a| a.iter().map(|d| (d-domain_mean).powi(2)).sum::<f64>()).sum::<f64>()/len_domain_and_range;
+            let range_var = range_vecs.clone().map(|a| a.iter().map(|r| (r-range_mean).powi(2)).sum::<f64>()).sum::<f64>()/len_domain_and_range;
+
+            let covar = domain_vecs.zip(range_vecs).map(|(dv, rv)| dv.into_iter().zip(rv).map(|(d, r)| (d-domain_mean)*(r-range_mean)).sum::<f64>()).sum::<f64>()/len_domain_and_range;
+
+            coeffs[lag] = covar/(domain_var*range_var).sqrt();
         }
         coeffs
     }

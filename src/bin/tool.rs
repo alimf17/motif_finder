@@ -245,40 +245,39 @@ fn main() {
             let mut ind: usize = 0;
             for i in 0..eps_sizes.len(){
                 for j in 0..momentum_sds.len() {
-                    ind += 1; 
                     println!("HMC with epsilon {} and momentum {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                              eps_sizes[i], momentum_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
                              (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                    ind += 1; 
                 }
             }
             for i in 0..base_ratio_sds.len(){
                 for j in 0..base_linear_sds.len() {
-                    ind += 1; 
                     println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                              base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
                              (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                    ind += 1; 
                 }
             }
             for i in 0..base_ratio_sds.len(){
                 for j in 0..base_linear_sds.len() {
-                    ind += 1; 
                     println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                              base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
                              (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                    ind += 1; 
                 }
             }
             for i in 0..height_sds.len() {
-                ind += 1; 
                 println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                          height_sds[i], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
                          (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
+                ind += 1; 
             }
-            ind += 1;
             println!("New motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
                      attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
                      (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-
             ind += 1;
+
             println!("Kill motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
                      attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
                      (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
@@ -299,7 +298,7 @@ fn main() {
             println!("Secondary shuffle move (always accepts). Times {}.", attempts_per_move[ind]);
 
 
-            if ((step % 1000) == 0) || (step+1 == num_advances){
+            if ((step >= 1000) && ((step % 1000) == 0)) || (step+1 == num_advances){
             
                 let root_signal: String = format!("{}/{}_step_{:0>7}_dist_of",output_dir,run_name, step);
 
@@ -320,7 +319,8 @@ fn main() {
                     for j in 0..momentum_sds.len() {
                         let file_string = format!("{}_HMC_eps_{}_momentum_{}.png", root_signal, eps_sizes[i], momentum_sds[j]);
                         let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins);
+                        if let Err(err) = check {println!("{}", err);};
                         ind += 1;
                         //TODO: Generate histograms for accepted and failed
                     }
@@ -330,7 +330,8 @@ fn main() {
                     for j in 0..base_linear_sds.len() {
                         let file_string = format!("{}_base_scale_ratio_sd_{}_linear_sd_{}.png", root_signal, base_ratio_sds[i], base_linear_sds[j]);
                         let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                        if let Err(err) = check {println!("{}", err);};
                         ind += 1;
                         //TODO: Generate histograms for accepted and failed
                     }
@@ -339,7 +340,8 @@ fn main() {
                     for j in 0..base_linear_sds.len() {
                         let file_string = format!("{}_motif_scale_ratio_sd_{}_linear_sd_{}.png", root_signal, base_ratio_sds[i], base_linear_sds[j]);
                         let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                        if let Err(err) = check {println!("{}", err);};
                         ind += 1;
                         //TODO: Generate histograms for accepted and failed
                     }
@@ -348,42 +350,48 @@ fn main() {
                 for i in 0..height_sds.len() {
                     let file_string = format!("{}_height_sd_{}.png", root_signal, height_sds[i]);
                     let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                    sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                    let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                    if let Err(err) = check {println!("{}", err);};
                     ind += 1;
                     //TODO: Generate histograms for accepted and failed
                 }
                 let file_string = format!("{}_motif_birth.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                if let Err(err) = check {println!("{}", err);};
                 ind += 1;
                 //TODO: Generate histograms for accepted and failed
                 let file_string = format!("{}_motif_death.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
                 ind += 1;
                 //TODO: Generate histograms for accepted and failed
 
                 //PWM expand and contract are fairly normal, all things considered
                 let file_string = format!("{}_motif_expand.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                if let Err(err) = check {println!("{}", err);};
                 ind += 1;
                 //TODO: Generate histograms for accepted and failed
                 let file_string = format!("{}_motif_contract.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                if let Err(err) = check {println!("{}", err);};
                 ind += 1;
                 //TODO: Generate histograms for accepted and failed
 
                 //The two gibbs moves do not need failure panels
                 let file_string = format!("{}_base_leap.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                if let Err(err) = check {println!("{}", err);};
                 ind += 1;
                 //TODO: Generate histograms for accepted
                 let file_string = format!("{}_secondary_shuffle.png", root_signal);
                 let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
+                if let Err(err) = check {println!("{}", err);};
                 ind += 1;
                 //TODO: Generate histograms for accepted
             }
@@ -440,7 +448,9 @@ fn main() {
 
 }
 
-fn sort_move_hists<DB: DrawingBackend>(data: &Vec<([f64; 4], bool)>, plotting: &DrawingArea<DB, Shift>, num_bins: usize) {
+fn sort_move_hists<DB: DrawingBackend>(data: &Vec<([f64; 4], bool)>, plotting: &DrawingArea<DB, Shift>, num_bins: usize) -> Result<(), String>{
+
+    if data.len() == 0 {return Err("No data for plotting".to_string());}
 
     plotting.fill(&WHITE).expect("This should just work");
 
@@ -465,6 +475,7 @@ fn sort_move_hists<DB: DrawingBackend>(data: &Vec<([f64; 4], bool)>, plotting: &
         let hist = quick_hist(&trial_data, area, labs[j].clone().to_string(), num_bins);
     }
 
+    Ok(())
 
 }
 

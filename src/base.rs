@@ -482,27 +482,19 @@ impl Base {
 
         let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
 
-        println!("pre ratios {} {}", large_abs_ratio, small_abs_ratio);
         large_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
 
-        println!("attempt large {}", large_abs_ratio);
         if large_abs_ratio < 1.0 { large_abs_ratio = 1.0/large_abs_ratio; }
 
-        println!("final large {}", large_abs_ratio);
         small_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
         
-        println!("attempt small {}", small_abs_ratio);
-
         if small_abs_ratio < 1.0 { small_abs_ratio = 1.0/small_abs_ratio; }
-        println!("final small {}", small_abs_ratio);
 
         new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*small_sd;
 
         new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1].abs()*signs_base_vect[largest_abs_to_smallest[1].1];
 
         new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1].abs()*signs_base_vect[largest_abs_to_smallest[0].1];
-
-        println!("old vect {:?}, new vect {:?}", self.base_to_vect(), new_base_vect);
 
         if new_base_vect.iter().any(|&a| a.abs() > MAX_VECT_COORD) { return None;}
         
@@ -1193,11 +1185,11 @@ impl Motif {
           
             for gray_code in 0..((BASE_L-1).pow(scramble.len() as u32)) {
                 
-                let inner_swap = scramble.iter().enumerate().map(|(i, &s)| (s, (gray_code/((BASE_L-1).pow(i as u32)) % (BASE_L-1))));
+                let inner_swap = scramble.iter().enumerate().map(|(i, &s)| (i, ((gray_code/((BASE_L-1).pow(i as u32))) % (BASE_L-1))));
 
                 let mut mot_to_be = self.clone();
 
-                for (&b, s) in inner_swap { mot_to_be.pwm[b] = swapped_bases[b][s].clone(); }
+                for (b, s) in inner_swap { mot_to_be.pwm[to_scramble[b]] = swapped_bases[b][s].clone(); }
 
                 final_swaps.push(mot_to_be);
             }
@@ -3056,9 +3048,12 @@ impl<'a> SetTrace<'a> {
 
         let acc_vec = move_vec.iter().scan(0, |s, a| {*s += *a; Some(*s)}).collect::<Vec<usize>>();
 
-        let select_move: usize = rng.gen_range(0..*acc_vec.last().expect("We have at least two elements in this, guarenteed"));
+        println!("move {:?} acc {:?}", move_vec, acc_vec);
+        let select_move: usize = rng.gen_range(0..*acc_vec.last().expect("We have at least two elements in this, guaranteed"));
 
-        let (which_move, which_variant): (usize, usize) = match acc_vec.iter().rposition(|&x| select_move <= x) { Some(i) => (i+1, select_move-acc_vec[i]), None => (0, select_move) };
+        let (which_move, which_variant): (usize, usize) = match acc_vec.iter().rposition(|&x| select_move >= x) { Some(i) => (i+1, select_move-acc_vec[i]), None => (0, select_move) };
+
+        println!("sel {} w {} v {}", select_move, which_move, which_variant);
 
         let (first, maybe_sec) = match split_arr[which_move] { Some(split) => (which_variant/split, Some(which_variant % split)), None => (which_variant, None) };
 
