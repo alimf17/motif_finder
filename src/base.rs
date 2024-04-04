@@ -3048,12 +3048,9 @@ impl<'a> SetTrace<'a> {
 
         let acc_vec = move_vec.iter().scan(0, |s, a| {*s += *a; Some(*s)}).collect::<Vec<usize>>();
 
-        println!("move {:?} acc {:?}", move_vec, acc_vec);
         let select_move: usize = rng.gen_range(0..*acc_vec.last().expect("We have at least two elements in this, guaranteed"));
 
         let (which_move, which_variant): (usize, usize) = match acc_vec.iter().rposition(|&x| select_move >= x) { Some(i) => (i+1, select_move-acc_vec[i]), None => (0, select_move) };
-
-        println!("sel {} w {} v {}", select_move, which_move, which_variant);
 
         let (first, maybe_sec) = match split_arr[which_move] { Some(split) => (which_variant/split, Some(which_variant % split)), None => (which_variant, None) };
 
@@ -3114,7 +3111,6 @@ impl<'a> SetTrace<'a> {
         //                            distances_per_attempted_move
 
         attempts_per_move[select_move] += 1; 
-        if accept { successes_per_move[select_move] += 1; }
 
         let set_to_add = match potential_set {
             None => {
