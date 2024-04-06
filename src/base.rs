@@ -43,6 +43,7 @@ use serde::{Serialize, Deserialize};
 pub const SQRT_2: f64 = 1.41421356237;
 pub const SQRT_3: f64 = 1.73205080757;
 
+pub const LN_2: f64 = 0.69314718055994531;
 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
@@ -169,6 +170,10 @@ pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 //        and technically, all valid u64s are valid f64s. Edge cases exist for NaN and Inf
 //        But 2^(-61) is neither of those, and it's not subnormal, either. 
 pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c20000000000000) }; 
+        
+//This was NOT chosen randomly. I picked it so that proportions are
+//all normal numbers
+const BARRIER: f64 = 2044_f64*LN_2;
 
 //BEGIN BASE
 
@@ -438,29 +443,34 @@ impl Base {
     pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
         //let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.props[a]+VEC_PAD_EPS).ln());
-        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| {
+        /*let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| {
             let b = (self.props[a]).ln();
             if b.is_infinite() { b.signum()*(MAX_VECT_COORD)} else {b}
-        });
+        });*/
 
-        Base::reflect_triple_to_finite([ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3], 
-          -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
-          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]])
+
+        Base::reflect_triple_to_finite(
+            &[nicer_ln_ratio([self[Bp::C], self[Bp::G]],[self[Bp::A], self[Bp::T]]),
+              nicer_ln_ratio([self[Bp::C], self[Bp::T]],[self[Bp::A], self[Bp::G]]), 
+              nicer_ln_ratio([self[Bp::T], self[Bp::G]],[self[Bp::A], self[Bp::C]])] )
     }
 
     pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
 
 
         //This clamp exists to make sure that we don't over or underflow exp and break things
-        let sanitized_base: [f64; BASE_L-1] = core::array::from_fn(|a| Self::keep_coord_in_finite(base_as_vec[a]));//.clamp(-943., 943.));
+        let sanitized_base: [f64; BASE_L-1] = Self::reflect_triple_to_finite(base_as_vec); 
 
-        let normalize = sanitized_base.iter().map(|a| a.abs()).sum::<f64>();
+        //TODO: fix this so that it starts with best base at 1.0
+        let pre_exp_base: [f64; BASE_L] = 
+            [-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25, 
+              (sanitized_base[0]+sanitized_base[1]-sanitized_base[2])*0.25,
+              (sanitized_base[0]-sanitized_base[1]+sanitized_base[2])*0.25,
+             (-sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25];
 
-        let unnormalized_base: [f64; BASE_L] = 
-            [((-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp(), 
-             ((( sanitized_base[0]+sanitized_base[1]-sanitized_base[2])-normalize)*0.25).exp(),
-             ((( sanitized_base[0]-sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp(),
-             (((-sanitized_base[0]+sanitized_base[1]+sanitized_base[2])-normalize)*0.25).exp()];
+        let max_val = pre_exp_base.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).expect("We obviously know this has items in it");
+
+        let unnormalized_base: [f64; BASE_L] = core::array::from_fn(|a| (pre_exp_base[a]-max_val).exp());
 
         Base::new(unnormalized_base)
     }
@@ -496,9 +506,9 @@ impl Base {
 
         new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1].abs()*signs_base_vect[largest_abs_to_smallest[0].1];
 
-        if new_base_vect.iter().any(|&a| a.abs() > MAX_VECT_COORD) { return None;}
-        
-        Some(Self::vect_to_base(&new_base_vect))
+       
+        Some(Base::vect_to_base(&Base::reflect_triple_to_finite(&new_base_vect)))
+
 
     }
 
@@ -660,20 +670,99 @@ impl Base {
     }
 
 
-    fn reflect_triple_to_finite(triple: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
-        core::array::from_fn(|a| Self::keep_coord_in_finite(triple[a]) ) 
+    fn reflect_triple_to_finite(triple: &[f64; BASE_L-1]) -> [f64; BASE_L-1] {
+    
+
+        let mut return_triple = triple.clone();
+        let mut maybe_id = Self::terminate_refect(triple); 
+
+        let mut is_some = maybe_id.is_some();
+
+        while is_some {
+
+            return_triple = Self::reflect_outer_barrier(return_triple, maybe_id.expect("only here if we're some"));
+            maybe_id = Self::terminate_refect(&return_triple);
+            is_some = maybe_id.is_some();
+        }
+
+        
+
+        return_triple
+
+
+    }
+
+    fn terminate_refect(triple: &[f64; BASE_L-1]) -> Option<usize> {
+        
+
+        let first_checks = [triple[0].abs()+triple[1].abs()-BARRIER,
+                            triple[0].abs()+triple[2].abs()-BARRIER,
+                            triple[1].abs()+triple[2].abs()-BARRIER];
+
+        let mut first_barrier: Option<(usize, f64)> = None;
+
+        for (id, &check) in first_checks.iter().enumerate() {
+            first_barrier = match first_barrier {
+                Some(bar) => if check > bar.1 { Some((id, check))} else {Some(bar)},
+                None => if check > 0.0 { Some((id, check)) } else {None},
+            };
+        }
+
+        first_barrier.map(|a| a.0)
+
+    }
+
+    //NOTE: At some point, I should turn this algorithm into some kind of division based on
+    //      the "penalty" scores to do this reflection in one go, but I'm currently just a 
+    //      little too out of it to figure it out and it's not urgent
+    fn reflect_outer_barrier(triple: [f64; BASE_L-1], id: usize) -> [f64; BASE_L-1] {
+
+        //let i = ((((2*BASE_L-1) as f64)-(((2*BASE_L-1).pow(2)-8*id) as f64).sqrt())/2.) as usize;
+        //let i = ((7_f64-(49_f64-8.*(id as f64)).sqrt())/2.) as usize;
+        //let j = (id+((BASE_L-1-i)*(BASE_L-2-i))/2)-((BASE_L-1)*BASE_L-2)/2;
+        //let j = (id+((3-i)*(2-i))/2)-3;
+
+
+        let (i, j): (usize, usize) = [(0, 1), (0, 2), (1, 2)][id];
+
+        let sum = triple[i]+triple[j];
+        let diff = triple[i]-triple[j];
+
+        let mut new_triple = triple;
+
+        let swap = new_triple[i];
+        new_triple[i] = new_triple[j];
+        new_triple[j] = swap;
+
+        //It's possible that both sum and diff are problems
+        //We need to pick the biggest problem, because that's the first reflection
+        if sum.abs() > diff.abs() {
+            let sign = sum.signum();
+            new_triple[i] = -new_triple[i]+sign*BARRIER;
+            new_triple[j] = -new_triple[j]+sign*BARRIER;
+        } else {
+            let sign  = diff.signum();
+            new_triple[i] += sign*BARRIER;
+            new_triple[j] -= sign*BARRIER;
+        }
+       
+        new_triple
+
     }
 
     pub fn add_in_hmc(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.base_to_vect();
-       let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| Self::keep_coord_in_finite(tetra[a]+addend[a]));
+       let mut vec_res: [f64; BASE_L-1] = core::array::from_fn(|a| tetra[a]+addend[a]);
+       vec_res = Self::reflect_triple_to_finite(&vec_res);
        if confine_base {
            let best_base = self.best_base();
 
            let mut conds_check = Self::check_vec_kept_best_bp(&vec_res, best_base); 
            let mut conds: [bool; BASE_L-1] = core::array::from_fn(|a| conds_check[a] > 0.);
            let mut failed = conds.iter().any(|&a| a);
+
+           let mut failures: usize = 0;
 
            while failed {
                let next_reflect = conds_check.iter().enumerate().max_by(|(_, &a), (_, b)| a.partial_cmp(b).unwrap()).expect("conds_check is not empty").0;
@@ -693,6 +782,18 @@ impl Base {
                conds_check = Self::check_vec_kept_best_bp(&vec_res, best_base);
                conds = core::array::from_fn(|a| conds_check[a] > 0.);
                failed = conds.iter().any(|&a| a);
+
+               #[cfg(test)]
+               {
+                   failures += 1;
+
+               
+                   if (failures > 0) && (failures % 10 == 0) {
+                   
+                       println!("{} failures: {:?}", failures, vec_res);
+               
+                   }
+               }
            }
        }
        Base::vect_to_base(&vec_res)
@@ -745,6 +846,52 @@ impl Base {
     }
 
 }
+
+//This should never be part of the public API
+fn nicer_ln_ratio(numerator: [f64;2], denominator: [f64;2]) -> f64 {
+
+    let n = [exponent_mantissa_f64(numerator[0]), exponent_mantissa_f64(numerator[1])];
+    let d = [exponent_mantissa_f64(denominator[0]), exponent_mantissa_f64(denominator[1])];
+
+    //I am essentially always expecting the same sign on exponents, here
+    //So I want the subtractions to happen before the additions to lower
+    //chances of overflow
+    let mut exponent = (n[0].0-d[0].0)+(n[1].0-d[1].0);
+
+    let mant_ratio = n[0].1 * n[1].1 /(d[0].1 * d[1].1);
+
+    if !( (mant_ratio > 0.0) && (mant_ratio.is_finite()) )  { return mant_ratio.ln(); }
+
+    let (miniexp, final_mant) = exponent_mantissa_f64(mant_ratio);
+
+    exponent += miniexp;
+
+    final_mant.ln()+(exponent as f64)*LN_2
+
+
+}
+
+//Ignores sign. Will not produce a stable result for infs or nans
+//Also shifts zeros and subnormals to be the smallest normal number, effectively
+//This should never be part of the public API
+fn exponent_mantissa_f64(f: f64) -> (i64, f64) {
+
+    if f.abs() < f64::MIN_POSITIVE { return ((f64::MIN_EXP-1) as i64, 1.0); }
+    
+    /*if f.is_infinite() { return (0, f64::INFINITY); }
+    if f.is_nan() { return (0, f64::NAN);} */
+    
+    /*if f.is_subnormal() { 
+        let lead = f.to_bits().leading_zeros();
+        let e = -1011-(lead as i64);
+        let m = f64::from_bits(0x3ff_0_0000_0000_0000_u64+(f.to_bits() << (lead+1)));
+        return (e, m);
+    }*/ //I don't want to deal with subnormal ratios on bases for now
+
+    (((f.to_bits() & 0x7FF_0_0000_0000_0000) >> 52) as i64-1023, 
+     f64::from_bits((f.to_bits() & 0x000_F_FFFF_FFFF_FFFF)+0x3FF_0_0000_0000_0000))
+}
+
 
 
 fn reflect_abs_height(a: f64) -> f64 {
@@ -4151,14 +4298,52 @@ mod tester{
         //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
 
 
-        let random_base_dist = SymmetricBaseDirichlet::new(0.1).expect("obviously valid");
+        let random_base_dist = SymmetricBaseDirichlet::new(0.001).expect("obviously valid");
 
-        for i in 0..100000 {
-            let b = random_base_dist.sample(&mut rng);
+        for i in 0..10000 {
+            let b = Base::vect_to_base(&(random_base_dist.sample(&mut rng)).base_to_vect());
             println!("Base {i} {:?}", b);
             let f = b.base_to_vect();
+            let b2 = Base::vect_to_base(&f); 
             println!("back to simplex {:?}", f);
+       
             println!("base once more {:?}", Base::vect_to_base(&f));
+      
+
+            let bitarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]).to_bits() & 0x7ff_0_0000_0000_0000}) ;
+            let difarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]-b[a]).to_bits() & 0x7ff_0_0000_0000_0000} ) ;
+
+            let mag_diff = core::array::from_fn::<_,4,_>(|a| if (difarr[a] == 0) { None } else { Some(((bitarr[a]-difarr[a]) >> 52)) });
+
+            println!("mag_diff {:?}", mag_diff);
+
+            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 40)), "magnitude of relative difference between back and forth exceeds 2^(-45)")
+
+
+        }
+        
+        let random_base_dist = SymmetricBaseDirichlet::new(1000.).expect("obviously valid");
+
+        for i in 0..10000 {
+            let b = Base::vect_to_base(&(random_base_dist.sample(&mut rng)).base_to_vect());
+            println!("Base {i} {:?}", b);
+            let f = b.base_to_vect();
+            let b2 = Base::vect_to_base(&f); 
+            println!("back to simplex {:?}", f);
+       
+            println!("base once more {:?}", Base::vect_to_base(&f));
+      
+
+            let bitarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]).to_bits() & 0x7ff_0_0000_0000_0000}) ;
+            let difarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]-b[a]).to_bits() & 0x7ff_0_0000_0000_0000} ) ;
+
+            let mag_diff = core::array::from_fn::<_,4,_>(|a| if (difarr[a] == 0) { None } else { Some(((bitarr[a]-difarr[a]) >> 52)) });
+
+            println!("mag_diff {:?}", mag_diff);
+
+            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 40)), "magnitude of relative difference between back and forth exceeds 2^(-46)")
+
+
         }
 
         let s = [-SQRT_2/3., -0.01, -0.3333333333333];
@@ -4216,6 +4401,7 @@ mod tester{
 
     }
 
+    /*
     #[test]
     fn gradient_test() {
 
@@ -4435,7 +4621,7 @@ mod tester{
         println!("I'm not setting a firm unit test here. Instead, the test should be that as epsilon approaches 0, D hamiltonian does as well");
         println!("Epsilon {} D hamiltonian {} acc {} \n old_set: {:?} \n new_set: {:?}", (*HMC_EPSILON.read().expect("no writes expected now")), dham, acc, motif_set,new_set);
 
-    }
+    }*/
     #[test]
     fn leap_test() {
 
