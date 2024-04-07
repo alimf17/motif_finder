@@ -4300,6 +4300,7 @@ mod tester{
 
         let random_base_dist = SymmetricBaseDirichlet::new(0.001).expect("obviously valid");
 
+        let t = Instant::now();
         for i in 0..10000 {
             let b = Base::vect_to_base(&(random_base_dist.sample(&mut rng)).base_to_vect());
             println!("Base {i} {:?}", b);
@@ -4317,7 +4318,7 @@ mod tester{
 
             println!("mag_diff {:?}", mag_diff);
 
-            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 40)), "magnitude of relative difference between back and forth exceeds 2^(-45)")
+            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 42)), "magnitude of relative difference between back and forth exceeds 2^(-45)")
 
 
         }
@@ -4345,6 +4346,9 @@ mod tester{
 
 
         }
+
+        let elapse = t.elapsed();
+        println!("time converting between stuff {:?}", elapse);
 
         let s = [-SQRT_2/3., -0.01, -0.3333333333333];
         println!("simplex {:?}", s);
