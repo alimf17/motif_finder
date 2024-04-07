@@ -401,7 +401,7 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], are
 
             hist.margin(10).set_left_and_bottom_label_area_size(20);
 
-            hist.caption(label, ("sans-serif", 10));
+            hist.caption(label, ("Times New Roman", 20));
 
             let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).filter(|a| a.is_finite()).collect();
 
@@ -415,7 +415,7 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], are
 
                 let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
 
-                hist_context.configure_mesh().disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.02}", *x)).draw().unwrap();
+                hist_context.configure_mesh().disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
                 //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
                 hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap();

@@ -12,7 +12,7 @@ use core::slice::{Iter, IterMut};
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise};
 use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF};
-use crate::{MAX_IND_RJ, MAX_IND_LEAP, MAX_IND_HMC, HMC_TRACE_STEPS, HMC_EPSILON};
+use crate::{MAX_IND_RJ, MAX_IND_LEAP};
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
 
