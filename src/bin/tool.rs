@@ -1,6 +1,6 @@
 
-use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, NUM_HMC_STEPS, MAX_E_VAL};
-use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT, MOMENTUM_SD, HMC_EPSILON, MOMENTUM_DIST};
+use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL};
+use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use motif_finder::base::*;
 use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
@@ -136,37 +136,6 @@ fn main() {
         *w = credibility; 
     }
 
-    if init_check_index > 14 { 
-        let momentum: f64 = args[14].parse().expect("We already checked that this parsed to f64");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        //SAFETY: This modification is made before any inference is done, preventing data races
-        //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
-
-        if !(momentum > 0.0) {panic!("Momentum distribution standard deviation must be a valid strictly positive float");}
-        
-        let mut w = MOMENTUM_SD.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        *w = momentum;
-    } 
-
-
-    if init_check_index > 15 { 
-        let eps: f64 = args[15].parse().expect("We already checked that this parsed to f64");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        if !(eps > 0.0) {panic!("HMC epsilon must be a valid strictly positive float");} 
-        //SAFETY: This modification is made before any inference is done, preventing data races
-        //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
-
-        {
-        let f = HMC_EPSILON.write();
-        let mut m = f.expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        *m = eps;
-        }
-    }
-
-
-    MOMENTUM_DIST.set(Normal::new(0.0, *MOMENTUM_SD.read().expect("Nothing should be writing to this now")).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
 
 
 
@@ -180,7 +149,7 @@ fn main() {
     let background = data_ref.background_ref();
 
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
-    let capacity: usize = save_step*(NUM_RJ_STEPS+NUM_HMC_STEPS+2);
+    let capacity: usize = save_step*(NUM_RJ_STEPS+2);
 
 
 
@@ -222,20 +191,19 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
-    let eps_sizes = [0.04_f64, 0.004, 0.0004];
-    let momentum_sds = [0.1, 1_f64, 10.];
     let base_ratio_sds = [0.1_f64, 0.5, 1.];
     let base_linear_sds = [0.1_f64, 0.5, 1.];
     let height_sds = [0.1, 1_f64, 2.0];
-    let mut attempts_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
-    let mut successes_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
-    let mut immediate_failures_per_move = vec![0_usize; eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
-    let mut distances_per_attempted_move = vec![Vec::<([f64; 4], bool)>::with_capacity(num_advances/20); eps_sizes.len()*momentum_sds.len()+2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6];
+    let move_num: usize = 2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6;
+    let mut attempts_per_move = vec![0_usize; move_num];
+    let mut successes_per_move = vec![0_usize;move_num]; 
+    let mut immediate_failures_per_move = vec![0_usize; move_num]; 
+    let mut distances_per_attempted_move = vec![Vec::<([f64; 4], bool)>::with_capacity(num_advances/20);move_num]; 
 
     //for step in 0..10000 {
  
     for step in 0..num_advances {
-        current_trace.advance(&eps_sizes, &momentum_sds, &base_ratio_sds, &base_linear_sds, &height_sds, 
+        current_trace.advance(&base_ratio_sds, &base_linear_sds, &height_sds, 
                               &mut attempts_per_move, &mut successes_per_move, &mut immediate_failures_per_move, 
                               &mut distances_per_attempted_move, &mut rng);
 
@@ -243,14 +211,6 @@ fn main() {
 
             println!("Step {}", step);
             let mut ind: usize = 0;
-            for i in 0..eps_sizes.len(){
-                for j in 0..momentum_sds.len() {
-                    println!("HMC with epsilon {} and momentum {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                             eps_sizes[i], momentum_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
-                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-                    ind += 1; 
-                }
-            }
             for i in 0..base_ratio_sds.len(){
                 for j in 0..base_linear_sds.len() {
                     println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
@@ -314,17 +274,6 @@ fn main() {
 
                 //All necessary data is found in the distances_per_attempted_move: Vec<Vec<([f64; 4], bool)>>
 
-                //HMC histogram needs #epses*#momenta super panels
-                for i in 0..eps_sizes.len(){
-                    for j in 0..momentum_sds.len() {
-                        let file_string = format!("{}_HMC_eps_{}_momentum_{}.png", root_signal, eps_sizes[i], momentum_sds[j]);
-                        let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins);
-                        if let Err(err) = check {println!("{}", err);};
-                        ind += 1;
-                        //TODO: Generate histograms for accepted and failed
-                    }
-                }
                 //Base move and motif move each need #base ratio sds * #base linear sds
                 for i in 0..base_ratio_sds.len(){
                     for j in 0..base_linear_sds.len() {
@@ -408,39 +357,6 @@ fn main() {
 
     }
 
-    //let init_sd: f64 = MOMENTUM_SD.read().expect("Nothing should write to this right now");
-    /*let (number_burn_in, new_sd) = current_trace.burn_in_momentum(*(MOMENTUM_SD.read().expect("Nothing should write to this right now")), &mut rng);
-
-    println!("Momentum burn in took {} trials to stabilize to sd of {}", number_burn_in, new_sd);
-
-    let new_momentum_dist = Normal::new(0.0, new_sd).unwrap();
-
-    for step in 0..num_advances {
- 
-        let (selected_move, accepted) = current_trace.advance(&new_momentum_dist, &mut rng);
-
-        trials[selected_move] += 1;
-        if accepted {acceptances[selected_move] += 1;}
-        rates[selected_move] = (acceptances[selected_move] as f64)/(trials[selected_move] as f64);
-
-        //println!("Step {} ", step);
-        if step % 10 == 0 {
-            println!("Step {}. Trials/acceptences/acceptance rates for {:?}, base leaping, and HMC, respectively are: {:?}/{:?}/{:?}", step, RJ_MOVE_NAMES, trials, acceptances, rates);
-            if (acceptances[5]-track_hmc) == 0 {
-                println!("Not really changing motif???");
-                println!("{:?}", current_trace.current_set_to_print());
-            }
-            track_hmc=acceptances[5];
-        }
-        if step % save_step == 0 {
-            
-            current_trace.save_trace(output_dir, &run_name, step+10000);
-            current_trace.save_and_drop_history(output_dir, &run_name, step+10000);
-
-        }
-
-    }
-*/
     println!("Finished run in {:?}", start_inference_time.elapsed());
 
   

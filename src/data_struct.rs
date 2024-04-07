@@ -1239,7 +1239,6 @@ impl<'a> AllDataUse<'a> {
         for &noi in real_noises.iter()  {
         
             //If noise is exactly 0, we want this to be none and know not to add any noise
-            let noise_dist: Option<Normal> = Normal::new(0.0, noi).ok();
             for &shuf in real_shuffles.iter(){ 
             
 
@@ -1258,16 +1257,8 @@ impl<'a> AllDataUse<'a> {
 
                     *motif = motif.scramble_by_id_to_valid(new_mot_id, false, self.data.seq());
 
-                    if let Some(noise_sampler) = noise_dist {
-
-                        let mut noises: Vec<f64> = vec![0.0; 1+((BASE_L-1)*mot_len)];
-
-                        for i in 1..(noises.len()) { noises[i] = noise_sampler.sample(rng); }
-
-                        //SAFETY: We specifically defined the noises vector to follow length
-                        //invariant of add_momentum
-                        *motif = unsafe{ motif.add_momentum(1.0, &noises, true) };
-
+                    if noi > 0.0 {
+                        *motif = motif.add_noise([noi;3], rng);
                     }
                         
                 }
