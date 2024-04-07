@@ -252,7 +252,7 @@ fn main() {
                      attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
                      (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
 
-            println!("PWM lengths per motif {:?}", current_trace.current_set_to_print().set_iter().map(|a|a.peak_height()).collect::<Vec<_>>());
+            println!("PWM lengths per motif {:?}", current_trace.current_set_to_print().set_iter().map(|a|a.len()).collect::<Vec<_>>());
             ind += 1;
             println!("Base leap move (always accepts). Times {}.", attempts_per_move[ind]);
             ind += 1;
