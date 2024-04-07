@@ -102,7 +102,7 @@ fn main() {
         PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(extend_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
     } else {
 
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
     if init_check_index > 11 { 
         let pwm_alpha: f64 = args[11].parse().expect("We already checked that this parsed to f64");
