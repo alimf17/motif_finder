@@ -3751,7 +3751,7 @@ impl<'a> SetTrace<'a> {
 
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SetTraceDef {
 
     trace: Vec<StrippedMotifSet>,
