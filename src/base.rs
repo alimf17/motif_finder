@@ -2295,7 +2295,7 @@ impl<'a> MotifSet<'a> {
 
         let mut replacement = new_set.set[c_id].clone();
         
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE];
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE]*0.25;
 
         let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd*scaler, linear_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
