@@ -496,8 +496,10 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
     let cis = create_credible_intervals(samples, credible);
 
+    println!("Finished cred");
     for j in 0..num_bases {
         
+        println!("{j}");
 
         let mut chart = ChartBuilder::on(&(panels[j])).margin(10).caption(format!("Base {}", j).as_str(), ("serif", 20))
             .build_cartesian_2d(-(4.0*SQRT_2/3.)..(2.0*SQRT_2/3.), -(2.*SQRT_2*SQRT_3/3.)..(2.*SQRT_2*SQRT_3/3.)).unwrap();
@@ -624,23 +626,25 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
     let (num_samples, _num_bases, _) = samples.dim();
     let credible = credible.min(1.0);
     let num_interval = ((num_samples as f64)*credible).floor() as u32;
+    println!("samples dim  {:?}, num_interval {} credible {credible}", samples.dim(), num_interval);
 
-    let z_steps: usize = ((4./3.)/INTERVAL_CELL_LENGTH).floor() as usize;
-    let x_steps: usize = (SQRT_2/INTERVAL_CELL_LENGTH).floor()  as usize;
-    let y_steps: usize = ((2.*SQRT_2/SQRT_3)/INTERVAL_CELL_LENGTH).floor() as usize;
+    let z_steps: usize = ((4./3.)/INTERVAL_CELL_LENGTH).ceil() as usize;
+    let x_steps: usize = (SQRT_2/INTERVAL_CELL_LENGTH).ceil()  as usize;
+    let y_steps: usize = ((2.*SQRT_2/SQRT_3)/INTERVAL_CELL_LENGTH).ceil() as usize;
 
-    let zs = (0..z_steps).map(|a| -1./3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
-    let xs = (0..x_steps).map(|a| -SQRT_2/3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
-    let ys = (0..y_steps).map(|a| -SQRT_2/SQRT_3+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
-
-
+    let zs = (0..=z_steps).map(|a| -1./3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
+    let xs = (0..=x_steps).map(|a| -SQRT_2/3.+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
+    let ys = (0..=y_steps).map(|a| -SQRT_2/SQRT_3+(a as f64)*INTERVAL_CELL_LENGTH).collect::<Vec<_>>();
 
 
+
+    let mut i = 0;
     
     //This will yield a vector where the ith position corresponds to the cells of the
     //credible region for the ith base
     let credible_cells_vec = samples.axis_iter(ndarray::Axis(1)).map(|base_vecs| {
 
+        println!("initialized {i}");
         //I picked the smallest unsized int that I could: I can have more than 65000 points in a cell
         //theoretically (hard but not impossible). But I can't have more than 4 billion: a million
         //steps still takes a couple of weeks. Billion would just not be practical
@@ -649,16 +653,19 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
 
         for base_vector in base_vecs.axis_iter(ndarray::Axis(0)) {
 
+            println!("b len {}", base_vector.dim());
             let x_ind = ((base_vector[0]-(-SQRT_2/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
             let y_ind = ((base_vector[1]-(-SQRT_2/SQRT_3))/INTERVAL_CELL_LENGTH).floor() as usize;
             let z_ind = ((base_vector[2]-(-1.0/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
-            if x_ind > x_steps { println!("about to break x {} {}", x_ind, x_steps);}
-            if y_ind > y_steps { println!("about to break y {} {}", y_ind, y_steps);}
-            if z_ind > z_steps { println!("about to break z {} {}", z_ind, z_steps);}
+            if x_ind >= x_steps { println!("about to break x {} {}", x_ind, x_steps);}
+            if y_ind >= y_steps { println!("about to break y {} {}", y_ind, y_steps);}
+            if z_ind >= z_steps { println!("about to break z {} {}", z_ind, z_steps);}
+            println!("dim {:?} x {} y {} z {}", cell_counts.dim(), x_ind, y_ind, z_ind);
             cell_counts[[x_ind, y_ind, z_ind]] += 1;
 
         }
 
+        println!("{cell_counts} counts of cell"); 
  
         let mut cells_and_counts = cell_counts.indexed_iter().map(|(a, &b)| (a, b)).collect::<Vec<_>>();
 
@@ -684,6 +691,8 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
         let posterior_sum = space_region.iter().fold((0.0, 0.0, 0.0), |acc, x| (acc.0+x[0], acc.1+x[1], acc.2+x[2]));
         let posterior_mean = [posterior_sum.0/(index as f64), posterior_sum.1/(index as f64), posterior_sum.2/(index as f64)];
 
+        println!("{i} {:?}", posterior_mean);
+        i+=1; 
         (region, posterior_mean)
 
     }).collect::<Vec<_>>();
