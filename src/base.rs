@@ -1804,9 +1804,12 @@ impl<'a> MotifSet<'a> {
         self.ln_post = None;
     }
 
-    fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, rng: &mut R) -> bool {
+    //Note: It is technically allowed to have a negative thermodynamic beta
+    //      This will invert your mechanics to find your LOWEST likelihood region
+    //      Which is bad for most use cases! So be warned. 
+    fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, thermo_beta: f64, rng: &mut R) -> bool {
 
-        let diff_ln_like = new-old;
+        let diff_ln_like = (new-old)*thermo_beta;
 
         //println!("accept ln prob {}", diff_ln_like);
         //Always accept if new likelihood is better
