@@ -157,6 +157,7 @@ pub fn main() {
         buffer.clear();
     }
 
+    //TODO: change out data_name for a way to supply the correct data file to the processing directly
     let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
     all_dat_file.read_to_end(&mut buffer);
     let all_dat: AllData = bincode::deserialize(&buffer).expect("Big trouble if we're saving invalid data files");

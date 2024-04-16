@@ -1222,8 +1222,9 @@ impl<'a> AllDataUse<'a> {
     pub fn number_bp(&self) -> usize {
         self.data.number_bp()
     }
-    
-    pub fn generate_initial_condition_jsons<R: Rng + ?Sized>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: &mut R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
+   
+    /*
+    pub fn generate_initial_condition_jsons<R: Rng>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
 
 
         
@@ -1250,7 +1251,7 @@ impl<'a> AllDataUse<'a> {
                     let mot_len = motif.len();
                     let shuffle_num = shuf.min(mot_len);
 
-                    let Some(&new_mot_id) = self.data.seq().all_kmers_with_exact_hamming(&motif.best_motif(), shuffle_num).choose(rng) else { 
+                    let Some(&new_mot_id) = self.data.seq().all_kmers_with_exact_hamming(&motif.best_motif(), shuffle_num).choose(&mut rng) else { 
                         println!("Did not generate hamming distance {} because there are no relevant motifs with that hamming distance", shuf); 
                         continue; 
                     };
@@ -1258,13 +1259,14 @@ impl<'a> AllDataUse<'a> {
                     *motif = motif.scramble_by_id_to_valid(new_mot_id, false, self.data.seq());
 
                     if noi > 0.0 {
-                        *motif = motif.add_noise([noi;3], rng);
+                        *motif = motif.add_noise([noi;3], &mut rng);
                     }
                         
                 }
 
+                //TODO: when I want to generate random initial conditions, I need to fix this to generate SetTraceDefs directly
 
-                let base_trace = SetTrace::new_trace::<R>(1, self_file_name.clone(), InitializeSet::Set(new_set.reactivate_set(&self)), &self, None);
+                let base_trace = SetTrace::new_trace(1, self_file_name.clone(), Some(new_set.reactivate_set(&self)), rng, &self, None);
 
                 let name_of_init = format!("{}_shuffle_{}_bases_with_noise_{}", init_name, shuf, noi);
 
@@ -1274,7 +1276,7 @@ impl<'a> AllDataUse<'a> {
         };
 
 
-    }
+    }*/
 
 }
 
