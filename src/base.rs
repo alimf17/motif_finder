@@ -1625,26 +1625,38 @@ impl Motif {
     fn little_distance(&self, other_mot: &Vec<Base>) -> f64 {
 
         let total_len = (self.len()).max(other_mot.len());
+ 
 
-        let (pwm_1, pwm_2) = (&self.pwm, other_mot);
+        let (pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self.pwm, other_mot)} else {(other_mot, &self.pwm)};
+
+        let short_len = pwm_short.len();
+        let long_len = pwm_long.len();
+
+
+        let off_center = ((long_len-1)/2) - ((short_len-1)/2)
 
         let mut distance: f64 = 0.0;
 
-        for ind in 0..total_len {
+        if off_center > 0 { 
+            for i in 0..off_center {
+                //TODO: change this to get_unchecked if there's a performance benefit
+                distance += pwm_long[i].dist_sq(None);
+            }
+        }
+        
+        if (short_len+off_center) < long_len {
+            for i in (short_len+off_center-1)..long_len {
+                distance += pwm_long[i].dist_sq(None);
+            }
+        }
 
-            let b1 = pwm_1.get(ind); 
-            let b2 = pwm_2.get(ind);
+        for ind in 0..short_len {
 
+            let b1 = pwm_short[ind]; 
+            let b2 = pwm_long[ind];
             
-            distance += match b1 {
-                Some(b) => b.dist_sq(b2),
-                None => match b2{
-                    Some(bb) => bb.dist_sq(None),
-                    None => { warn!("PWM alignment in distance is causing a complete miss!"); 0.0},
-                },
-            };
+            distance += b1.dist_sq(Some(b2));
             
-
         }
 
 
@@ -2549,24 +2561,28 @@ pub enum InitializeSet<'a,'b, R: Rng + ?Sized>{
 //THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
 //SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
 //AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
-pub struct SetTrace<'a> {
+pub struct SetTrace<'a, R: Rng + ?Sized> {
     trace: Vec<StrippedMotifSet>,
     active_set: MotifSet<'a>,
     all_data_file: String,
     data_ref: &'a AllDataUse<'a>, 
     sparse: usize, 
     sparse_count: usize,
+    thermo_beta: f64,
+    rng: R,
 }
 
 
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_trace<'b, R: Rng + ?Sized>(capacity: usize, all_data_file: String, initial_condition: InitializeSet<'a,'b, R>, data_ref: &'a AllDataUse<'a>, sparse: Option<usize>) -> SetTrace<'a> {
+    pub fn new_trace(capacity: usize, all_data_file: String, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a> {
+
+        thermo_beta = thermo_beta.abs();
 
         let active_set = match initial_condition {
-            InitializeSet::Set(set) => set,
-            InitializeSet::Rng(rng) => MotifSet::rand_with_one(data_ref, rng),
+            Some(set) => set,
+            None => MotifSet::rand_with_one(data_ref, &mut rng),
         };
 
 
@@ -2577,6 +2593,8 @@ impl<'a> SetTrace<'a> {
             data_ref: data_ref, 
             sparse: sparse.unwrap_or(10),
             sparse_count: 0_usize,
+            thermo_beta: thermo_beta,
+            rng: rng,
         }
 
     }
@@ -2585,11 +2603,13 @@ impl<'a> SetTrace<'a> {
     //Panics: if any of base_ratio_sds, base_linear_sds, or height_move_sds are of length 0
     //        or if any of the *per_move vectors are not as least as long as 
     //        2*base_ratio_sds.len()*base_linear_sds.len()+height_move_sds.len()+6
-    pub fn advance<R: Rng + ?Sized>(&mut self, base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64], 
+    pub fn advance(&mut self, base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64], 
                                     attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize], 
-                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>], rng: &mut R) {
+                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]) {
 
         //Number of possible HMCs + number of base scalings + number of possible height moves+number of possible RJ moves+number of shuffle/leap moves
+
+        let rng = &mut self.rng;
 
 
         let move_vec: Vec<usize> = vec![base_ratio_sds.len()*base_linear_sds.len(), 
@@ -3183,6 +3203,28 @@ impl SetTraceDef {
     }
 }
 
+//pub fn new_trace(capacity: usize, all_data_file: String, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a>
+/*
+
+   pub struct SetTrace<'a, R: Rng + ?Sized> {
+    trace: Vec<StrippedMotifSet>,
+    active_set: MotifSet<'a>,
+    all_data_file: String,
+    data_ref: &'a AllDataUse<'a>,
+    sparse: usize,
+    sparse_count: usize,
+    thermo_beta: f64,
+    rng: R,
+}
+
+
+
+   */
+pub struct TemperSetTraces<'a> {
+
+    parallel_traces: Vec<SetTrace<'a>>,
+
+}
 
 
 
