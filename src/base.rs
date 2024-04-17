@@ -3264,6 +3264,25 @@ impl MoveTracker {
         }
     }
 
+    fn document_motion(&mut self, move_id: usize, motion_and_accceptance: Option<([f64;4], bool)>) -> Result<(), String> {
+
+        if move_id >= NUM_MOVES { return Err("Invalid move id".to_string()); }
+
+        self.attempts_per_move[move_id] += 1;
+
+        match motion_and_accceptance {
+            None => {self.immediate_failures_per_move[move_id] += 1;},
+            Some((move_arr, accept)) => {
+                if accept { self.successes_per_move[move_id] += 1;}
+                self.distances_per_attempted_move[move_id].push((move_arr, accept));
+            },
+        };
+
+        Ok(())
+
+    }
+
+
     pub fn give_status(&self) {
         let mut ind: usize = 0;
             for i in 0..BASE_RATIO_SDS.len(){
