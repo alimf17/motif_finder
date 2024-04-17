@@ -34,6 +34,8 @@ use once_cell::sync::Lazy;
 use rayon::prelude::*;
 
 use plotters::prelude::*;
+use plotters::coord::types::RangedSlice;
+use plotters::coord::Shift;
 
 use log::warn;
 
@@ -3228,6 +3230,203 @@ impl SetTraceDef {
 
 
    */
+
+//base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64],
+//                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
+//                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]
+
+const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
+const BASE_LINEAR_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
+const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
+
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
+
+pub struct MoveTracker {
+
+    attempts_per_move: [usize; NUM_MOVES],
+    successes_per_move: [usize; NUM_MOVES], 
+    immediate_failures_per_move: [usize; NUM_MOVES], 
+    distances_per_attempted_move: [Vec<([f64; 4], bool)>; NUM_MOVES], 
+
+}
+
+impl MoveTracker {
+
+    pub fn new(likely_steps: usize) -> Self {
+
+        let distances_per_attempted_move: [Vec::<([f64; 4], bool)>; NUM_MOVES] = core::array::from_fn(|a| Vec::<([f64; 4], bool)>::with_capacity(likely_steps));
+
+        MoveTracker {
+            attempts_per_move: [0; NUM_MOVES],
+            successes_per_move: [0; NUM_MOVES],
+            immediate_failures_per_move: [0; NUM_MOVES],
+            distances_per_attempted_move: distances_per_attempted_move,
+        }
+    }
+
+    pub fn give_status(&self) {
+        let mut ind: usize = 0;
+            for i in 0..BASE_RATIO_SDS.len(){
+                for j in 0..BASE_LINEAR_SDS.len() {
+                    println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                             BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                             (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+                    ind += 1;
+                }
+            }
+            for i in 0..BASE_RATIO_SDS.len(){
+                for j in 0..BASE_LINEAR_SDS.len() {
+                    println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                             BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                             (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+                    ind += 1;
+                }
+            }
+            for i in 0..HEIGHT_SDS.len() {
+                println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                         HEIGHT_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                         (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+                ind += 1;
+            }
+            println!("New motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
+
+            println!("Kill motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Extend motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Contract motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+
+            ind += 1;
+            println!("Base leap move (always accepts). Times {}.", self.attempts_per_move[ind]);
+            ind += 1;
+            println!("Secondary shuffle move (always accepts). Times {}.", self.attempts_per_move[ind]);
+    }
+   
+
+    fn sort_move_hists<DB: DrawingBackend>(&self, move_id: usize, plotting: &DrawingArea<DB, Shift>, num_bins: usize) -> Result<(), String>{
+
+        if move_id >= NUM_MOVES { return Err("Invalid move id".to_string()); }
+        
+        let data = &self.distances_per_attempted_move[move_id];
+        
+        if data.len() == 0 {return Err("No data for plotting".to_string());}
+
+        plotting.fill(&WHITE).expect("This should just work");
+
+
+        let left_subs = plotting.split_evenly((2,2));
+
+        let labs = ["Occupancy Signal RMSE between moves", "Finite Likelihood differences", "Euclidean distance of heights", "Total distance of all PWMs"];
+
+        for (j, area) in left_subs.iter().enumerate() {
+            let trial_data = data.iter().map(|(a, _)| a[j]).collect::<Vec<_>>();
+            let trial_data_2 = data.iter().filter(|(_, b)| *b).map(|(a, _)| a[j]).collect::<Vec<_>>();
+            let hist = quick_hist(&trial_data, &trial_data_2, area, labs[j].clone().to_string(), num_bins);
+        }
+        Ok(())
+
+    }
+
+
+}
+
+fn build_hist_bins(mut data: Vec<f64>, mut data_2: Vec<f64>, num_bins: usize) -> (Vec<f64>, Vec<(f64, f64)>, Vec<(f64, f64)>) {
+
+    let length = data.len() as f64;
+
+    let mut big_data = data.clone();
+
+    big_data.append(&mut data_2.clone());
+
+    data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    data_2.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
+    big_data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let min = big_data[0];
+    let max = *big_data.last().unwrap();
+
+    let step = (max-min)/(num_bins as f64);
+
+    let add_into = 1./length;
+
+    let xs = (0..num_bins).map(|i| (min+(i as f64)*step)).collect::<Vec<_>>();
+
+    let mut bins: Vec<(f64, f64)> = xs.iter().clone().map(|&x| (x, 0.0)).collect();
+
+    let mut bins_2 = bins.clone();
+
+    let mut j: usize = 1;
+    let mut k: usize = 1;
+    for &dat in data.iter() {
+
+        //Because data and bins are sorted, we only need to find the first bin
+        //where the data is less than the top end. We use short circuit && to prevent overflow
+        while (j < (bins.len()-1)) && (dat >= bins[j+1].0) { j+= 1;}
+
+        bins[j].1 += add_into;
+
+    }
+    for &dat in data_2.iter() {
+
+        //Because data and bins are sorted, we only need to find the first bin
+        //where the data is less than the top end. We use short circuit && to prevent overflow
+        while (k < (bins.len()-1)) && (dat >= bins[k+1].0) { k+= 1;}
+
+        bins_2[k].1 += add_into;
+
+    }
+
+    (xs, bins, bins_2)
+
+}
+
+fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw_data_2: &[N], area: &'a DrawingArea<DB, Shift>, label: String, num_bins: usize) -> ChartBuilder<'a, 'b, DB> {
+
+            let mut hist = ChartBuilder::on(area);
+
+            hist.margin(10).set_left_and_bottom_label_area_size(20);
+
+            hist.caption(label, ("Times New Roman", 20));
+
+            let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).collect();
+            let mut data_2: Vec<f64> = raw_data_2.iter().map(|&a| a.into()).collect();
+
+
+            let (xs, hist_form, hist_form_2) = build_hist_bins(data, data_2, num_bins);
+
+            let range = RangedSlice::from(xs.as_slice());
+
+            let max_prob = hist_form.iter().map(|&x| x.1).fold(0_f64, |x,y| x.max(y));
+
+            let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
+
+            hist_context.configure_mesh().disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
+
+            //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
+            hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.mix(0.2).filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap();
+
+
+            hist_context.draw_series(Histogram::vertical(&hist_context).style(RED.mix(0.2).filled()).margin(0).data(hist_form_2.iter().map(|x| (&x.0, x.1)))).unwrap();
+
+            hist
+
+}
+
+
+
+
 pub struct TemperSetTraces<'a, R: Rng > {
 
     //Each trace knows its thermodynamic beta
@@ -3281,6 +3480,9 @@ impl<'a, R: Rng> TemperSetTraces<'a, R> {
         Ok(TemperSetTraces { parallel_traces: parallel_traces })
     }
 
+    pub fn iter_and_swap(&mut self, iters_before_swaps: usize) {
+
+    }
 }
 
 pub enum InitializationError {
