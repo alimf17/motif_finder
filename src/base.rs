@@ -23,7 +23,9 @@ use itertools::Itertools;
 use rand::Rng;
 use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
-use rand::distributions::{Distribution, WeightedIndex};
+use rand::distributions::{Distribution, Uniform, WeightedIndex};
+
+use  rand_distr::weighted_alias::*;
 
 use statrs::{consts, StatsError};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
@@ -137,6 +139,25 @@ const SD_LEAST_MOVE_SINGLE: f64 = 1.0;
 const HEIGHT_MOVE_SD: f64 = 1.0;
 
 const PROB_POS_PEAK: f64 = 0.9;
+
+
+
+const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
+const BASE_LINEAR_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
+ 
+const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
+                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
+
+
+const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
+
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
+const VARIANT_NUMS: [usize; 6] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1]; 
+
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 12, 1, 1]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+
+static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
+
 
 //This controls how much shuffling we do for the secondary base shuffling move
 //Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
@@ -2087,7 +2108,7 @@ impl<'a> MotifSet<'a> {
     }
 
     //Panics: if which_rj >= number of rj moves encoded here
-    fn run_rj_move_known<R: Rng + ?Sized>(&self, which_rj: usize, thermo_beta: f64, rng: &mut R) -> (Option<Self>, bool) {
+    fn run_rj_move_known<R: Rng + ?Sized>(&self, which_rj: usize, thermo_beta: f64, rng: &mut R) -> Option<(Self, bool)> {
 
         let proposal: Option<(Self, f64)> = match which_rj {
 
@@ -2103,11 +2124,11 @@ impl<'a> MotifSet<'a> {
 
             None => {
                 //println!("Failed move {}", which_rj);
-                (None, false)
+                None
             },
             Some((new_mot, modded_ln_like)) => {
                 let accepted = Self::accept_test(self.ln_post.unwrap(), modded_ln_like, thermo_beta, rng);
-                (Some(new_mot), accepted)
+                Some((new_mot, accepted))
             }
         }
     }
@@ -2603,96 +2624,62 @@ impl<'a, R: Rng> SetTrace<'a, R> {
 
     pub fn thermo_beta(&self) -> f64 { self.thermo_beta }
 
-    //Panics: if any of base_ratio_sds, base_linear_sds, or height_move_sds are of length 0
-    //        or if any of the *per_move vectors are not as least as long as 
-    //        2*base_ratio_sds.len()*base_linear_sds.len()+height_move_sds.len()+6
-    pub fn advance(&mut self, base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64], 
-                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize], 
-                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]) {
+    pub fn advance(&mut self, track: Option<&mut MoveTracker>) { 
 
-        //Number of possible HMCs + number of base scalings + number of possible height moves+number of possible RJ moves+number of shuffle/leap moves
 
         let rng = &mut self.rng;
 
+        let which_move = PICK_MOVE.sample(rng);
 
-        let move_vec: Vec<usize> = vec![base_ratio_sds.len()*base_linear_sds.len(), 
-                                            base_ratio_sds.len()*base_linear_sds.len(), height_move_sds.len(), 4, 1, 1]; 
-
-        let split_arr = [Some(base_linear_sds.len()), Some(base_linear_sds.len()), None, None, None, None];
-
-        let acc_vec = move_vec.iter().scan(0, |s, a| {*s += *a; Some(*s)}).collect::<Vec<usize>>();
-
-        let select_move: usize = rng.gen_range(0..*acc_vec.last().expect("We have at least two elements in this, guaranteed"));
-
-        let (which_move, which_variant): (usize, usize) = match acc_vec.iter().rposition(|&x| select_move >= x) { Some(i) => (i+1, select_move-acc_vec[i]), None => (0, select_move) };
-
-        let (first, maybe_sec) = match split_arr[which_move] { Some(split) => (which_variant/split, Some(which_variant % split)), None => (which_variant, None) };
+        let which_variant = SAMPLE_VARIANTS[which_move].sample(rng); 
 
         //Can't use non const values in match statements. Using a bajillion if-elses 
         
-        let (potential_set, accept) = match which_move {
+        let potential_set_and_accept = match which_move {
         
             0 =>  {
-                let ratio_s = base_ratio_sds[first];
-                let liney_s = base_linear_sds[maybe_sec.expect("This move has two pars")];
-                match self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s) {
-                    None => {
-                        (None, false)
-                    },
-                    Some((mut new_mot, modded_ln_like)) => {
-                        let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
-                        (Some(new_mot), accepted)
-                    }
-                }
+                let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
+                self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s).map(|(mut new_mot, modded_ln_like)| { 
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
+                    (new_mot, accepted)
+                })
             }, 
             1 =>  {
-                let ratio_s = base_ratio_sds[first];
-                let liney_s = base_linear_sds[maybe_sec.expect("This move has two pars")];
-                match self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s) {
-                    None => {
-                        (None, false)
-                    },
-                    Some((mut new_mot, modded_ln_like)) => {
-                        let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
-                        (Some(new_mot), accepted)
-                    }
-                }
-            },
+                let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
+                self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s).map(|(mut new_mot, modded_ln_like)| { 
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
+                    (new_mot, accepted)
+                })
+            }, 
             2 => {
-                let height_sd = height_move_sds[first];
-                match self.active_set.propose_height_move_custom(rng, height_sd) {
-                    None => (None, false),
-                    Some((mut new_mot, modded_ln_like)) => {
+                let height_sd = HEIGHT_SDS[which_variant];
+                self.active_set.propose_height_move_custom(rng, height_sd).map(|(mut new_mot, modded_ln_like)| {
                         let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
-                        (Some(new_mot), accepted)
-                    }
-                }
+                        (new_mot, accepted)
+                })
             },
-            3 => self.active_set.run_rj_move_known(first, self.thermo_beta, rng),
-            4 => (Some(self.active_set.base_leap(rng)), true),
-            5 => (Some(self.active_set.secondary_shuffle(rng)), true),
+            3 => self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng),
+            4 => Some((self.active_set.base_leap(rng), true)),
+            5 => Some((self.active_set.secondary_shuffle(rng), true)),
             _ => unreachable!(),
 
         };
-      
+ 
+
         //attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
         //                            distances_per_attempted_move
 
-        attempts_per_move[select_move] += 1; 
 
-        let set_to_add = match potential_set {
-            None => {
-                immediate_failures_per_move[select_move] += 1;
-                self.active_set.clone()
-            }
-            Some(mut actual_set) => {
-                distances_per_attempted_move[select_move].push((self.active_set.measure_movement(&mut actual_set), accept));
-                if accept{
-                    successes_per_move[select_move] += 1;
-                    actual_set
-                } else { self.active_set.clone() }
+        let (set_to_add, movement_tracker) = match potential_set_and_accept {
+            None => (self.active_set.clone(), None),
+            Some((mut actual_set, accept)) => {
+                let tracked = self.active_set.measure_movement(&mut actual_set);
+                let setting = if accept { actual_set } else { self.active_set.clone() };
+                (setting, Some((tracked, accept)))
             }
         };
+        
+        if let Some(tracker) = track {tracker.document_motion(which_move, movement_tracker);} ;
 
         self.sparse_count = (self.sparse_count+1) % self.sparse;
 
@@ -3234,12 +3221,6 @@ impl SetTraceDef {
 //base_ratio_sds: &[f64], base_linear_sds: &[f64], height_move_sds: &[f64],
 //                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
 //                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]
-
-const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
-const BASE_LINEAR_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
-const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
-
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
 
 pub struct MoveTracker {
 

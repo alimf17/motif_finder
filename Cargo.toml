@@ -33,6 +33,7 @@ spectrum-analyzer = "1.4.0"
 flamegraph = "0.6.4"
 bincode = "1.3.3"
 thiserror = "1.0.50"
+rand_distr = "0.4.3"
 
 [dev-dependencies]
 criterion = "0.3"

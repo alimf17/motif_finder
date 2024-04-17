@@ -1455,6 +1455,7 @@ dependencies = [
  "plotters",
  "poloto",
  "rand",
+ "rand_distr",
  "rayon",
  "regex",
  "serde",
