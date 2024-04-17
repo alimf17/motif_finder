@@ -3222,6 +3222,7 @@ impl SetTraceDef {
 //                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
 //                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]
 
+#[derive(Clone)]
 pub struct MoveTracker {
 
     attempts_per_move: [usize; NUM_MOVES],
@@ -3426,11 +3427,16 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 
 
 
+pub enum TrackingOptions {
+    NoTracking,
+    TrackTrueTrace,
+    TrackAllTraces,
+}
 
-pub struct TemperSetTraces<'a, R: Rng > {
+pub struct TemperSetTraces<'a, R: Rng> {
 
     //Each trace knows its thermodynamic beta
-    parallel_traces: Vec<SetTrace<'a, R>>,
+    parallel_traces: Vec<(SetTrace<'a, R>, Option<MoveTracker>)>,
 
 }
 
@@ -3444,7 +3450,7 @@ impl<'a, R: Rng> TemperSetTraces<'a, R> {
     //      parallel_traces.len() >= 2
     //      parallel_traces[0] will always have thermo_beta = 1_f64. Because of this, it is the "canonical" trace, and the others "just" seed it periodically
     //      parallel_traces.last().unwrap() will never panic, and will always have thermo_beta = min_thermo_beta
-    pub fn new_parallel_traces(min_thermo_beta: f64, half_num_intermediate_traces: usize, capacity_per_trace: usize, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng_maker: &dyn Fn() -> R) -> Result<Self, InitializationError> {
+    pub fn new_parallel_traces(min_thermo_beta: f64, half_num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng_maker: &dyn Fn() -> R) -> Result<Self, InitializationError> {
     
         if let Some(a) = initial_condition.as_ref(){
             if !ptr::eq(a.data_ref, data_ref) { return Err(InitializationError::UnsynchedData); }
@@ -3468,13 +3474,20 @@ impl<'a, R: Rng> TemperSetTraces<'a, R> {
             thermos[i] = 1_f64-(i as f64)*thermo_step
         }
 
-        let mut parallel_traces: Vec<SetTrace<_>> = Vec::with_capacity(thermos.len());
+        let mut parallel_traces: Vec<(SetTrace<_>, Option<MoveTracker>)> = Vec::with_capacity(thermos.len());
 
         //pub fn new_trace(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a>
 
+        let mut past_initial: bool = false;
+
         for thermo_beta in thermos {
             let rng = rng_maker();
-            parallel_traces.push(SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), data_ref, thermo_beta, sparse, rng));
+            let potential_tracker = match how_to_track {
+                TrackingOptions::NoTracking => None, 
+                TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),
+                TrackingOptions::TrackTrueTrace => if past_initial { None } else { Some(MoveTracker::new(step_num_estimate)) },
+            };
+            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), data_ref, thermo_beta, sparse, rng), potential_tracker));
         }
 
         Ok(TemperSetTraces { parallel_traces: parallel_traces })
