@@ -49,7 +49,7 @@ pub struct AllData {
 
     seq: Sequence,
     data: WaveformDef, 
-    background: Background
+    background: Background,
 
 }
 

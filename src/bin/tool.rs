@@ -1,10 +1,13 @@
 
+
 use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL};
 use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use motif_finder::base::*;
 use motif_finder::waveform::*;
 use motif_finder::data_struct::*;
 use motif_finder::modified_t::SymmetricBaseDirichlet;
+
+use log::warn;
 
 use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
@@ -75,7 +78,7 @@ fn main() {
     min_thermo_beta = min_thermo_beta.abs();
 
     if min_thermo_beta > 1.0 {
-        warn!("Your min thermodynamic beta was set > 1.0! We're taking the reciprocal!")
+        warn!("Your min thermodynamic beta was set > 1.0! We're taking the reciprocal!");
         min_thermo_beta = 1.0/min_thermo_beta;
     }
     
@@ -163,41 +166,58 @@ fn main() {
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+2);
 
+    let steps_per_exchange_attempt: usize = 500;
 
 
     let mut rng = rand::thread_rng();
     
-    let check: Option<&str> = match args.get(init_check_index) { Some(x) => Some(x.as_str()), None => None};
-    match check {
-
-        Some("meme") => current_trace.trace_from_meme(args.get(init_check_index+1).expect("Must include a string indicating MEME output file").as_str(),data.seq(), MAX_E_VAL, &mut rng),
-        Some("json") => {
-            //If you're picking up from a JSON, you have the right to tell the motif finder to trust your motif set and minimize recalculation.
-            //Note that it doesn't COMPLETELY trust you: it will validate on making sure your motif set signal is compatible with your processed ChIP data regardless. 
-            //The default behavior is that it doesn't trust you.
-            let (validate, mut maybe_rng) = match args.get(init_check_index+1).map(|x| x.parse::<bool>().ok()).flatten() { 
-                None | Some(false) => (true, Some(&mut rng)),
-                Some(true) => (false, None),
-            };
-            current_trace.push_last_state_from_json(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a Json output file").as_str());
+    let check: Option<(&str, &str)> = match args.get(init_check_index) { 
+        Some(x) => { 
+            match args.get(init_check_index+1) {
+                Some(y) => Some((x.as_str(), y.as_str())), 
+                None => None,
+            }
         },
-        Some("bincode") => {
-            let (validate, mut maybe_rng) = match args.get(init_check_index+1).map(|x| x.parse::<bool>().ok()).flatten() {
-                None | Some(false) => (true, Some(&mut rng)),
-                Some(true) => (false, None),
-            };
-            println!("bincode");
-            current_trace.push_last_state_from_bincode(validate, validate, &mut maybe_rng, args.get(init_check_index+1).expect("Must inlcude a string indicating a bincode output file").as_str());
-        }
-        _ => (),
+        None => None,
+    };
+    let maybe_init = match check {
+
+        Some(("meme", meme_file)) => {
+            match MotifSet::set_from_meme(&meme_file , &data_ref, MAX_E_VAL, &mut rng) { 
+                Err(e) => { 
+                    eprintln!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
+                    None
+                },
+                Ok(m) => Some(m),
+            }
+        },
+        Some(("json", json_file)) => {
+            match MotifSet::set_from_json(&data_ref, true, true, json_file, &mut rng) { 
+                Err(e) => { 
+                    eprintln!("Json file did not parse. Using random initial condition instead. Reason:\n {}", e);
+                    None
+                },
+                Ok(m) => Some(m),
+            }
+        },
+        Some(("bincode", bincode_file)) => {
+            match MotifSet::set_from_bincode(&data_ref, true, true, bincode_file, &mut rng) { 
+                Err(e) => { 
+                    eprintln!("Bincode file did not parse. Using random initial condition instead. Reason:\n {}", e);
+                    None
+                },
+                Ok(m) => Some(m),
+            }
+        },
+        _ => None,
     };
 
     //    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
 
-    let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, &TrackingOptions::TrackAllTraces, &data_ref, maybe_init, None, &mut rng).unwrap();
+    let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, &data_ref, maybe_init, None, &mut rng).unwrap();
 
 
-    println!("init {:?}", current_trace.current_set_to_print());
+
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
@@ -206,110 +226,30 @@ fn main() {
     let start_inference_time = Instant::now();
 
     //for step in 0..10000 {
+
+    let pushes = num_advances/steps_per_exchange_attempt + ((num_advances % steps_per_exchange_attempt) > 0) as usize;
  
-    for step in 0..num_advances {
-        current_trace.advance(&base_ratio_sds, &base_linear_sds, &height_sds, 
-                              &mut attempts_per_move, &mut successes_per_move, &mut immediate_failures_per_move, 
-                              &mut distances_per_attempted_move, &mut rng);
+    for step in 0..pushes {
 
-        if step % 100 == 0 {
+        initialization_chains.iter_and_swap(steps_per_exchange_attempt, rand::thread_rng);
 
-            //Do all available MoveTracker prints here
+        if step % 5 == 0 {
 
-            if ((step >= 10000) && ((step % 10000) == 0)) || (step+1 == num_advances){
+            initialization_chains.print_acceptances(TrackingOptions::TrackAllTraces);
+
+            if ((step > 0) && ((step % 50) == 0)) || (step+1 == pushes){
             
-                let root_signal: String = format!("{}/{}_step_{:0>7}_dist_of",output_dir,run_name, step);
+                let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
 
                 let num_bins: usize = 100;
+
+                initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
                 
-                let mut ind = 0_usize;
-                //TODO: 
-                //Move histograms:
-                //Each histogram needs 8 panels apiece, split into two batches of four:
-                //      one for acccepted moves, the other for attempted failures.
-                //      1) RMSE, 2) Finite likelihood differences (with a blur of text indicating proportion of infinities)
-                //      3) Euclidean distance of heights 4) Euclidean distances of PWMs
-
-                //All necessary data is found in the distances_per_attempted_move: Vec<Vec<([f64; 4], bool)>>
-
-                //Base move and motif move each need #base ratio sds * #base linear sds
-                for i in 0..base_ratio_sds.len(){
-                    for j in 0..base_linear_sds.len() {
-                        let file_string = format!("{}_base_scale_ratio_sd_{}_linear_sd_{}.png", root_signal, base_ratio_sds[i], base_linear_sds[j]);
-                        let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                        if let Err(err) = check {println!("{}", err);};
-                        ind += 1;
-                        //TODO: Generate histograms for accepted and failed
-                    }
-                }
-                for i in 0..base_ratio_sds.len(){
-                    for j in 0..base_linear_sds.len() {
-                        let file_string = format!("{}_motif_scale_ratio_sd_{}_linear_sd_{}.png", root_signal, base_ratio_sds[i], base_linear_sds[j]);
-                        let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                        let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                        if let Err(err) = check {println!("{}", err);};
-                        ind += 1;
-                        //TODO: Generate histograms for accepted and failed
-                    }
-                }
-                //Height moves needs # of height sds
-                for i in 0..height_sds.len() {
-                    let file_string = format!("{}_height_sd_{}.png", root_signal, height_sds[i]);
-                    let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                    let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                    if let Err(err) = check {println!("{}", err);};
-                    ind += 1;
-                    //TODO: Generate histograms for accepted and failed
-                }
-                let file_string = format!("{}_motif_birth.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                if let Err(err) = check {println!("{}", err);};
-                ind += 1;
-                //TODO: Generate histograms for accepted and failed
-                let file_string = format!("{}_motif_death.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                ind += 1;
-                //TODO: Generate histograms for accepted and failed
-
-                //PWM expand and contract are fairly normal, all things considered
-                let file_string = format!("{}_motif_expand.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                if let Err(err) = check {println!("{}", err);};
-                ind += 1;
-                //TODO: Generate histograms for accepted and failed
-                let file_string = format!("{}_motif_contract.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                if let Err(err) = check {println!("{}", err);};
-                ind += 1;
-                //TODO: Generate histograms for accepted and failed
-
-                //The two gibbs moves do not need failure panels
-                let file_string = format!("{}_base_leap.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                if let Err(err) = check {println!("{}", err);};
-                ind += 1;
-                //TODO: Generate histograms for accepted
-                let file_string = format!("{}_secondary_shuffle.png", root_signal);
-                let plotting = BitMapBackend::new(&file_string, (5000, 3000)).into_drawing_area();
-                let check = sort_move_hists(&distances_per_attempted_move[ind], &plotting, num_bins); 
-                if let Err(err) = check {println!("{}", err);};
-                ind += 1;
-                //TODO: Generate histograms for accepted
             }
         }
         if (step+1) % save_step == 0 {
             
-            current_trace.save_trace(output_dir, &run_name, step);
-            current_trace.save_and_drop_history(output_dir, &run_name, step);
-
-
-
+            initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
 
         }
 
@@ -321,96 +261,3 @@ fn main() {
 
 
 }
-
-fn sort_move_hists<DB: DrawingBackend>(data: &Vec<([f64; 4], bool)>, plotting: &DrawingArea<DB, Shift>, num_bins: usize) -> Result<(), String>{
-
-    if data.len() == 0 {return Err("No data for plotting".to_string());}
-
-    plotting.fill(&WHITE).expect("This should just work");
-
-    let (left, right) = plotting.split_horizontally((50).percent_width());
-
-    let lchart = ChartBuilder::on(&left).margin(30).set_label_area_size(LabelAreaPosition::Top, 60).caption("Accepted Moves", ("sans-serif", 50));
-    let rchart = ChartBuilder::on(&right).margin(30).set_label_area_size(LabelAreaPosition::Top, 60).caption("All Moves", ("sans-serif", 50));
-
-    let left_subs = left.split_evenly((2,2));
-    let right_subs = right.split_evenly((2,2));
-
-
-    let labs = ["Occupancy Signal RMSE between moves", "Finite Likelihood differences", "Euclidean distance of heights", "Total distance of all PWMs"];
-
-    for (j, area) in right_subs.iter().enumerate() {
-        let trial_data = data.iter().map(|(a, _)| a[j]).collect::<Vec<_>>();
-        let hist = quick_hist(&trial_data, area, labs[j].clone().to_string(), num_bins);
-    }
-
-    for (j, area) in left_subs.iter().enumerate() {
-        let trial_data = data.iter().filter(|(_, b)| *b).map(|(a, _)| a[j]).collect::<Vec<_>>();
-        let hist = quick_hist(&trial_data, area, labs[j].clone().to_string(), num_bins);
-    }
-
-    Ok(())
-
-}
-
-fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], area: &'a DrawingArea<DB, Shift>, label: String, num_bins: usize) -> ChartBuilder<'a, 'b, DB> {
-
-            let mut hist = ChartBuilder::on(area);
-
-            hist.margin(10).set_left_and_bottom_label_area_size(20);
-
-            hist.caption(label, ("Times New Roman", 20));
-
-            let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).filter(|a| a.is_finite()).collect();
-
-            if data.len() > 0 {
-            
-                let (xs, hist_form) = build_hist_bins(data, num_bins);
-
-                let range = RangedSlice::from(xs.as_slice());
-
-                let max_prob = hist_form.iter().map(|&x| x.1).fold(0_f64, |x,y| x.max(y));
-
-                let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
-
-                hist_context.configure_mesh().disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
-
-                //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
-                hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap();
-            }
-
-            hist
-}
-
-
-fn build_hist_bins(mut data: Vec<f64>, num_bins: usize) -> (Vec<f64>, Vec<(f64, f64)>) {
-
-    let length = data.len() as f64;
-
-    data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-
-    let min = data[0];
-    let max = *data.last().unwrap();
-
-    let step = (max-min)/(num_bins as f64);
-
-    let add_into = 1./length;
-
-    let xs = (0..num_bins).map(|i| (min+(i as f64)*step)).collect::<Vec<_>>();
-
-    let mut bins: Vec<(f64, f64)> = xs.iter().clone().map(|&x| (x, 0.0)).collect();
-
-    let mut j: usize = 1;
-
-    for &dat in data.iter() {
-
-        //Because data and bins are sorted, we only need to find the first bin
-        //where the data is less than the top end. We use short circuit && to prevent overflow 
-        while (j < (bins.len()-1)) && (dat >= bins[j+1].0) { j+= 1;}
-        bins[j].1 += add_into;
-    }
-
-    (xs, bins)
-
-}
-

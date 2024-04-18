@@ -155,7 +155,7 @@ const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
 const VARIANT_NUMS: [usize; 6] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 12, 1, 1]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -3607,6 +3607,16 @@ impl<'a> TemperSetTraces<'a> {
 
     }
 
+    //    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+    pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+
+        self.parallel_traces[0].0.save_trace(output_dir, run_name, zeroth_step);
+        self.parallel_traces[0].0.save_and_drop_history(output_dir, run_name, zeroth_step);
+
+        for i in 1..self.parallel_traces.len() { self.parallel_traces[i].0.drop_history(); }
+
+    }
 }
 
 pub enum InitializationError {

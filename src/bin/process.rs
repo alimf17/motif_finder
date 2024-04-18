@@ -158,11 +158,10 @@ pub fn main() {
     }
 
     //TODO: change out data_name for a way to supply the correct data file to the processing directly
-    let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
+    /*let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
     all_dat_file.read_to_end(&mut buffer);
     let all_dat: AllData = bincode::deserialize(&buffer).expect("Big trouble if we're saving invalid data files");
-    let all_dat_use: AllDataUse = AllDataUse::new(&all_dat).expect("Big trouble if we're saving invalid data files");
- 
+    let all_dat_use: AllDataUse = AllDataUse::new(&all_dat).expect("Big trouble if we're saving invalid data files");*/
 
     //set_trace_collections is now the chains we want
     
@@ -304,23 +303,24 @@ pub fn main() {
         plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
-    
+   
+    /*
     let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
     let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&all_dat).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    };
+    }; */
 
+    /*
     let mut plot_like = poloto::plot(format!("{} Median distance to data", base_file), "Step", "Median Dist");
     let plot_like_file = fs::File::create(format!("{}/{}_med_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_like.line(format!("Chain {}", letter), trace.wave_dist_trace(&all_dat_use).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    };
+    };*/
 
-
-    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
+    //plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
     
     let mut rng = rand::thread_rng();
     

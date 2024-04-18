@@ -8,7 +8,7 @@ use std::{fs};
 
 
 fn main() {
-
+/*
     let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/MG1655_GSM639836_TrpR_Trp_ln_ratio_custom_scale_1_25_data.bin";
 
     let bincode_string = bincode_file.to_owned();
@@ -140,7 +140,7 @@ fn main() {
     swi_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "swi_set", 0);
 
 
-
+*/
 
 
 }
