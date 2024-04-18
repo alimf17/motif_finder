@@ -3381,10 +3381,8 @@ impl MoveTracker {
 
     }
 
-    fn all_move_hists<DB: DrawingBackend>(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
+    fn all_move_hists(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
         
-        
-
         let v: Vec<String> = (0..NUM_MOVES).map(|i|
                                                 {
                                                     let file = format!("{}{}", base_file_name,HIST_END_NAMES[i]);
@@ -3581,7 +3579,33 @@ impl<'a> TemperSetTraces<'a> {
         });
     }
 
+    pub fn print_acceptances(&self, track: TrackingOptions) {
 
+        let tracker = self.track.min(track);
+
+        match tracker {
+            TrackingOptions::NoTracking => (),
+            TrackingOptions::TrackTrueTrace => {self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
+            TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| b.1.as_ref().map(|a| a.give_status())).collect::<Vec<_>>();},
+        }
+
+    }
+
+    pub fn handle_histograms(&self, track: TrackingOptions, pre_file_name: &str, num_bins: usize) {
+        let tracker = self.track.min(track);
+        
+        match tracker {
+            TrackingOptions::NoTracking => (),
+            TrackingOptions::TrackTrueTrace => {self.parallel_traces[0].1.as_ref().map(|a| a.all_move_hists(pre_file_name, num_bins));},
+            TrackingOptions::TrackAllTraces => {self.parallel_traces.par_iter().map(|b| b.1.as_ref()
+                                                                                .map(|a| {
+                                                                                    let alter_name = format!("{}_thermo_beta_{}", pre_file_name, b.0.thermo_beta);
+                                                                                    a.all_move_hists(&alter_name, num_bins)
+                                                                                })).collect::<Vec<_>>();},
+        }
+
+
+    }
 
 }
 
