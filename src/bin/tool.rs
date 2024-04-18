@@ -223,55 +223,7 @@ fn main() {
 
         if step % 100 == 0 {
 
-            println!("Step {}", step);
-            let mut ind: usize = 0;
-            for i in 0..base_ratio_sds.len(){
-                for j in 0..base_linear_sds.len() {
-                    println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                             base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
-                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-                    ind += 1; 
-                }
-            }
-            for i in 0..base_ratio_sds.len(){
-                for j in 0..base_linear_sds.len() {
-                    println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                             base_ratio_sds[i], base_linear_sds[j], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
-                             (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-                    ind += 1; 
-                }
-            }
-            for i in 0..height_sds.len() {
-                println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                         height_sds[i], attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind], 
-                         (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-                ind += 1; 
-            }
-            println!("New motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
-                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
-                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-            ind += 1;
-
-            println!("Kill motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
-                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
-                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-       
-            ind += 1;
-            println!("Extend motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
-                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
-                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-
-            ind += 1;
-            println!("Contract motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
-                     attempts_per_move[ind], successes_per_move[ind], immediate_failures_per_move[ind],
-                     (successes_per_move[ind] as f64)/(attempts_per_move[ind] as f64), (immediate_failures_per_move[ind] as f64)/(attempts_per_move[ind] as f64));
-
-            println!("PWM lengths per motif {:?}", current_trace.current_set_to_print().set_iter().map(|a|a.len()).collect::<Vec<_>>());
-            ind += 1;
-            println!("Base leap move (always accepts). Times {}.", attempts_per_move[ind]);
-            ind += 1;
-            println!("Secondary shuffle move (always accepts). Times {}.", attempts_per_move[ind]);
-
+            //Do all available MoveTracker prints here
 
             if ((step >= 10000) && ((step % 10000) == 0)) || (step+1 == num_advances){
             

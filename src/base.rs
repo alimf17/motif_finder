@@ -2952,6 +2952,11 @@ impl<'a> SetTrace<'a> {
         outfile_handle.write(&buffer).expect("buffer should write");
     }
 
+    //We don't need to worry about saving any state in trace, since inference works on the ACTIVE state
+    fn drop_history(&mut self) {
+        self.trace.clear();
+    }
+
     pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
 
         let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
@@ -2959,8 +2964,8 @@ impl<'a> SetTrace<'a> {
 
         let len_trace = self.trace.len();
 
-        //We want to keep the last element in the SetTrace, so that the markov chain can proceed
-        let trace: Vec<StrippedMotifSet> = self.trace.drain(0..(len_trace-1)).collect();
+        //We don't need to worry about saving any state in trace, since inference works on the ACTIVE state
+        let trace: Vec<StrippedMotifSet> = self.trace.drain(0..len_trace).collect();
 
 
         let buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
@@ -3341,6 +3346,7 @@ impl MoveTracker {
     }
    
 
+    //Note: the fact that we need to pass plotting into this means that this function cannot in context where we need all arguments to be Send or Sync
     fn sort_move_hists<DB: DrawingBackend>(&self, move_id: usize, plotting: &DrawingArea<DB, Shift>, num_bins: usize) -> Result<(), String>{
 
         if move_id >= NUM_MOVES { return Err("Invalid move id".to_string()); }
@@ -3365,6 +3371,16 @@ impl MoveTracker {
 
     }
 
+    fn all_move_hists<DB: DrawingBackend>(&self, plotting: [&DrawingArea<DB, Shift>; NUM_MOVES], num_bins: usize) -> Result<(), Vec<String>> {
+        
+        let v: Vec<String> = (0..NUM_MOVES).map(|i| (i, self.sort_move_hists(i, plotting[i], num_bins))).filter(|(_,x)| x.is_err())
+            .map(|(i, a)| {
+                let mut m = a.unwrap_err();
+                m.push_str(" {i}");
+                m
+            }).collect();
+        if v.len() != 0 { Err(v)} else { Ok(()) }
+    }
 
 }
 
@@ -3452,7 +3468,7 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 }
 
 
-
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TrackingOptions {
     NoTracking,
     TrackTrueTrace,
@@ -3460,10 +3476,9 @@ pub enum TrackingOptions {
 }
 
 pub struct TemperSetTraces<'a> {
-
     //Each trace knows its thermodynamic beta
     parallel_traces: Vec<(SetTrace<'a>, Option<MoveTracker>)>,
-
+    track: TrackingOptions,
 }
 
 impl<'a> TemperSetTraces<'a> {
@@ -3476,7 +3491,7 @@ impl<'a> TemperSetTraces<'a> {
     //      parallel_traces.len() >= 2
     //      parallel_traces[0] will always have thermo_beta = 1_f64. Because of this, it is the "canonical" trace, and the others "just" seed it periodically
     //      parallel_traces.last().unwrap() will never panic, and will always have thermo_beta = min_thermo_beta
-    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
+    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
         if let Some(a) = initial_condition.as_ref(){
             if !ptr::eq(a.data_ref, data_ref) { return Err(InitializationError::UnsynchedData); }
         }
@@ -3512,7 +3527,7 @@ impl<'a> TemperSetTraces<'a> {
             parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), data_ref, thermo_beta, sparse, rng), potential_tracker));
         }
 
-        Ok(TemperSetTraces { parallel_traces: parallel_traces })
+        Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
     }
 
     pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, rng_maker: fn() -> R) {
@@ -3549,6 +3564,9 @@ impl<'a> TemperSetTraces<'a> {
             }
         });
     }
+
+
+
 }
 
 pub enum InitializationError {
