@@ -28,18 +28,20 @@ fn main() {
     //6) The average length of the DNA fragments after your DNAse digest
     //7) A positive integer corresponding to the spacing between data points in bp
     //8) Number of advances to run the set trace
+    //9) The minimum thermodynamic beta for the chains. The absolute value of this will be taken, and if you give a number > 1.0, the reciprocal will be taken instead
+    //10) The number of intermediate traces between the base inference chain and the minimum thermodynamic beta chain. Must be a non-negative integer
     //May also have the following arguments:
 
-    //9) A non negative double for how much to scale the cutoff for a data block
+    //10) A non negative double for how much to scale the cutoff for a data block
     //   to be considered peaky: less than 1.0 is more permissive, greater than 1.0 
     //   is more strict
-    //10) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
+    //11) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
     //   extensions and contractions on a single motif Will only work if (9) included
-    //11) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
+    //12) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
     //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included
-    //12) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
+    //13) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
     //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included 
-    //13) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
+    //14) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
     //    being considered. Will only work if (9), (10), (11), and (12) included
     //
     //Penultimate argument) Either the word "meme" or the word "json". If one of these is not the argument,
@@ -50,7 +52,7 @@ fn main() {
     //   If they're not identical, the program will panic on the spot
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 9 {
+    if args.len() < 10 {
         panic!("Not enough arguments!");
     }
 
@@ -66,10 +68,20 @@ fn main() {
 
     let num_advances: usize = args[8].parse().expect("The number of advances to run must be a positive integer!");
  
+    let mut min_thermo_beta: f64 = args[9].parse().expect("The minimum thermodynamic beta must be a float!");
 
+    let mut num_intermediate_traces: usize = args[10].parse().expect("The number of intermediate traces must be a non-negative integer!");
+
+    min_thermo_beta = min_thermo_beta.abs();
+
+    if min_thermo_beta > 1.0 {
+        warn!("Your min thermodynamic beta was set > 1.0! We're taking the reciprocal!")
+        min_thermo_beta = 1.0/min_thermo_beta;
+    }
     
     let mut check_for_init: bool = true;
-    let mut init_check_index: usize = 9;
+    let base_check_index: usize = 11;
+    let mut init_check_index: usize = base_check_index;
 
     while check_for_init {
         match args.get(init_check_index) {
@@ -79,7 +91,7 @@ fn main() {
     }
 
     //By the end of this block, init_check_index holds the index where we check what type of
-    //initial condition we have, if any. If this is larger than 9, then we have arguments to parse
+    //initial condition we have, if any. If this is larger than base_check_index, then we have arguments to parse
     //that change statics relevant for inference.
     //
 
@@ -87,14 +99,14 @@ fn main() {
 
     let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
     let run_name;
-    if init_check_index > 9 {
-        peak_cutoff = Some(args[9].parse().expect("We already checked that this parsed to f64"));
+    if init_check_index > base_check_index {
+        peak_cutoff = Some(args[base_check_index].parse().expect("We already checked that this parsed to f64"));
         run_name = format!("{}_custom_scale_{}", args[1].as_str(), args[9]);
     } else {
         run_name = args[1].clone();
     }
-    if init_check_index > 10 { 
-        let extend_alpha: f64 = args[10].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > base_check_index+1 { 
+        let extend_alpha: f64 = args[base_check_index+1].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(extend_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //let mut w = PROPOSE_EXTEND.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
@@ -104,8 +116,8 @@ fn main() {
 
         PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
-    if init_check_index > 11 { 
-        let pwm_alpha: f64 = args[11].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > base_check_index+2 { 
+        let pwm_alpha: f64 = args[base_check_index+2].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(pwm_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -119,16 +131,16 @@ fn main() {
     }
 
 
-    if init_check_index > 12 { 
-        let threshold: f64 = args[12].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > base_check_index+3 { 
+        let threshold: f64 = args[base_check_index+3].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(threshold > 0.0) || (threshold >= 1.0) {panic!("Peak drawing threshold must be a valid strictly positive float strictly less than 1.0");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
         let mut w = THRESH.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
         *w = threshold; 
     }
-    if init_check_index > 13 { 
-        let credibility: f64 = args[13].parse().expect("We already checked that this parsed to f64");
+    if init_check_index > base_check_index+4 { 
+        let credibility: f64 = args[base_check_index+4].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -155,9 +167,6 @@ fn main() {
 
     let mut rng = rand::thread_rng();
     
-    //Initialize trace
-    let mut current_trace: SetTrace = SetTrace::new_trace(capacity,data_string.clone(), InitializeSet::Rng(&mut rng), &data_ref, None);
-    
     let check: Option<&str> = match args.get(init_check_index) { Some(x) => Some(x.as_str()), None => None};
     match check {
 
@@ -182,6 +191,11 @@ fn main() {
         }
         _ => (),
     };
+
+    //    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
+
+    let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, &TrackingOptions::TrackAllTraces, &data_ref, maybe_init, None, &mut rng).unwrap();
+
 
     println!("init {:?}", current_trace.current_set_to_print());
     //run MCMC and make sure that I'm saving and clearing periodically

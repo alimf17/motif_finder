@@ -1822,6 +1822,87 @@ impl<'a> MotifSet<'a> {
 
         mot_set
     }
+    
+    
+ 
+    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+
+        let meme_file_string = fs::read_to_string(meme_file_name)?;
+        let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
+
+        //This should be infallible, because it never changes and I already validated it once. 
+        //If THIS is where you're breaking, this whole function is invalid and needs to be fixed. 
+        let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)")?;
+
+        let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
+
+        if start_matrix_lines.len() == 0 { return Err(Box::new(MemeParseError::EmptyMatrix)); }
+
+        let mut set: Vec<Motif> = Vec::new();
+
+        for (mot_num, &line) in start_matrix_lines.iter().enumerate() {
+            let captures = re.captures(meme_as_vec[line]).expect("We can only get here because we matched on regex");
+            let alphabet_len: usize = captures[1].parse().expect("We can only get here because we matched on regex");
+
+            if alphabet_len != BASE_L { return Err(Box::new(MemeParseError::InvalidAlphabet{ motif_num: mot_num }));}
+
+            let motif_len: usize = captures[2].parse().unwrap();
+            if (motif_len < MIN_BASE) || (motif_len > MAX_BASE) { return Err(Box::new(MemeParseError::InvalidMotifLength{ motif_num: mot_num, captured_length: motif_len })); }
+
+
+            let e_value: f64 = captures[3].parse().unwrap();
+
+            if (set.len() > 0) && (e_value > e_value_cutoff) {
+                break;
+            }
+
+            let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
+
+            for i in 1..(motif_len+1) {
+                let mut props: [ f64; BASE_L] = [0.0; BASE_L];
+                let mut line_split = meme_as_vec[line+i].split_whitespace();
+                for j in 0..BASE_L {
+                    let Some(prop_str) = line_split.next() else { return Err(Box::new(MemeParseError::ColumnLengthFailure{line_num: line+i+1})); };
+                    let Ok(prop)= prop_str.parse::<f64>() else { return Err(Box::new(MemeParseError::FloatParseFailure{line_num: line+i+1}));}; 
+                    props[j] = prop;
+                }
+
+                base_vec.push(Base::new(props));
+            }
+
+            let mut motif = Motif::rand_height_pwm(base_vec, rng);
+
+            let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
+
+            match poss_hamming {
+                Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
+                None => (),
+            };
+
+
+            set.push(motif);    
+
+        }
+
+
+        let mut signal = data_ref.data().derive_zero();
+
+        for mot in &set {
+            signal += &(mot.generate_waveform(data_ref));
+        }
+
+        let mut full_set = MotifSet {
+            set: set,
+            signal: signal, 
+            ln_post: None, 
+            data_ref: data_ref, 
+        };
+
+        let _ = full_set.ln_posterior();
+
+        Ok(full_set)
+
+    }
 
     #[cfg(test)]
     fn recalced_signal(&self) -> Waveform {
@@ -2391,6 +2472,30 @@ impl<'a> MotifSet<'a> {
 }
 
 
+pub enum MemeParseError {
+    EmptyMatrix,
+    InvalidAlphabet{ motif_num: usize},
+    InvalidMotifLength{ motif_num: usize, captured_length: usize },
+    ColumnLengthFailure{ line_num: usize },
+    FloatParseFailure{ line_num: usize },
+}
+
+impl fmt::Display for MemeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MemeParseError::EmptyMatrix =>  write!(f, "This file has no MEME matrix input!"),
+            MemeParseError::InvalidAlphabet{ motif_num } => write!(f, "The MEME matrix in position {motif_num} has a number of bps which does not match the proper {BASE_L}"),
+            MemeParseError::InvalidMotifLength{ motif_num, captured_length } => write!(f, "The MEME matrix in position {motif_num} is of length {captured_length}, which is not in the range [{MIN_BASE}, {MAX_BASE}]"),
+            MemeParseError::ColumnLengthFailure{ line_num } => write!(f, "The items on line {line_num} are fewer than the claimed number of columns from the base pair alphabet!"),
+            MemeParseError::FloatParseFailure{ line_num } => write!(f, "The items on line {line_num} do not parse to floats, even though they should be part of a matrix!"),
+        }
+    }
+}
+impl Debug for MemeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self) }
+}
+impl Error for MemeParseError {}
+
 impl Debug for MotifSet<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, " ln_post: {:?}, \n set: {:#?}", self.ln_post, self.set)
@@ -2907,84 +3012,6 @@ impl<'a> SetTrace<'a> {
 
 
  
-    pub fn trace_from_meme<R: Rng+?Sized>(&mut self, meme_file_name: &str, seq: &Sequence, e_value_cutoff: f64, rng: &mut R) {
-
-        let meme_file_string = fs::read_to_string(meme_file_name).expect("Invalid FASTA file name!");
-        let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
-
-        let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)").unwrap();
-
-        let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
-
-        if start_matrix_lines.len() == 0 {
-            panic!("Cannot read this file: it is invalid MEME output");
-        }
-
-        let mut set: Vec<Motif> = Vec::new();
-
-        for (mot_num, line) in start_matrix_lines.iter().enumerate() {
-            let captures = re.captures(meme_as_vec[*line]).unwrap();
-            let alphabet_len: usize = captures[1].parse().unwrap();
-
-            assert!(alphabet_len == BASE_L, "MEME alphabet must be the same length as supplied alphabet");
-
-            let motif_len: usize = captures[2].parse().unwrap();
-            assert!((motif_len >= MIN_BASE) && (motif_len <= MAX_BASE), "Motif length must be compatible with supplied minimum and maximum");
-
-
-            let e_value: f64 = captures[3].parse().unwrap();
-
-            if (set.len() > 0) && (e_value > e_value_cutoff) {
-                break;
-            }
-
-            let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
-
-            for i in 1..(motif_len+1) {
-                let mut props: [ f64; BASE_L] = [0.0; BASE_L];
-                let mut line_split = meme_as_vec[*line+i].split_whitespace();
-                for j in 0..BASE_L {
-                    props[j] = line_split.next().expect(format!("MEME file doesn't deliver on alphabet length on line {}", *line+i+1).as_str())
-                        .parse().expect(format!("MEME file doesn't deliver on bases being floats on line {}", *line+i+1).as_str());
-                }
-
-                base_vec.push(Base::new(props));
-            }
-
-            let mut motif = Motif::rand_height_pwm(base_vec, rng);
-
-            let poss_hamming = motif.scramble_to_close_random_valid(seq, &mut Some(rng));
-
-            match poss_hamming {
-                Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
-                None => (),
-            };
-
-
-            set.push(motif);    
-
-        }
-
-
-        let mut signal = self.data_ref.data().derive_zero();
-
-        for mot in &set {
-            signal += &(mot.generate_waveform(self.data_ref));
-        }
-
-        let mut full_set = MotifSet {
-            set: set,
-            signal: signal, 
-            ln_post: None, 
-            data_ref: self.data_ref, 
-        };
-
-        let _ = full_set.ln_posterior();
-
-        self.push_set_to_active(full_set);
-
-
-    }
 
 }
 
@@ -3442,15 +3469,13 @@ impl<'a> TemperSetTraces<'a> {
     //      parallel_traces.len() >= 2
     //      parallel_traces[0] will always have thermo_beta = 1_f64. Because of this, it is the "canonical" trace, and the others "just" seed it periodically
     //      parallel_traces.last().unwrap() will never panic, and will always have thermo_beta = min_thermo_beta
-    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, half_num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
+    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
         if let Some(a) = initial_condition.as_ref(){
             if !ptr::eq(a.data_ref, data_ref) { return Err(InitializationError::UnsynchedData); }
         }
 
         if min_thermo_beta < 0.0 { return Err(InitializationError::NegativeTemperature); }
         if min_thermo_beta > 1.0 { return Err(InitializationError::UselessBeta); }
-
-        let num_intermediate_traces = half_num_intermediate_traces*2;
 
         //I always want my intermediate states to be even, because I want to be able to try to swap everybody at once
         //So I always want to randomly 
