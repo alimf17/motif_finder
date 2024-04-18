@@ -685,7 +685,7 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
 
         println!("region sampler {:?}", &region[0..(10.min(region.len()-1))]);
         let space_region = region.iter().map(|&(a,b,c)| Base::simplex_to_vect(&[a,b,c])).filter(|a| a[0].is_finite() && a[1].is_finite() && a[2].is_finite()).collect::<Vec<[f64;3]>>();
-        println!("space sampler {:?}", &space_region[0..(10.min(region.len()-1))]);
+        println!("space sampler {:?}", &space_region[0..(10.min(space_region.len()-1))]);
         
         let index = space_region.len();
 

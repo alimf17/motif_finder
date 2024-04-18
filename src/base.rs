@@ -1417,6 +1417,7 @@ impl Motif {
     }
 
 
+
     //PRIORS
 
     pub fn pwm_prior(&self, seq: &Sequence) -> f64 {
@@ -1697,6 +1698,22 @@ impl Motif {
 
         distance.sqrt()
 
+    }
+
+    fn for_meme(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+        const MEME_DIGITS: usize = 6;
+
+        write!(f, "letter-probability matrix: alength= {} w= {}\n", BPS.len(), self.len());
+
+        for base in self.pwm.iter() {
+            let probs = base.as_probabilities();
+            for prob in probs.iter() {
+                write!(f, " {:.MEME_DIGITS$} ", prob);
+            }
+            write!(f, "\n");
+        }
+        write!(f, "\n");
     }
 
 
@@ -2588,6 +2605,21 @@ impl StrippedMotifSet {
     pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
         self.set.iter_mut()
     }
+
+        pub fn output_to_meme(self, output_dir: &str, run_name: &str) -> std::io::Result<()> {
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+
+        let mut outfile_handle = fs::File::create(savestate_file)?;
+
+        outfile_handle.write("MEME Version 4\n\n")?;
+
+        let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>();
+
+        outfile_handle.write(&alphabet)?;
+
+    }
+
 
 }
 
