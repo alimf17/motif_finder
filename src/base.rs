@@ -1904,6 +1904,39 @@ impl<'a> MotifSet<'a> {
 
     }
 
+
+    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, always_recalculate: bool, validate_motif: bool,json_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+
+        let json_string: String = fs::read_to_string(json_file)?;
+
+        let prior_state: MotifSetDef = serde_json::from_str(&json_string)?;
+
+
+        Ok(prior_state.get_motif_set(always_recalculate, validate_motif, &mut Some(rng), data_ref))
+
+        //self.push_set_def(always_recalculate, validate_motif, prior_state, rng);
+
+    }
+ 
+    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, always_recalculate: bool, validate_motif: bool,bincode_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+
+
+        let mut bincode_file_handle = fs::File::open(bincode_file)?;
+
+        let mut buffer: Vec<u8> = Vec::new();
+
+        bincode_file_handle.read_to_end(&mut buffer)?;
+
+        let prior_state: MotifSetDef = match bincode::deserialize(&buffer) {
+            Ok(set_def) => set_def, 
+            Err(_) => (&bincode::deserialize::<StrippedMotifSet>(&buffer)?.reactivate_set(data_ref)).into(),
+        };
+
+        println!("bincode state {:?}", prior_state.set);
+        Ok(prior_state.get_motif_set(always_recalculate, validate_motif, &mut Some(rng), data_ref))
+
+    }
+
     #[cfg(test)]
     fn recalced_signal(&self) -> Waveform {
         let mut signal = self.data_ref.data().derive_zero();
@@ -2830,32 +2863,6 @@ impl<'a> SetTrace<'a> {
     }
 
 
-    pub fn push_last_state_from_json<R: Rng+?Sized>(&mut self, always_recalculate: bool, validate_motif: bool,json_file: &str, rng: &mut R) {
-
-        let json_string: String = fs::read_to_string(json_file).expect("Json file MUST be valid!");
-
-        let prior_state: MotifSetDef = serde_json::from_str(&json_string).expect("Json file MUST be a valid motif set!");
-
-
-        self.push_set_def(always_recalculate, validate_motif, prior_state, rng);
-
-    }
- 
-    pub fn push_last_state_from_bincode<R: Rng+?Sized>(&mut self, always_recalculate: bool, validate_motif: bool,bincode_file: &str, rng: &mut R) {
-
-
-        let mut bincode_file_handle = fs::File::open(bincode_file).expect("Binarray file MUST be valid!");
-
-        let mut buffer: Vec<u8> = Vec::new();
-
-        bincode_file_handle.read_to_end(&mut buffer).expect("Something killed this buffer and it shouldn't have");
-
-        let prior_state: MotifSetDef = bincode::deserialize(&buffer).unwrap_or_else(|_| (&bincode::deserialize::<StrippedMotifSet>(&buffer).expect("bincode must be a valid motif set!").reactivate_set(self.data_ref)).into());
-
-        println!("bincode state {:?}", prior_state.set);
-        self.push_set_def(always_recalculate, validate_motif, prior_state, rng);
-
-    }
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
