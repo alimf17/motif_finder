@@ -1713,7 +1713,7 @@ impl Motif {
             }
             write!(f, "\n");
         }
-        write!(f, "\n");
+        write!(f, "\n")
     }
 
 
@@ -2606,18 +2606,19 @@ impl StrippedMotifSet {
         self.set.iter_mut()
     }
 
-        pub fn output_to_meme(self, output_dir: &str, run_name: &str) -> std::io::Result<()> {
+    pub fn output_to_meme(self, output_dir: &str, run_name: &str) -> std::io::Result<()> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
 
         let mut outfile_handle = fs::File::create(savestate_file)?;
 
-        outfile_handle.write("MEME Version 4\n\n")?;
+        outfile_handle.write(b"MEME Version 4\n\n")?;
 
         let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>();
 
-        outfile_handle.write(&alphabet)?;
+        outfile_handle.write(&alphabet.into_bytes())?;
 
+        Ok(())
     }
 
 
