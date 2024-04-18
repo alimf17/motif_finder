@@ -205,15 +205,6 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
-    let base_ratio_sds = [0.05_f64, 0.1_f64, 0.5];
-    let base_linear_sds = [0.05_f64, 0.1_f64, 0.5];
-    let height_sds = [0.1, 1_f64, 2.0];
-    let move_num: usize = 2*base_ratio_sds.len()*base_linear_sds.len()+height_sds.len()+6;
-    let mut attempts_per_move = vec![0_usize; move_num];
-    let mut successes_per_move = vec![0_usize;move_num]; 
-    let mut immediate_failures_per_move = vec![0_usize; move_num]; 
-    let mut distances_per_attempted_move = vec![Vec::<([f64; 4], bool)>::with_capacity(num_advances/20);move_num]; 
-
     //for step in 0..10000 {
  
     for step in 0..num_advances {

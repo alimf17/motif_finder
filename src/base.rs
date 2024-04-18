@@ -20,6 +20,7 @@ use crate::data_struct::{AllData, AllDataUse};
 
 use itertools::Itertools;
 
+
 use rand::Rng;
 use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
@@ -158,6 +159,15 @@ static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasInde
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
+static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
+                                                   let b = RATIO_LINEAR_SD_COMBO;
+                                                   let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
+                                                   let m = m.chain(b.iter().map(|&[a,b]| format!("_motif_scale_ratio_sd_{a}_linear_sd_{b}.png"))); 
+                                                   let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
+                                                   let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
+                                                   "_motif_contract.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
+                                                   m.collect::<Vec<_>>().try_into().unwrap()
+});
 
 //This controls how much shuffling we do for the secondary base shuffling move
 //Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
@@ -3371,14 +3381,20 @@ impl MoveTracker {
 
     }
 
-    fn all_move_hists<DB: DrawingBackend>(&self, plotting: [&DrawingArea<DB, Shift>; NUM_MOVES], num_bins: usize) -> Result<(), Vec<String>> {
+    fn all_move_hists<DB: DrawingBackend>(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
         
-        let v: Vec<String> = (0..NUM_MOVES).map(|i| (i, self.sort_move_hists(i, plotting[i], num_bins))).filter(|(_,x)| x.is_err())
-            .map(|(i, a)| {
-                let mut m = a.unwrap_err();
-                m.push_str(" {i}");
-                m
-            }).collect();
+        
+
+        let v: Vec<String> = (0..NUM_MOVES).map(|i|
+                                                {
+                                                    let file = format!("{}{}", base_file_name,HIST_END_NAMES[i]);
+                                                    let plotting = BitMapBackend::new(&file, (2000, 1000)).into_drawing_area();
+                                                    (i, self.sort_move_hists(i, &plotting, num_bins))
+                                                }).filter(|(_,x)| x.is_err()).map(|(i, a)| {
+                                                    let mut m = a.unwrap_err();
+                                                    m.push_str(" {i}");
+                                                    m
+        }).collect();
         if v.len() != 0 { Err(v)} else { Ok(()) }
     }
 
