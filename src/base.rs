@@ -159,6 +159,8 @@ static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasInde
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
+static VARIANT_CUMULATIVE: Lazy<[usize; 6]> = Lazy::new(|| core::array::from_fn(|a| if (a == 0) {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
                                                    let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
@@ -2855,7 +2857,10 @@ impl<'a> SetTrace<'a> {
             }
         };
         
-        if let Some(tracker) = track {tracker.document_motion(which_move, movement_tracker);} ;
+        if let Some(tracker) = track {
+            let total_id = VARIANT_CUMULATIVE[which_move]+which_variant;
+            tracker.document_motion(total_id, movement_tracker);
+        };
 
         self.sparse_count = (self.sparse_count+1) % self.sparse;
 
