@@ -248,7 +248,7 @@ fn main() {
                 
             }
         }
-        if (step+1) % save_step == 0 {
+        if ((step+1) % 5 == 0) || (step+1 == pushes) {
             
             initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
 

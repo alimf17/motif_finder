@@ -3591,30 +3591,38 @@ impl<'a> TemperSetTraces<'a> {
         });
 
         //This swaps the pairs of adjacent traces starting from index 1
-        self.parallel_traces[1..].par_chunks_exact_mut(2).for_each(|x| {
+        let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            if MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng) {
+            let accept_swap = MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
+            if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
                 //a[1].0.active_set = tmp;
                 std::mem::swap(&mut a.0.active_set, &mut b.0.active_set);
             }
-        });
+            ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+        }).collect();
 
-        //This swamps the pairs of adjacent traces starting from index 0, thus including the actual trace we care about 
-        self.parallel_traces.par_chunks_exact_mut(2).for_each(|x| {
+        println!("Odd swaps: {:?}", odd_swaps);
+    
+
+        let even_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            if MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng) {
+            let accept_swap = MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
+            if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
                 //a[1].0.active_set = tmp;
                 std::mem::swap(&mut a.0.active_set, &mut b.0.active_set);
             }
-        });
+            ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+        }).collect();
+        
+        println!("Even swaps: {:?}", even_swaps);
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
@@ -3624,7 +3632,10 @@ impl<'a> TemperSetTraces<'a> {
         match tracker {
             TrackingOptions::NoTracking => (),
             TrackingOptions::TrackTrueTrace => {self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
-            TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| b.1.as_ref().map(|a| a.give_status())).collect::<Vec<_>>();},
+            TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| { 
+                println!("Thermodynamic beta: {}", b.0.thermo_beta);
+                b.1.as_ref().map(|a| a.give_status())
+            }).collect::<Vec<_>>();},
         }
 
     }
