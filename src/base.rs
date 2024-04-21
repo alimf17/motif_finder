@@ -3631,9 +3631,12 @@ impl<'a> TemperSetTraces<'a> {
 
         match tracker {
             TrackingOptions::NoTracking => (),
-            TrackingOptions::TrackTrueTrace => {self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
+            TrackingOptions::TrackTrueTrace => {
+                println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
+                self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
             TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| { 
                 println!("Thermodynamic beta: {}", b.0.thermo_beta);
+                println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
                 b.1.as_ref().map(|a| a.give_status())
             }).collect::<Vec<_>>();},
         }

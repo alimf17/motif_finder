@@ -117,7 +117,8 @@ fn main() {
         PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(extend_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
     } else {
 
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+        //Changed this from 10.0 because extensions not working well
+        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
     if init_check_index > base_check_index+2 { 
         let pwm_alpha: f64 = args[base_check_index+2].parse().expect("We already checked that this parsed to f64");
@@ -130,7 +131,8 @@ fn main() {
         DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(pwm_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
     } else {
 
-        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+        //Changed this from 10.0 because I'm worried that new PWMs are too promiscuous
+        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     }
 
 
