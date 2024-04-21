@@ -238,17 +238,14 @@ fn main() {
 
             initialization_chains.print_acceptances(TrackingOptions::TrackAllTraces);
 
-            if ((step > 0) && ((step % 50) == 0)) || (step+1 == pushes){
-            
-                let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
-
-                let num_bins: usize = 100;
-
-                initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
-                
-            }
         }
         if ((step+1) % 5 == 0) || (step+1 == pushes) {
+        
+            let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
+
+            let num_bins: usize = 100;
+
+            initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
             
             initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
 
