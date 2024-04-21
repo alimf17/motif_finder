@@ -211,7 +211,6 @@ pub fn main() {
 
         let chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
         
-        collection.save_best_trace(&mut buffer, &out_dir, &chain_name);
     
         //TODO: This makes a vector V of length reference_motifs, of vectors of length equal 
         //      to each collection. V[i][j] is the mean distance of the motifs in collection's
