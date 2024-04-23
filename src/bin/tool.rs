@@ -103,8 +103,11 @@ fn main() {
     let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
     let run_name;
     if init_check_index > base_check_index {
-        peak_cutoff = Some(args[base_check_index].parse().expect("We already checked that this parsed to f64"));
-        run_name = format!("{}_custom_scale_{}", args[1].as_str(), args[9]);
+        peak_cutoff = args[base_check_index].parse().ok();
+        run_name = match peak_cutoff{
+            Some(a) => format!("{}_custom_scale_{}", args[1].as_str(), args[9]),
+            None => args[1].clone(),
+        };
     } else {
         run_name = args[1].clone();
     }
