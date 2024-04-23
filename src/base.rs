@@ -1966,8 +1966,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    #[cfg(test)]
-    fn recalced_signal(&self) -> Waveform {
+    pub fn recalced_signal(&self) -> Waveform {
         let mut signal = self.data_ref.data().derive_zero();
         for mot in self.set.iter() {
             signal += &(mot.generate_waveform(self.data_ref));
@@ -2965,6 +2964,10 @@ impl<'a> SetTrace<'a> {
 
       }*/
 
+    pub fn loan_active(&self) -> &MotifSet<'a> {
+        &self.active_set
+    }
+
     pub fn current_set_to_print(&self) -> StrippedMotifSet {
         StrippedMotifSet::from(&self.active_set)
     }
@@ -3037,36 +3040,59 @@ impl<'a> SetTrace<'a> {
 
         let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
 
-        let plot = BitMapBackend::new(&signal_file, (3000, 1000)).into_drawing_area();
+                let plot = BitMapBackend::new(signal_file, (3000, 1200)).into_drawing_area();
 
         plot.fill(&WHITE).unwrap();
 
-        let mut chart = ChartBuilder::on(&plot)
-            .set_label_area_size(LabelAreaPosition::Left, 40)
-            .set_label_area_size(LabelAreaPosition::Bottom, 40)
-            .caption("Signal Comparison", ("sans-serif", 40))
+        let (upper, lower) = plot.split_vertically((86).percent_height());
+
+        let mut chart = ChartBuilder::on(&upper)
+            .set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 100)
+            .caption("Signal Comparison", ("Times New Roman", 80))
             .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
 
 
-        chart.configure_mesh().draw().unwrap();
+        chart.configure_mesh()
+            .x_label_style(("sans-serif", 40))
+            .y_label_style(("sans-serif", 40))
+            .x_label_formatter(&|v| format!("{:.0}", v))
+            .x_desc("Genome Location (Bp)")
+            .y_desc("Signal Intensity")
+            .disable_mesh().draw().unwrap();
 
-        chart.draw_series(current_active.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),1_u32, &BLACK))).unwrap().label("Data Wave");
+        const horiz_offset: i32 = -5;
 
-        let current_resid = current_active.data_ref.data()-&current_active.signal;
-        chart.draw_series(LineSeries::new(current_resid.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), &BLUE)).unwrap().label("Occpuancy Trace");
+        chart.draw_series(data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
-        let max_draw = current_active.set.len().min(3);
+        let signal = current_active.recalced_signal();
 
-        let colors = [&RED, &GREEN, &CYAN];
+        let current_resid = data_ref.data()-&signal;
 
-        for i in 0..max_draw {
+        chart.draw_series(LineSeries::new(signal.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), BLUE.filled())).unwrap().label("Motif Set Occupancy").legend(|(x, y)| Rectangle::new([(x+4*horiz_offset, y-4), (x+4*horiz_offset + 20, y+3)], Into::<ShapeStyle>::into(&BLUE).filled()));
 
-            let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
-            chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
+        const THICKEN: usize = 20;
+        for j in 1..=THICKEN{
+        chart.draw_series(LineSeries::new(signal.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k+0.01*2_f64.powf(k*0.15)*(j as f64))), BLUE.filled())).unwrap();
 
         }
+        chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
 
-        chart.configure_series_labels().border_style(&BLACK).draw().unwrap();
+        let max_abs_resid = current_resid.read_wave().iter().map(|&a| a.abs()).max_by(|x,y| x.partial_cmp(y).unwrap()).unwrap();
+
+        let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(a, b)| (a/b).abs()).zip(locs.iter()).map(|(a, &b)| (a, b as f64)).collect();
+
+        let mut map = ChartBuilder::on(&lower)
+            .set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 50)
+            .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), 0_f64..1_f64).unwrap();
+
+        map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Proportion Residual Error").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+
+        let derived_color = DerivedColorMap::new(&[WHITE,YELLOW, RED]);
+
+        map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0/max_abs_resid).filled()))).unwrap();
+
 
     }
 
@@ -3489,33 +3515,38 @@ fn build_hist_bins(mut data: Vec<f64>, mut data_2: Vec<f64>, num_bins: usize) ->
 
 fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw_data_2: &[N], area: &'a DrawingArea<DB, Shift>, label: String, num_bins: usize) -> ChartBuilder<'a, 'b, DB> {
 
-            let mut hist = ChartBuilder::on(area);
+    let mut hist = ChartBuilder::on(area);
 
-            hist.margin(10).set_left_and_bottom_label_area_size(20);
+    hist.margin(10).y_label_area_size(200).x_label_area_size(100);
 
-            hist.caption(label, ("Times New Roman", 20));
+    hist.caption(label, ("Times New Roman", 80));
 
-            let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).collect();
-            let mut data_2: Vec<f64> = raw_data_2.iter().map(|&a| a.into()).collect();
-
-
-            let (xs, hist_form, hist_form_2) = build_hist_bins(data, data_2, num_bins);
-
-            let range = RangedSlice::from(xs.as_slice());
-
-            let max_prob = hist_form.iter().map(|&x| x.1).fold(0_f64, |x,y| x.max(y));
-
-            let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
-
-            hist_context.configure_mesh().disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
-
-            //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
-            hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.mix(0.2).filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap();
+    let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).collect();
+    let mut data_2: Vec<f64> = raw_data_2.iter().map(|&a| a.into()).collect();
 
 
-            hist_context.draw_series(Histogram::vertical(&hist_context).style(RED.mix(0.2).filled()).margin(0).data(hist_form_2.iter().map(|x| (&x.0, x.1)))).unwrap();
+    let (xs, hist_form, hist_form_2) = build_hist_bins(data, data_2, num_bins);
 
-            hist
+    let range = RangedSlice::from(xs.as_slice());
+
+    let max_prob = hist_form.iter().map(|&x| x.1).fold(0_f64, |x,y| x.max(y));
+
+    let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
+
+    hist_context.configure_mesh().x_label_style(("sans-serif", 60))
+        .y_label_style(("sans-serif", 60))
+        .x_label_formatter(&|v| format!("{:.0}", v))
+        .x_desc("Genome Location (Bp)")
+        .y_desc("Signal Intensity").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
+
+    //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
+    hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.mix(0.8).filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap().label("Proposed Moves").legend(|(x, y)| Rectangle::new([(x-20, y-10), (x, y+10)], Into::<ShapeStyle>::into(&CYAN).filled()));
+
+    hist_context.draw_series(Histogram::vertical(&hist_context).style(RED.mix(0.8).filled()).margin(0).data(hist_form_2.iter().map(|x| (&x.0, x.1)))).unwrap().label("Accepted Moves").legend(|(x, y)| Rectangle::new([(x-20, y-10), (x, y+10)], Into::<ShapeStyle>::into(&RED).filled()));
+
+    hist_context.configure_series_labels().position(SeriesLabelPosition::UpperLeft).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+
+    hist
 
 }
 
