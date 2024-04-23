@@ -26,14 +26,14 @@ use plotters::prelude::full_palette::ORANGE;
 
 fn main() {
 
-    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
-    //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
+    let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
+    let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
 
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639826_ArgR_Arg_ln_ratio_1_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639826_ArgR_Arg_ln_ratio_1_D_1_trace_from_step_0533999.bin";
 
-    let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
-    let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
+    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
+    //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
 
     let mut try_bincode = fs::File::open(file_out).unwrap();
     let mut try_bin_trace = fs::File::open(trace_file).unwrap();
@@ -53,8 +53,10 @@ fn main() {
 
     let trace = pre_trace.get_set_trace(&data, &mut rng, None);
 
+
     mod_save_trace(&trace, &data);
 
+    println!("{:?}", trace.loan_active());
 
 }
 

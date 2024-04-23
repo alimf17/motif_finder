@@ -3040,7 +3040,7 @@ impl<'a> SetTrace<'a> {
 
         let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
 
-                let plot = BitMapBackend::new(signal_file, (3000, 1200)).into_drawing_area();
+        let plot = BitMapBackend::new(&signal_file, (3000, 1200)).into_drawing_area();
 
         plot.fill(&WHITE).unwrap();
 
@@ -3063,11 +3063,11 @@ impl<'a> SetTrace<'a> {
 
         const horiz_offset: i32 = -5;
 
-        chart.draw_series(data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+        chart.draw_series(self.data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
         let signal = current_active.recalced_signal();
 
-        let current_resid = data_ref.data()-&signal;
+        let current_resid = self.data_ref.data()-&signal;
 
         chart.draw_series(LineSeries::new(signal.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), BLUE.filled())).unwrap().label("Motif Set Occupancy").legend(|(x, y)| Rectangle::new([(x+4*horiz_offset, y-4), (x+4*horiz_offset + 20, y+3)], Into::<ShapeStyle>::into(&BLUE).filled()));
 
