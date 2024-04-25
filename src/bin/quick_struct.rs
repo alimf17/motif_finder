@@ -26,11 +26,11 @@ use plotters::prelude::full_palette::ORANGE;
 
 fn main() {
 
-    let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
-    let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
+    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
+    //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
 
-    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639826_ArgR_Arg_ln_ratio_1_25_data.bin";
-    //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639826_ArgR_Arg_ln_ratio_1_D_1_trace_from_step_0533999.bin";
+    let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639826_ArgR_Arg_ln_ratio_1_25_data.bin";
+    let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639826_ArgR_Arg_ln_ratio_1_D_1_trace_from_step_0533999.bin";
 
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
@@ -66,13 +66,29 @@ pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
 
         let locs = data_ref.data().generate_all_locs();
 
-        let signal_file = "/Users/afarhat/Downloads/traceTrial.png";
+        let signal_file = "/Users/afarhat/Downloads/traceTrialDiff.png";
 
-        let plot = BitMapBackend::new(signal_file, (3000, 1200)).into_drawing_area();
+        let plot = BitMapBackend::new(signal_file, (3300, 1500)).into_drawing_area();
+        
+        let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
         plot.fill(&WHITE).unwrap();
 
-        let (upper, lower) = plot.split_vertically((86).percent_height());
+        let (left, right) = plot.split_horizontally((95).percent_width());
+
+        let (right_space, _) = right.split_vertically((95).percent_height());
+
+        let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+
+        bar.configure_mesh()
+            .y_label_style(("sans-serif", 40))
+            .disable_mesh().draw().unwrap();
+
+        let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
+
+        bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
+
+        let (upper, lower) = left.split_vertically((86).percent_height());
 
         let mut chart = ChartBuilder::on(&upper)
             .set_label_area_size(LabelAreaPosition::Left, 100)
@@ -108,18 +124,20 @@ pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
 
         let max_abs_resid = current_resid.read_wave().iter().map(|&a| a.abs()).max_by(|x,y| x.partial_cmp(y).unwrap()).unwrap();
 
-        let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(a, b)| (a/b).abs()).zip(locs.iter()).map(|(a, &b)| (a, b as f64)).collect();
+        let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(&a, _)| {
+
+            let tup = data_ref.background_ref().cd_and_sf(a);
+            if tup.0 >= tup.1 { (tup.0-0.5)*2.0 } else {(tup.1-0.5)*2.0} } ).zip(locs.iter()).map(|(a, &b)| (a, b as f64)).collect();
         
         let mut map = ChartBuilder::on(&lower)
             .set_label_area_size(LabelAreaPosition::Left, 100)
             .set_label_area_size(LabelAreaPosition::Bottom, 50)
             .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-        map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Proportion Residual Error").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+        map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
-        let derived_color = DerivedColorMap::new(&[WHITE,YELLOW, RED]);
 
-        map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0/max_abs_resid).filled()))).unwrap();
+        map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
 
 
 }
