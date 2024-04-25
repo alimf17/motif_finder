@@ -4714,7 +4714,7 @@ mod tester{
             _ = motif_set.add_motif(add_mot);
         }
         for i in 0..100 {
-            let (step_set, selected_move, accepted) = motif_set.run_rj_move(&mut rng);
+            let (step_set, selected_move, accepted) = motif_set.run_rj_move(1.0, &mut rng);
             
             //For when run_rj_move gives a clone of the old set when rejecting, rather than telling us what could have been
             /*match accepted {
@@ -4885,7 +4885,6 @@ mod tester{
         let d_ad_like_d_ad_stat = Noise::ad_deriv(noise.ad_calc());
 
 
-        let grad = unsafe{ motif.parallel_single_motif_grad(&data_seq_2, &d_ad_stat_d_noise, d_ad_like_d_ad_stat)};
 
         let waveform_raw = waveform.raw_wave();
 
@@ -5029,7 +5028,6 @@ mod tester{
         let correct: Vec<bool> = rev_comp.iter().enumerate().map(|(a, &b)| if b {reverse[a]} else {forward[a]}).collect();
 
         println!("correct: {:?}", correct);
-        println!("checked: {:?}", checked);
 
         println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_u8_starts(), small.return_bases(0, 0, 24));
         println!("blocks in seq: {:?}", small.seq_blocks());
@@ -5044,8 +5042,7 @@ mod tester{
                     let bp = small.return_bases(i, ind, 1)[0];
                     let bp2 = small.return_bases(i, ind, 1)[0];
                     let matcher = if rev_comp[24*i+j] { bp == Bp::T } else { bp == Bp::A};
-                    println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {}, checked: {}, correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, checked[24*i+j], correct[24*i+j]);
-                    assert!(checked[24*i+j] == matcher);
+                    println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {},  correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, correct[24*i+j]);
                 }
             }
         }
@@ -5088,16 +5085,9 @@ mod tester{
         let prop_bp = motif.pwm[pwm_pos][pwm_bp];
         let wave_main = motif.generate_waveform(&data_seq);
         let start0 = Instant::now();
-        let wave_noh = motif.no_height_waveform(&data_seq);
         let duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
-        let wave_sho: Vec<f64> = wave_noh.raw_wave();
 
-        let start = Instant::now();
-        let wave_filter = motif.only_pos_waveform(Bp::T, 6, &data_seq);
-        let duration = start.elapsed();
-
-        let raw_filter: Vec<f64> = wave_filter.raw_wave();
 
         let point_lens = wave_main.point_lens();
         start_bases.push(bp);
@@ -5112,27 +5102,10 @@ mod tester{
 
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
-        let start2 = Instant::now();
-        let unsafe_filter = unsafe{motif.only_pos_waveform_from_binds(&binds, Bp::T, 6, &data_seq)};
-        let duration2 = start2.elapsed();
 
-        let start3 = Instant::now();
-        let just_divide = unsafe{motif.no_height_waveform_from_binds(&binds, &data_seq)};
-        let duration3 = start3.elapsed();
 
-        let unsafe_sho = just_divide.raw_wave();
 
-        println!("Time in raw filter {:?}. Time in unsafe filter {:?}. Time spent in safe divide: {:?}. Time spent in divide {:?}", duration, duration2, duration0, duration3);
-        let unsafe_raw_filter = unsafe_filter.raw_wave();
 
-        assert!(unsafe_raw_filter.len() == raw_filter.len());
-        let wave_s = unsafe_raw_filter.iter().zip(&raw_filter).map(|(a, &b)| (a-b).powf(2.0)).collect::<Vec<f64>>();
-        println!("Wave_s {:?}", wave_s.iter().enumerate().filter(|(_,&a)| a > 0.).map(|(a, _)| a).collect::<Vec<_>>());
-
-        assert!(wave_s.iter().sum::<f64>().powf(0.5) < 1e-6);
-
-        assert!(unsafe_sho.len() == wave_sho.len());
-        assert!((unsafe_sho.iter().zip(&wave_sho).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
 
         println!("unsafe filter same as filter when properly made");
 
@@ -5144,27 +5117,18 @@ mod tester{
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
                 let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > *THRESH.read().expect("no writes expected now")).collect::<Vec<_>>();
 
-                let relevant_filt = (cut_low..cut_high).filter(|&a| (binds.0[a] > *THRESH.read().expect("no writes expected now")) & checked[a]).collect::<Vec<_>>();
 
                 if relevant_binds.len() > 0 {
 
                     let mut score: f64 = 0.0;
-                    let mut filt_score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
                         score += binds.0[relevant_binds[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
                     }
-                    for k in 0..relevant_filt.len() {
-                        filt_score += binds.0[relevant_filt[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_filt[k]+half_len)];
-                    }
                     assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
-                    assert!((wave_sho[start_dats[i]+j]-score/motif.peak_height()).abs() < 1e-6);
 
-                    assert!((raw_filter[start_dats[i]+j]-filt_score/prop_bp).abs() < 1e-6);
 
                 } else {
                     assert!(wave_gen[start_dats[i]+j].abs() < 1e-6);
-                    assert!((wave_sho[start_dats[i]+j]).abs() < 1e-6);
-                    assert!(raw_filter[start_dats[i]+j].abs() < 1e-6);
                 }
 
 

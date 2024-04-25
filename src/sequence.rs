@@ -31,9 +31,9 @@ pub struct Sequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
-    kmer_dict: HashMap<usize, Vec<u64>>,
+    kmer_dict:  [Vec<u64>; MAX_BASE+1-MIN_BASE],
     kmer_id_dict: Vec<HashMap<u64, usize>>,
-    kmer_nums: HashMap<usize, usize>,
+    kmer_nums: [usize; MAX_BASE+1-MIN_BASE],
 }
 
 
@@ -105,9 +105,11 @@ impl Sequence {
 
         }
 
-        let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
+        const F: Vec<u64> = Vec::new();
+
+        let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
         let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
-        let orig_nums: HashMap<usize, usize> = HashMap::new();
+        let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
 
         let mut seq = Sequence{
                     seq_blocks: seq_bls,
@@ -142,9 +144,11 @@ impl Sequence {
             panic!("stated block lengths do not equal the length of your data!");
         }
 
+        const F: Vec<u64> = Vec::new();
+
         let max_len: usize = *block_lens.iter().max().unwrap();
-        let orig_dict: HashMap<usize, Vec<u64>> = HashMap::new();
-        let orig_nums: HashMap<usize, usize> = HashMap::new();
+        let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
+        let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
         let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
 
         let mut seq = Sequence{
@@ -164,11 +168,17 @@ impl Sequence {
 
     fn initialize_kmer_dicts(&mut self) {
 
-        let mut kmer_dict: HashMap<usize, Vec<u64>> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
         
+        let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
+            let cap = if a < 11 { 
+                if let Some(cap) = 4_usize.checked_pow((a+MIN_BASE) as u32) { cap } else {4_usize.pow(10) }
+            } else {4_usize.pow(10)};
+            Vec::with_capacity(cap)
+        });
+
         let mut kmer_id_dict: Vec<HashMap<u64, usize>> = Vec::with_capacity(MAX_BASE+1-MIN_BASE);
 
-        let mut kmer_nums: HashMap<usize, usize> = HashMap::with_capacity(MAX_BASE+1-MIN_BASE);
+        let mut kmer_nums = [0_usize; MAX_BASE+1-MIN_BASE]; 
 
         for k in MIN_BASE..MAX_BASE+1 {
 
@@ -176,8 +186,8 @@ impl Sequence {
             let mut minimap: HashMap<u64, usize> = HashMap::with_capacity(kmer_arr.len());
             let _ = kmer_arr.iter().enumerate().map(|(a, &b)| minimap.insert(b, a)).collect::<Vec<_>>();
             kmer_id_dict.push(minimap);
-            kmer_nums.insert(k, kmer_arr.len());
-            kmer_dict.insert(k, kmer_arr);
+            kmer_nums[k-MIN_BASE] =  kmer_arr.len();
+            kmer_dict[k-MIN_BASE] =  kmer_arr;
         }
 
         self.kmer_dict = kmer_dict;
@@ -258,16 +268,16 @@ impl Sequence {
 
     //Panics: if k is not an element of [MIN_BASE, MAX_BASE]
     pub fn number_unique_kmers(&self, k: usize) -> usize {
-        self.kmer_nums[&k]
+        self.kmer_nums[k-MIN_BASE]
     }
 
     pub fn unique_kmers(&self, k: usize) -> Vec<u64> {
 
-        self.kmer_dict[&k].clone()
+        self.kmer_dict[k-MIN_BASE].clone()
     }
 
     pub fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
-        self.kmer_dict[&k][id]
+        self.kmer_dict[k-MIN_BASE][id]
     }
 
     pub fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
@@ -349,6 +359,33 @@ impl Sequence {
 
     }
 
+    pub fn number_kmer_reextends(&self, bases: &Vec<Bp>) -> f64 {
+
+        let k = bases.len();
+
+        let start_offset = (k-1)*2;
+
+        let add_offset: u64 = 1 << start_offset;
+
+        let mask_offset: u64 = (1 << (start_offset+2)) - 1;
+
+        let mut check_u64 = Self::kmer_to_u64(bases);
+        
+        let mut num: f64 = 1.0;
+
+        for _ in 0..3 {
+
+            check_u64 = (check_u64+add_offset) & mask_offset;
+
+            if self.id_of_u64_kmer(k, check_u64).is_some() {
+                num += 1.0;
+            }
+
+        }
+
+        num
+
+    }
 
     pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<Bp> {
 
@@ -376,73 +413,8 @@ impl Sequence {
 
         let look_for = Self::kmer_to_u64(kmer);
 
-        let unique_kmer_ptr: *const u64 = self.kmer_dict[&kmer.len()].as_ptr();
+        self.id_of_u64_kmer(kmer.len(), look_for).is_some()
 
-        let mut found = false;
-       
-        let mut lowbound: isize = 0;
-        let mut upbound: isize = (self.kmer_nums[&(kmer.len())]-1) as isize;
-        let mut midcheck: isize = (upbound+lowbound)/2;
-        
-
-        //SAFETY: The initial definitions of lowbound, upbound, and midcheck,
-        //        combined with how they're revised, ensures that all pointer
-        //        dereferences are always in bound of the relevant kmer_dict array
-        unsafe {
-
-
-            found = found || (*unique_kmer_ptr.offset(lowbound) == look_for);
-            found = found || (*unique_kmer_ptr.offset(upbound) == look_for);
-            
-            let mut terminate = found ||  (*unique_kmer_ptr.offset(lowbound) > look_for) || (*unique_kmer_ptr.offset(upbound) < look_for) ; 
-            while !terminate {
-
-                found = look_for == *unique_kmer_ptr.offset(midcheck);
-                if !found {
-                    if *unique_kmer_ptr.offset(midcheck) > look_for {
-                        upbound = midcheck-1;
-                    } else {
-                        lowbound = midcheck+1;
-                    }
-                    midcheck = (upbound+lowbound)/2;
-                    terminate = upbound < lowbound;
-
-                } else {
-                    terminate = true;
-                }
-            }
-        
-        } 
-       
-       /* 
-        let mut lowbound: usize = 0;
-        let mut upbound: usize = self.kmer_nums[&kmer.len()] as usize;
-        let mut midcheck: usize = (upbound+lowbound)/2;
-
-        unsafe{
-            found = found || (*self.kmer_dict[&kmer.len()].get_unchecked(lowbound) == look_for);
-            found = found || (*self.kmer_dict[&kmer.len()].get_unchecked(upbound-1) == look_for);
-
-            let mut terminate = found;
-            while !terminate {
-                found =  (*self.kmer_dict[&kmer.len()].get_unchecked(midcheck) == look_for);
-                if !found {
-                    if(*self.kmer_dict[&kmer.len()].get_unchecked(midcheck) > look_for) {
-                        upbound = midcheck;
-                    } else {
-                        lowbound = midcheck;
-                    }
-                    midcheck = (upbound+lowbound)/2;
-                    terminate = (midcheck == lowbound);
-
-                } else {
-                    terminate = true;
-                }
-            }
-        }
-        */
-
-        found
     }
 
     fn u64_kmers_have_hamming(kmer_a: u64, kmer_b: u64, distance: usize) -> bool {
@@ -465,7 +437,7 @@ impl Sequence {
 
         let len: usize = kmer.len();
 
-        self.kmer_dict[&len].iter().enumerate()
+        self.kmer_dict[len-MIN_BASE].iter().enumerate()
                            .filter(|(_, &b)| Self::u64_kmers_have_hamming(u64_kmer, b, distance))
                            .map(|(a, _)| a).collect::<Vec<usize>>()
 
@@ -493,7 +465,7 @@ impl Sequence {
 
         let len: usize = kmer.len();
 
-        self.kmer_dict[&len].iter().enumerate()
+        self.kmer_dict[len-MIN_BASE].iter().enumerate()
                            .filter(|(_, &b)| Self::u64_kmers_within_hamming(u64_kmer, b, threshold))
                            .map(|(a, _)| a).collect::<Vec<usize>>()                    
 
@@ -504,9 +476,9 @@ impl Sequence {
 
         let mut rng = rand::thread_rng();
 
-        let mot_id: usize = rng.gen_range(0..(self.kmer_nums[&len]));
+        let mot_id: usize = rng.gen_range(0..(self.kmer_nums[len-MIN_BASE]));
 
-        Self::u64_to_kmer(self.kmer_dict[&len][mot_id], len)
+        Self::u64_to_kmer(self.kmer_dict[len-MIN_BASE][mot_id], len)
     }
 
 }
@@ -604,7 +576,7 @@ mod tests {
         let in_it = sequence.kmer_in_seq(&vec![Bp::C;20]);
 
         let duration = start.elapsed();
-        println!("Done search {} bp {:?}", bp, duration);
+        println!("Done search {} found {} bp {:?}", bp, in_it, duration);
 
         let thresh: usize = 3;
 
@@ -624,9 +596,43 @@ mod tests {
 
             println!("For kmer size {}, all generated results are within hamming distance ({}) and exist in seq ({})", b_l, all_within_hamming, all_exist_in_seq);
 
+            let neighbors = sequence.number_kmer_reextends(&mot);
+
+            let mut neigh: f64 = 0.0;
+
+            for bp in [Bp::A, Bp::C, Bp::G, Bp::T] {
+                let mut other_mot = mot.clone();
+                other_mot[mot.len()-1] = bp;
+                if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
+            }
+
+            println!("{neighbors}, {neigh} neighbs");
+            assert!(neighbors == neigh);
+
+            for _ in 0..100 {
+
+                let mot2 = sequence.random_valid_motif(b_l);
+                
+                let neighbors = sequence.number_kmer_reextends(&mot2);
+
+                let mut neigh: f64 = 0.0;
+
+                for bp in [Bp::A, Bp::C, Bp::G, Bp::T] {
+                    let mut other_mot = mot2.clone();
+                    other_mot[mot2.len()-1] = bp;
+                    if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
+                }
+
+                println!("{neighbors}, {neigh} neighbs");
+                assert!(neighbors == neigh);
+
+            }
             assert!(all_within_hamming && all_exist_in_seq, "Generated kmer results have an invalidity");
-       
+
             let examine = sequence.unique_kmers(b_l);
+
+            assert!(examine.len() == sequence.number_unique_kmers(b_l));
+
             let mut count_close = 0;
             for poss in examine {
                 if Sequence::u64_kmers_within_hamming(mot_u64, poss, thresh) { count_close += 1; }
@@ -635,6 +641,7 @@ mod tests {
             assert!(legal_mot_ids.len() == count_close, "Missing possible mots");
 
         }
+
 
     }
 
