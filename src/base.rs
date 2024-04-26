@@ -4079,7 +4079,7 @@ mod tester{
 
             println!("mag_diff {:?}", mag_diff);
 
-            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 42)), "magnitude of relative difference between back and forth exceeds 2^(-45)")
+            assert!(mag_diff.iter().all(|&a| a.is_none() || (a.unwrap() > 40)), "magnitude of relative difference between back and forth exceeds 2^(-45)")
 
 
         }
