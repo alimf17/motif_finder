@@ -237,7 +237,7 @@ fn main() {
     for step in 0..pushes {
 
         println!("push {step}");
-        initialization_chains.iter_and_swap(steps_per_exchange_attempt, rand::thread_rng);
+        initialization_chains.iter_and_swap(10, steps_per_exchange_attempt, rand::thread_rng);
 
         if step % 5 == 0 {
 

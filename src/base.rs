@@ -8,6 +8,9 @@ use std::io::{Read, Write};
 use std::error::Error;
 use std::ptr;
 
+use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
+
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
@@ -29,7 +32,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use  rand_distr::weighted_alias::*;
 
 use statrs::{consts, StatsError};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal};
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp};
 use statrs::statistics::{Min, Max, Distribution as StatrsDist};
 
 use once_cell::sync::Lazy;
@@ -116,11 +119,10 @@ pub const MIN_BASE: usize = 8;
 pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit here is 32. 
                                 //To make sure this runs before the heat death of the universe
                                 //while also not taking more memory than every human brain combined,
-                                //We store many kmers as u64s. If you have 20 "bases" (amino acids)
-                                //You need to force it to be at most 12. 
+                                //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 3.;
+pub const MIN_HEIGHT: f64 = 0.;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -128,6 +130,8 @@ const LOG_HEIGHT_SD: f64 = 0.25;
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
 static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
+
+static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
 
 const L_SD_VECTOR_SPACE: f64 = 1.0;
 
@@ -155,7 +159,7 @@ const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
 const VARIANT_NUMS: [usize; 6] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -236,6 +240,7 @@ impl TryFrom<usize> for Bp {
     type Error = &'static str;
     fn try_from(bp: usize) -> Result<Self, Self::Error> {
         if bp < BASE_L {
+            //SAFETY: We checked that this is a valid variant and Bp is repr(usize)
             Ok(unsafe{std::mem::transmute::<usize, Bp>(bp)})
         } else {
             Err("usize not a valid base pair!")
@@ -1114,7 +1119,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
 
         Self::raw_pwm(pwm, peak_height)
     }
@@ -1132,7 +1137,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
 
 
         Motif {
@@ -1154,7 +1159,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
 
 
         Motif {
@@ -1176,7 +1181,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*(*HEIGHT_DIST).sample(rng);
+        let peak_height: f64 = sign*HEIGHT_PROPOSAL_DIST.sample(rng);
 
 
         Motif {
@@ -1457,13 +1462,13 @@ impl Motif {
     pub fn height_prior(&self) -> f64 {
 
         let mut prior = if self.peak_height > 0.0 { PROB_POS_PEAK.ln() } else { (1.0-PROB_POS_PEAK).ln() };
-        prior += (*HEIGHT_DIST).ln_pdf(self.peak_height.abs());
+        prior += HEIGHT_DIST.ln_pdf(self.peak_height.abs());
         prior
     }
 
 
     pub fn d_height_prior(&self) -> f64 {
-        (*HEIGHT_DIST).d_ln_pdf(self.peak_height.abs())*self.peak_height.signum()
+        HEIGHT_DIST.d_ln_pdf(self.peak_height.abs())*self.peak_height.signum()
     }
 
 
@@ -2121,7 +2126,7 @@ impl<'a> MotifSet<'a> {
 
         let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-        let ln_gen_prob = new_mot.height_prior()+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -2141,7 +2146,7 @@ impl<'a> MotifSet<'a> {
 
             let pick_prob = self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-            let ln_gen_prob = self.set[rem_id].height_prior()+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.set[rem_id].peak_height)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -2171,17 +2176,25 @@ impl<'a> MotifSet<'a> {
             None
         } else {
 
+            let mut add_base_mot = self.set[extend_id].best_motif();
+            add_base_mot.push(Bp::A);
+            let last_ind = add_base_mot.len()-1;
+            let mut valid_extends: Vec<Bp> = Vec::with_capacity(BASE_L);
+            for &b in BP_ARRAY.iter() {
+                add_base_mot[last_ind] = b;
+                if self.data_ref.data().seq().kmer_in_seq(&add_base_mot) { valid_extends.push(b); }
+            }
+            if valid_extends.len() == 0 { return None; }
+
+            let new_bp = valid_extends.choose(rng).expect("We already returned if there are no valid extensions");
+            
             let mut new_mot = self.set[extend_id].clone();
-            let new_base = Base::propose_safe_new(rng);
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base);
+            let new_base = Base::propose_safe_new(rng).make_best(*new_bp);
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) - (valid_extends.len() as f64).ln();
             new_mot.pwm.push(new_base);
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
-            if self.data_ref.data().seq().kmer_in_seq(&new_mot.best_motif()) { //When we extend a motif, its best base sequence may no longer be in the sequence
-                let ln_post = new_set.replace_motif(new_mot, extend_id);
-                Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
-            } else {
-                None
-            }
+            let ln_post = new_set.replace_motif(new_mot, extend_id);
+            Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
 
@@ -2196,9 +2209,10 @@ impl<'a> MotifSet<'a> {
             None
         } else {
             let mut new_mot = self.set[contract_id].clone();
+            let new_mot_bps = new_mot.best_motif();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")));
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")))-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -2876,6 +2890,31 @@ impl<'a> SetTrace<'a> {
 
     }
 
+    pub fn advance_only_shuffles<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, do_base_leap: bool, rng: &mut R) {
+
+        let mut set = match do_base_leap {
+            true => self.active_set.base_leap(rng),
+            false => self.active_set.secondary_shuffle(rng),
+        };
+
+        if let Some(tracker) = track {
+            let tracked = self.active_set.measure_movement(&mut set);
+            let total_id = if do_base_leap { VARIANT_CUMULATIVE[4] } else { VARIANT_CUMULATIVE[5] };
+            tracker.document_motion(total_id, Some((tracked, true)));
+        }
+
+        self.sparse_count = (self.sparse_count+1) % self.sparse;
+
+        if self.sparse_count == 0 {
+
+            //This order INCLUDES the last possible motif set
+            //and specifically EXCLUDES the initial state
+            self.trace.push(StrippedMotifSet::from(&set));
+        }
+
+        self.active_set = set;
+
+    }
 
     //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
     //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
@@ -3613,14 +3652,30 @@ impl<'a> TemperSetTraces<'a> {
         Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
     }
 
-    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, rng_maker: fn() -> R) {
+    pub fn do_shuffles<R: Rng+?Sized>(&mut self, number_secondaries: usize, rng: &mut R) {
 
-        //This actually does the execution of all of our regular monte carlo setup
-        self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
-            let mut rng = rng_maker();
-            for _ in 0..iters_before_swaps { set.advance(track.as_mut(), &mut rng); }
+        self.parallel_traces.iter_mut().for_each(|(set, track)| {
+            set.advance_only_shuffles(track.as_mut(), true, rng);
+            for _ in 0..number_secondaries { set.advance_only_shuffles(track.as_mut(), false, rng); } 
         });
 
+    }
+
+    pub fn iter_and_swap<R: Rng>(&mut self, iters_between_shuffles: usize, iters_before_swaps: usize, rng_maker: fn() -> R) {
+
+
+
+        let mut rng = rng_maker();
+        
+        for _ in 0..iters_before_swaps {
+       
+            self.do_shuffles(5, &mut rng);
+            //This actually does the execution of all of our regular monte carlo setup
+            self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
+                let mut rng = rng_maker();
+                for _ in 0..iters_between_shuffles { set.advance(track.as_mut(), &mut rng); }
+            });
+        }
         //This swaps the pairs of adjacent traces starting from index 1
         let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
@@ -3952,7 +4007,7 @@ mod tester{
         let bp_vec: Vec<Bp> = u64_vec.iter().map(|&a| Sequence::u64_to_kmer(a, 32)).flatten().collect();
 
 
-        println!("{:?} {:?}", bp_vec, usize_vec);
+        println!("{:?} {:?}", &bp_vec[0..10], &usize_vec[0..10]);
 
         let bad_safe_access = Instant::now();
         let accessed_c: Vec<f64> = usize_vec.iter().map(|&b| base.props[b]).collect();
@@ -3967,9 +4022,9 @@ mod tester{
         let unsafe_time = unsafe_access.elapsed();
 
 
-        println!("{:?}", accessed);
-        println!("{:?}", accessed_b);
-        println!("{:?}", accessed_c);
+        println!("{:?}", accessed.len());
+        println!("{:?}", accessed_b.len());
+        println!("{:?}", accessed_c.len());
         println!("safe {:?} unsafe {:?} bad_safe: {:?}", safe_time, unsafe_time, bad_safe_time);
     }
 
