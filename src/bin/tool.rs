@@ -239,12 +239,12 @@ fn main() {
         println!("push {step}");
         initialization_chains.iter_and_swap(10, steps_per_exchange_attempt, rand::thread_rng);
 
-        if step % 5 == 0 {
+      //  if step % 5 == 0 {
 
             initialization_chains.print_acceptances(TrackingOptions::TrackAllTraces);
 
-        }
-        if ((step+1) % 5 == 0) || (step+1 == pushes) {
+      //  }
+      //  if ((step+1) % 5 == 0) || (step+1 == pushes) {
         
             let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
 
@@ -254,7 +254,7 @@ fn main() {
             
             initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
 
-        }
+    //    }
 
     }
 
