@@ -170,9 +170,7 @@ impl Sequence {
 
         
         let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
-            let cap = if a < 11 { 
-                if let Some(cap) = 4_usize.checked_pow((a+MIN_BASE) as u32) { cap } else {4_usize.pow(10) }
-            } else {4_usize.pow(10)};
+            let cap: usize = 262144;
             Vec::with_capacity(cap)
         });
 
@@ -202,7 +200,7 @@ impl Sequence {
     pub fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
         
-        let max_possible_lenmers:usize = (4_usize.pow(len as u32)).min(self.block_lens.iter().sum::<usize>()-self.block_lens.len()*len);
+        let max_possible_lenmers:usize = 262144;
 
         let mut unel: Vec<u64> = Vec::with_capacity(max_possible_lenmers);
         
