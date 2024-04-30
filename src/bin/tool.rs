@@ -171,7 +171,7 @@ fn main() {
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+2);
 
-    let steps_per_exchange_attempt: usize = 500;
+    let steps_per_exchange_attempt: usize = 50;
 
 
     let mut rng = rand::thread_rng();

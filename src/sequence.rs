@@ -170,8 +170,7 @@ impl Sequence {
 
         
         let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
-            let cap: usize = 262144;
-            Vec::with_capacity(cap)
+            Vec::new()
         });
 
         let mut kmer_id_dict: Vec<HashMap<u64, usize>> = Vec::with_capacity(MAX_BASE+1-MIN_BASE);
@@ -200,9 +199,8 @@ impl Sequence {
     pub fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
         
-        let max_possible_lenmers:usize = 262144;
 
-        let mut unel: Vec<u64> = Vec::with_capacity(max_possible_lenmers);
+        let mut unel: Vec<u64> = Vec::new();
         
         for i in 0..self.block_lens.len() {
             
