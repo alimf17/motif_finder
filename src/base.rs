@@ -214,7 +214,12 @@ pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c2000000
         
 //This was NOT chosen randomly. I picked it so that proportions are
 //all normal numbers
-const BARRIER: f64 = 2044_f64*LN_2;
+//const BARRIER: f64 = 2044_f64*LN_2;
+
+//SAFETY: THRESH should be established at this point
+static BARRIER: Lazy<f64> = Lazy::new(|| unsafe {
+                                      println!("THRESH is {THRESH}");
+                                      -2.0* THRESH.ln() } );
 
 //BEGIN BASE
 
@@ -729,9 +734,9 @@ impl Base {
     fn terminate_refect(triple: &[f64; BASE_L-1]) -> Option<usize> {
         
 
-        let first_checks = [triple[0].abs()+triple[1].abs()-BARRIER,
-                            triple[0].abs()+triple[2].abs()-BARRIER,
-                            triple[1].abs()+triple[2].abs()-BARRIER];
+        let first_checks = [triple[0].abs()+triple[1].abs()-*BARRIER,
+                            triple[0].abs()+triple[2].abs()-*BARRIER,
+                            triple[1].abs()+triple[2].abs()-*BARRIER];
 
         let mut first_barrier: Option<(usize, f64)> = None;
 
@@ -772,12 +777,12 @@ impl Base {
         //We need to pick the biggest problem, because that's the first reflection
         if sum.abs() > diff.abs() {
             let sign = sum.signum();
-            new_triple[i] = -new_triple[i]+sign*BARRIER;
-            new_triple[j] = -new_triple[j]+sign*BARRIER;
+            new_triple[i] = -new_triple[i]+sign* *BARRIER;
+            new_triple[j] = -new_triple[j]+sign* *BARRIER;
         } else {
             let sign  = diff.signum();
-            new_triple[i] += sign*BARRIER;
-            new_triple[j] -= sign*BARRIER;
+            new_triple[i] += sign* *BARRIER;
+            new_triple[j] -= sign* *BARRIER;
         }
        
         new_triple
@@ -1576,7 +1581,9 @@ impl Motif {
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
-                if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //SAFETY: THRESH is never modified at this point
+                if bind_score_floats[starts[i]*BP_PER_U8+j] > unsafe {THRESH} {
                     actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height) ;
 
                     //SAFETY: 
@@ -1617,7 +1624,9 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //SAFETY: THRESH is never modified at this point
+                if binds.0[starts[i]*BP_PER_U8+j] > unsafe{THRESH} {
                     actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]*self.peak_height) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
@@ -2030,7 +2039,7 @@ impl<'a> MotifSet<'a> {
     //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     //for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
-        -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
+        -((self.set.len()-1) as f64)* unsafe{ NECESSARY_MOTIF_IMPROVEMENT } 
     }
 
     pub fn ln_prior(&self) -> f64 {
@@ -2606,7 +2615,7 @@ impl StrippedMotifSet {
     }
 
     pub fn motif_num_prior(&self) -> f64 {
-        -((self.set.len()-1) as f64)* *NECESSARY_MOTIF_IMPROVEMENT.read().expect("no writes expected now")
+        -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
 
     pub fn ln_prior(&self, seq: &Sequence) -> f64 {
@@ -3666,15 +3675,17 @@ impl<'a> TemperSetTraces<'a> {
 
 
         let mut rng = rng_maker();
-        
-        for _ in 0..iters_before_swaps {
+         
+        for i in 0..iters_before_swaps {
        
             self.do_shuffles(5, &mut rng);
+            println!("Did {i} shuffle out of {iters_before_swaps}");
             //This actually does the execution of all of our regular monte carlo setup
             self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
                 let mut rng = rng_maker();
                 for _ in 0..iters_between_shuffles { set.advance(track.as_mut(), &mut rng); }
             });
+            println!("Did {i} advance out of {iters_before_swaps}");
         }
         //This swaps the pairs of adjacent traces starting from index 1
         let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
@@ -5170,7 +5181,7 @@ mod tester{
 
                 let cut_low = if space*j >= kernel_mid+half_len {start_bases[i]+space*j-(kernel_mid+half_len)} else {start_bases[i]} ;
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
-                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > *THRESH.read().expect("no writes expected now")).collect::<Vec<_>>();
+                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > unsafe{ THRESH } ).collect::<Vec<_>>();
 
 
                 if relevant_binds.len() > 0 {

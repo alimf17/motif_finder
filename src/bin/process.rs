@@ -65,8 +65,8 @@ pub fn main() {
     match potential_prior_change {
         Some(credibility) => {
             if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
-            let mut w = NECESSARY_MOTIF_IMPROVEMENT.write().expect("This should be the only thread writing or reading to this");
-            *w = credibility;
+            //SAFETY: This is never a multithreaded spot
+            unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
         },
         None => (),
     };

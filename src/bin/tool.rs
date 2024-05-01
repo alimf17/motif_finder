@@ -33,18 +33,18 @@ fn main() {
     //8) Number of advances to run the set trace
     //9) The minimum thermodynamic beta for the chains. The absolute value of this will be taken, and if you give a number > 1.0, the reciprocal will be taken instead
     //10) The number of intermediate traces between the base inference chain and the minimum thermodynamic beta chain. Must be a non-negative integer
-    //May also have the following arguments:
 
-    //10) A non negative double for how much to scale the cutoff for a data block
+    //11) A non negative double for how much to scale the cutoff for a data block
     //   to be considered peaky: less than 1.0 is more permissive, greater than 1.0 
-    //   is more strict
-    //11) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
+    //   is more strict. If this exists but can't parse to a double, it's turned into a 1.0
+    //May also have the following arguments:
+    //12) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
     //   extensions and contractions on a single motif Will only work if (9) included
-    //12) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
+    //13) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
     //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included
-    //13) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
+    //14) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
     //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included 
-    //14) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
+    //15) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
     //    being considered. Will only work if (9), (10), (11), and (12) included
     //
     //Penultimate argument) Either the word "meme" or the word "json". If one of these is not the argument,
@@ -55,7 +55,7 @@ fn main() {
     //   If they're not identical, the program will panic on the spot
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 10 {
+    if args.len() < 11 {
         panic!("Not enough arguments!");
     }
 
@@ -83,7 +83,7 @@ fn main() {
     }
     
     let mut check_for_init: bool = true;
-    let base_check_index: usize = 11;
+    let base_check_index: usize = 12;
     let mut init_check_index: usize = base_check_index;
 
     while check_for_init {
@@ -105,8 +105,11 @@ fn main() {
     if init_check_index > base_check_index {
         peak_cutoff = args[base_check_index].parse().ok();
         run_name = match peak_cutoff{
+            None | Some(1.0) => {
+                peak_cutoff = None;
+                args[1].clone()
+            },
             Some(a) => format!("{}_custom_scale_{}", args[1].as_str(), args[9]),
-            None => args[1].clone(),
         };
     } else {
         run_name = args[1].clone();
@@ -139,24 +142,23 @@ fn main() {
     }
 
 
+   
     if init_check_index > base_check_index+3 { 
         let threshold: f64 = args[base_check_index+3].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(threshold > 0.0) || (threshold >= 1.0) {panic!("Peak drawing threshold must be a valid strictly positive float strictly less than 1.0");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
-        let mut w = THRESH.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        *w = threshold; 
+        unsafe { THRESH = threshold; }
     }
     if init_check_index > base_check_index+4 { 
         let credibility: f64 = args[base_check_index+4].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
-        let mut w = NECESSARY_MOTIF_IMPROVEMENT.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        *w = credibility; 
+        unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
     }
 
-
+    println!("Args parsed");
 
 
     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR, peak_cutoff).unwrap();

@@ -47,7 +47,11 @@ pub static PROPOSE_EXTEND: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
 
 pub static DIRICHLET_PWM: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
 
-pub static THRESH: RwLock<f64> = RwLock::new(1e-6);
+//pub static THRESH: RwLock<f64> = RwLock::new(1e-6);
 
-pub static NECESSARY_MOTIF_IMPROVEMENT: RwLock<f64> = RwLock::new(5.0_f64);
+//pub static NECESSARY_MOTIF_IMPROVEMENT: RwLock<f64> = RwLock::new(5.0_f64);
+
+pub static mut THRESH: f64 = 1e-3;
+
+pub static mut NECESSARY_MOTIF_IMPROVEMENT: f64 = 50.0_f64;
 
