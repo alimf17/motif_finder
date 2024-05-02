@@ -53,5 +53,5 @@ pub static DIRICHLET_PWM: OnceCell<SymmetricBaseDirichlet> = OnceCell::new();
 
 pub static mut THRESH: f64 = 1e-3;
 
-pub static mut NECESSARY_MOTIF_IMPROVEMENT: f64 = 50.0_f64;
+pub static mut NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 

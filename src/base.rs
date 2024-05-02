@@ -123,7 +123,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 0.;
+pub const MIN_HEIGHT: f64 = 0.5;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -160,7 +160,7 @@ const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
 const VARIANT_NUMS: [usize; 6] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -1587,8 +1587,10 @@ impl Motif {
                 //  -block = i, which is always less than the number of sequence blocks
                 //  -center = j, which is always less than the number of bps in the Sequence by at least the motif length if Sequence is correctly constructed
                 //SAFETY: THRESH is never modified at this point
-                if unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)} > unsafe {THRESH} {
-                    actual_kernel = unit_kernel*(*unsafe{bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)}*self.peak_height) ;
+
+                let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
+                if bind > unsafe {THRESH} {
+                    actual_kernel = unit_kernel*(bind*self.peak_height) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -3702,8 +3704,8 @@ impl<'a> TemperSetTraces<'a> {
          
         for i in 0..iters_before_swaps {
        
-            self.do_shuffles(1, &mut rng);
-            println!("Did {i} shuffle out of {iters_before_swaps}");
+            //self.do_shuffles(1, &mut rng);
+            //println!("Did {i} shuffle out of {iters_before_swaps}");
             //This actually does the execution of all of our regular monte carlo setup
             self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
                 let mut rng = rng_maker();
@@ -3754,10 +3756,12 @@ impl<'a> TemperSetTraces<'a> {
             TrackingOptions::NoTracking => (),
             TrackingOptions::TrackTrueTrace => {
                 println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
+                println!("Motif heights: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
                 self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
             TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| { 
                 println!("Thermodynamic beta: {}", b.0.thermo_beta);
                 println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
+                println!("Motif heights: {:?}", b.0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
                 b.1.as_ref().map(|a| a.give_status())
             }).collect::<Vec<_>>();},
         }
