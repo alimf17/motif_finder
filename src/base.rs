@@ -3520,7 +3520,7 @@ impl MoveTracker {
         let v: Vec<String> = (0..NUM_MOVES).map(|i|
                                                 {
                                                     let file = format!("{}{}", base_file_name,HIST_END_NAMES[i]);
-                                                    let plotting = BitMapBackend::new(&file, (2000, 1000)).into_drawing_area();
+                                                    let plotting = BitMapBackend::new(&file, (8000, 4000)).into_drawing_area();
                                                     (i, self.sort_move_hists(i, &plotting, num_bins))
                                                 }).filter(|(_,x)| x.is_err()).map(|(i, a)| {
                                                     let mut m = a.unwrap_err();
