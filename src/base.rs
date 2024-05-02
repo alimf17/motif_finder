@@ -42,6 +42,7 @@ use rayon::prelude::*;
 use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
 use plotters::coord::Shift;
+use plotters::prelude::full_palette::ORANGE;
 
 use log::warn;
 
@@ -3088,11 +3089,28 @@ impl<'a> SetTrace<'a> {
 
         let signal_file: String = format!("{}/{}_occupancy_signal_{:0>7}.png",output_dir,run_name,zeroth_step);
 
-        let plot = BitMapBackend::new(&signal_file, (3000, 1200)).into_drawing_area();
+
+        let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
+
+        let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
         plot.fill(&WHITE).unwrap();
 
-        let (upper, lower) = plot.split_vertically((86).percent_height());
+        let (left, right) = plot.split_horizontally((95).percent_width());
+
+        let (right_space, _) = right.split_vertically((95).percent_height());
+
+        let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+
+        bar.configure_mesh()
+            .y_label_style(("sans-serif", 40))
+            .disable_mesh().draw().unwrap();
+
+        let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
+
+        bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
+
+        let (upper, lower) = left.split_vertically((86).percent_height());
 
         let mut chart = ChartBuilder::on(&upper)
             .set_label_area_size(LabelAreaPosition::Left, 100)
@@ -3128,18 +3146,23 @@ impl<'a> SetTrace<'a> {
 
         let max_abs_resid = current_resid.read_wave().iter().map(|&a| a.abs()).max_by(|x,y| x.partial_cmp(y).unwrap()).unwrap();
 
-        let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(a, b)| (a/b).abs()).zip(locs.iter()).map(|(a, &b)| (a, b as f64)).collect();
+        let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(&a, _)| {
+
+            let tup = self.data_ref.background_ref().cd_and_sf(a);
+            if tup.0 >= tup.1 { (tup.0-0.5)*2.0 } else {(tup.1-0.5)*2.0} } ).zip(locs.iter()).map(|(a, &b)| (a, b as f64)).collect();
 
         let mut map = ChartBuilder::on(&lower)
             .set_label_area_size(LabelAreaPosition::Left, 100)
             .set_label_area_size(LabelAreaPosition::Bottom, 50)
             .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-        map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Proportion Residual Error").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+        map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
-        let derived_color = DerivedColorMap::new(&[WHITE,YELLOW, RED]);
 
-        map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0/max_abs_resid).filled()))).unwrap();
+        map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
+
+
+
 
 
     }
@@ -3565,7 +3588,7 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 
     let mut hist = ChartBuilder::on(area);
 
-    hist.margin(10).y_label_area_size(200).x_label_area_size(100);
+    hist.margin(10).y_label_area_size(200).x_label_area_size(200);
 
     hist.caption(label, ("Times New Roman", 80));
 
@@ -3581,20 +3604,22 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 
     let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
 
-    hist_context.configure_mesh().x_label_style(("sans-serif", 60))
-        .y_label_style(("sans-serif", 60))
+    hist_context.configure_mesh().x_label_style(("sans-serif", 70))
+        .y_label_style(("sans-serif", 70))
         .x_label_formatter(&|v| format!("{:.0}", v))
-        .x_desc("Genome Location (Bp)")
-        .y_desc("Signal Intensity").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
+        .axis_desc_style(("sans-serif",90))
+        .x_desc("Ln posterior density proposed set/current set")
+        .y_desc("Probability").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
     //hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.filled()).data(trial_data.iter().map(|x| (x, inverse_size)))).unwrap();
     hist_context.draw_series(Histogram::vertical(&hist_context).style(CYAN.mix(0.8).filled()).margin(0).data(hist_form.iter().map(|x| (&x.0, x.1)))).unwrap().label("Proposed Moves").legend(|(x, y)| Rectangle::new([(x-20, y-10), (x, y+10)], Into::<ShapeStyle>::into(&CYAN).filled()));
 
     hist_context.draw_series(Histogram::vertical(&hist_context).style(RED.mix(0.8).filled()).margin(0).data(hist_form_2.iter().map(|x| (&x.0, x.1)))).unwrap().label("Accepted Moves").legend(|(x, y)| Rectangle::new([(x-20, y-10), (x, y+10)], Into::<ShapeStyle>::into(&RED).filled()));
 
-    hist_context.configure_series_labels().position(SeriesLabelPosition::UpperLeft).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+    hist_context.configure_series_labels().position(SeriesLabelPosition::UpperLeft).margin(40).legend_area_size(20).border_style(&BLACK).label_font(("Calibri", 80)).draw().unwrap();
 
     hist
+
 
 }
 
