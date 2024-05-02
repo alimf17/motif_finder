@@ -83,8 +83,8 @@ fn main() {
     }
     
     let mut check_for_init: bool = true;
-    let base_check_index: usize = 12;
-    let mut init_check_index: usize = base_check_index;
+    let base_check_index: usize = 11;
+    let mut init_check_index: usize = base_check_index+1;
 
     while check_for_init {
         match args.get(init_check_index) {
@@ -117,6 +117,7 @@ fn main() {
     if init_check_index > base_check_index+1 { 
         let extend_alpha: f64 = args[base_check_index+1].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
+        println!("e {extend_alpha}");
         if !(extend_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //let mut w = PROPOSE_EXTEND.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
         //*w = Lazy::new(|&extend_alpha| SymmetricBaseDirichlet::new(extend_alpha.clone()).unwrap());
@@ -129,6 +130,7 @@ fn main() {
     if init_check_index > base_check_index+2 { 
         let pwm_alpha: f64 = args[base_check_index+2].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
+        println!("p {pwm_alpha}");
         if !(pwm_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
         //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
@@ -145,6 +147,7 @@ fn main() {
    
     if init_check_index > base_check_index+3 { 
         let threshold: f64 = args[base_check_index+3].parse().expect("We already checked that this parsed to f64");
+        println!("t {threshold}");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
         if !(threshold > 0.0) || (threshold >= 1.0) {panic!("Peak drawing threshold must be a valid strictly positive float strictly less than 1.0");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
@@ -153,6 +156,7 @@ fn main() {
     if init_check_index > base_check_index+4 { 
         let credibility: f64 = args[base_check_index+4].parse().expect("We already checked that this parsed to f64");
         //I wrote the condition as follows in case an argument is passed in that makes this a NaN
+        println!("c {credibility}");
         if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");} 
         //SAFETY: This modification is made before any inference is done, preventing data races
         unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
