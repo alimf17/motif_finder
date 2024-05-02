@@ -1583,14 +1583,13 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
                 //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //SAFETY: 
+                //  -block = i, which is always less than the number of sequence blocks
+                //  -center = j, which is always less than the number of bps in the Sequence by at least the motif length if Sequence is correctly constructed
                 //SAFETY: THRESH is never modified at this point
-                if bind_score_floats[starts[i]*BP_PER_U8+j] > unsafe {THRESH} {
-                    actual_kernel = unit_kernel*(bind_score_floats[starts[i]*BP_PER_U8+j]*self.peak_height) ;
+                if unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)} > unsafe {THRESH} {
+                    actual_kernel = unit_kernel*(*unsafe{bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)}*self.peak_height) ;
 
-                    //SAFETY: 
-                    //  -block = i, which is always less than the number of sequence blocks
-                    //  -center = j, which is always less than the number of bps in the Sequence if Sequence is correctly constructed
-                    //  -
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
                 }
@@ -3703,7 +3702,7 @@ impl<'a> TemperSetTraces<'a> {
          
         for i in 0..iters_before_swaps {
        
-            self.do_shuffles(5, &mut rng);
+            self.do_shuffles(1, &mut rng);
             println!("Did {i} shuffle out of {iters_before_swaps}");
             //This actually does the execution of all of our regular monte carlo setup
             self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
