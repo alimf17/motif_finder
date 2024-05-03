@@ -144,7 +144,7 @@ const SD_LEAST_MOVE_SINGLE: f64 = 1.0;
 
 const HEIGHT_MOVE_SD: f64 = 1.0;
 
-const PROB_POS_PEAK: f64 = 0.9;
+const PROB_POS_PEAK: f64 = 1.0;
 
 
 
@@ -2323,7 +2323,11 @@ impl<'a> MotifSet<'a> {
 
             let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold);
 
-            let ids_cartesian_bools = kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>();
+            let ids_cartesian_bools = if PROB_POS_PEAK == 1.0 {
+                kmer_ids.into_iter().map(|k| (k, false)).collect::<Vec<_>>()
+            } else {
+                kmer_ids.into_iter().flat_map(|k| [(k, true), (k, false)]).collect::<Vec<_>>()
+            };
 
             let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_par_iter().map(|a| {
                 //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {//}

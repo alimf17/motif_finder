@@ -103,7 +103,17 @@ pub fn main() {
 
         chain_files.sort();
 
+
+        let skip_some: bool = if min_chain == 0 && chain_files.len() > 1 { true } else {false};
+
         let mut iter_files = chain_files.iter();
+
+
+        if skip_some { 
+            for _ in 1..(chain_files.len().min(5)){
+            _ = iter_files.next(); 
+            }
+        }
 
         let file_y = iter_files.next();
 
