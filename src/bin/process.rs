@@ -17,6 +17,7 @@ use ndarray::prelude::*;
 use regex::Regex;
 
 use poloto;
+use poloto::Croppable;
 use plotters::prelude::*;
 use plotters::prelude::full_palette::*;
 
@@ -283,6 +284,13 @@ pub fn main() {
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         let tracey = trace.ln_posterior_trace();
+        let mut ordered_tracey = tracey.clone();
+        ordered_tracey.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        let minind = ordered_tracey.len()/10;
+        let maxind = (ordered_tracey.len()*9)/10;
+        let mid = (ordered_tracey[maxind]+ordered_tracey[minind])/2.0;
+        let min_y = mid-(mid-ordered_tracey[minind])*1.5;
+        let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
         //let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
         //let samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
         /*let res = samples_fft_to_spectrum(
@@ -292,7 +300,7 @@ pub fn main() {
         None,).unwrap();
         let daaa = res.data().iter().map(|(a, b)| (a.val(), b.val().powi(2)/(4.0*16384.))).collect::<Vec<_>>();
         //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());*/
-        plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
         let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&vec![tracey.clone()], 1000);
 
         let color = unsafe{*PALETTE.as_ptr().add(i)};
