@@ -2319,7 +2319,12 @@ impl<'a> MotifSet<'a> {
             let mut base_set = current_set.clone();
             base_set.remove_motif_void(id);
             //This was numerically derived, and not a hard rule. I wanted less than 150 kmers per leap
-            let threshold = if current_mot.len() < 12 {2} else { (current_mot.len()+1)/2-4}; 
+            //Numerically, the answers I got when I tried to solve the equation 
+            //(n choose k)*4^(k-n)*sequence.len()= 300 looked a lot like
+            //k = n/2+2-(0.5*sequence.len().ln()).ceil(), where k is hamming distance of a current n-mer
+            //I don't know why. This is strictly a numerical analysis.
+            //If YOU have a way to invert (n choose k)*4^(k-n), be my guest. 
+            let threshold = if current_mot.len() < 10 {2} else { current_mot.len()/2-2}; 
 
             let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold);
 
@@ -3715,7 +3720,7 @@ impl<'a> TemperSetTraces<'a> {
                 let mut rng = rng_maker();
                 for _ in 0..iters_between_shuffles { set.advance(track.as_mut(), &mut rng); }
             });
-            println!("Did {i} advance out of {iters_before_swaps}");
+            //println!("Did {i} advance out of {iters_before_swaps}");
         }
         //This swaps the pairs of adjacent traces starting from index 1
         let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {

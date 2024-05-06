@@ -671,19 +671,19 @@ pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(V
 
         for base_vector in base_vecs.axis_iter(ndarray::Axis(0)) {
 
-            println!("b len {}", base_vector.dim());
+            //println!("b len {}", base_vector.dim());
             let x_ind = ((base_vector[0]-(-SQRT_2/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
             let y_ind = ((base_vector[1]-(-SQRT_2/SQRT_3))/INTERVAL_CELL_LENGTH).floor() as usize;
             let z_ind = ((base_vector[2]-(-1.0/3.))/INTERVAL_CELL_LENGTH).floor() as usize;
             if x_ind >= x_steps { println!("about to break x {} {}", x_ind, x_steps);}
             if y_ind >= y_steps { println!("about to break y {} {}", y_ind, y_steps);}
             if z_ind >= z_steps { println!("about to break z {} {}", z_ind, z_steps);}
-            println!("dim {:?} x {} y {} z {}", cell_counts.dim(), x_ind, y_ind, z_ind);
+            //println!("dim {:?} x {} y {} z {}", cell_counts.dim(), x_ind, y_ind, z_ind);
             cell_counts[[x_ind, y_ind, z_ind]] += 1;
 
         }
 
-        println!("{cell_counts} counts of cell"); 
+        //println!("{cell_counts} counts of cell"); 
  
         let mut cells_and_counts = cell_counts.indexed_iter().map(|(a, &b)| (a, b)).collect::<Vec<_>>();
 
