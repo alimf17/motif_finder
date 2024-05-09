@@ -1582,7 +1582,7 @@ impl Motif {
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
-                //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {i //}
                 //SAFETY: 
                 //  -block = i, which is always less than the number of sequence blocks
                 //  -center = j, which is always less than the number of bps in the Sequence by at least the motif length if Sequence is correctly constructed
@@ -1626,7 +1626,7 @@ impl Motif {
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {
+                //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
                 //SAFETY: THRESH is never modified at this point
                 if binds.0[starts[i]*BP_PER_U8+j] > unsafe{THRESH} {
                     actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]*self.peak_height) ;

@@ -575,7 +575,11 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         println!("Creating credible region at {} samples", credible);
         
  
-        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| Base::vect_to_base(tetrahedral_mean).seqlogo_heights()).collect();
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| {
+            let b = Base::vect_to_base(tetrahedral_mean);
+            println!("{:?}", b);
+            b.seqlogo_heights()
+        }).collect();
 
         draw_pwm(&prep_pwm, &format!("{}_pwm.png", file_name));
         //This draws the credible region
