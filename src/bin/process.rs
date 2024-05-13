@@ -351,12 +351,21 @@ pub fn main() {
         println!("Min len {}", min_len);
     }
 
-    let cluster_per_chain: usize = min_len.min(1000);
+    let cluster_per_chain: usize = min_len.min(10000);
 
     let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
     //TODO: generate motif_num_traces plot here
     println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
+
+    let best_motif_sets = set_trace_collections.iter().map(|a| {
+        let ind = a.ln_posterior_trace().iter().enumerate().max_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
+        a.index_into(ind..ind+1)
+    }).collect::<Vec<_>>();
+
+    println!("Best motif sets for each trace: {:?}", best_motif_sets);
+
+    println!("Finish best motif sets");
 
     let total_sets = min_len*set_trace_collections.len();
     let tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;

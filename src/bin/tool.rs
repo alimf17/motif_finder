@@ -77,10 +77,12 @@ fn main() {
 
     min_thermo_beta = min_thermo_beta.abs();
 
+    println!("pre min {min_thermo_beta}");
     if min_thermo_beta > 1.0 {
         warn!("Your min thermodynamic beta was set > 1.0! We're taking the reciprocal!");
         min_thermo_beta = 1.0/min_thermo_beta;
     }
+    println!("post min {min_thermo_beta}");
     
     let mut check_for_init: bool = true;
     let base_check_index: usize = 11;
