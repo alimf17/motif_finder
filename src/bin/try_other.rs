@@ -8,8 +8,8 @@ use std::{fs};
 
 
 fn main() {
-/*
-    let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/MG1655_GSM639836_TrpR_Trp_ln_ratio_custom_scale_1_25_data.bin";
+
+    let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
 
     let bincode_string = bincode_file.to_owned();
 
@@ -27,7 +27,7 @@ fn main() {
 
     let using: AllDataUse = AllDataUse::new(&full_dat).unwrap();
     println!("{} {}", using.size(), using.number_bp());
-
+/*
     let cho_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.62, 21.89, 1.99, 10.81]),
                                        Base::new([10.63, 1.68, 9.72, 1.54]),
@@ -56,7 +56,7 @@ fn main() {
     let cho_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(cho_set), &using, None);
 
     cho_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "cho_set", 0);
-
+*/
     //This is the actual regulonDB set. Its best motif, [A, G, T, A, A, C, T, T, A, C, A, A],
     //does not appear directly in the sequence
     //So I modified it: there are only two motifs that are within hamming distance 2 of it:
@@ -75,8 +75,7 @@ fn main() {
                                        Base::new([0.25, 1.0, 0.125, 0.375]),
                                        Base::new([1.0, 1./7., 5./7., 1./7.]),
                                        Base::new([1.0, 1.0, 0.75, 0.75])], 10.0);
-
-                                       */
+*/
     
     let reg_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([1.0, 0.5, 0.125, 0.125]),
@@ -103,11 +102,15 @@ fn main() {
 
     println!("reg like {}", like);
 
-    let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
+//    2818 |     pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
+
+    let reg_trace = SetTrace::new_trace(1, Some(reg_set), &using, 1.0, None, &mut rng);
+
+//    let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
    
-    reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set");
-    reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set", 0);
-    let swi_mot: Motif = Motif::raw_pwm(vec![
+    reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod");
+    reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod", 0);
+  /*  let swi_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.2, 0.1, 0.1, 1.0]),
                                        Base::new([0.1, 0.2, 0.1, 1.0]),
                                        Base::new([0.2, 0.1, 0.1, 1.0]),
