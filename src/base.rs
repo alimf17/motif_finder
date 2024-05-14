@@ -5130,20 +5130,21 @@ mod tester{
             }
         }
 
+        let rand_pwm = random_motif.pwm();
         for _ in 0..100 {
         
-            let altermot = data_seq.data().seq().random_valid_motif(motif.pwm().len());
+            let altermot = data_seq.data().seq().random_valid_motif(random_motif.pwm().len());
 
-            let forward_defect = altermot.iter().enumerate().map(|(i, &b)| pwm[i][b]).product::<f64>();
-            let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| pwm[i][b.complement()]).product::<f64>();
+            let forward_defect = altermot.iter().enumerate().map(|(i, &b)| rand_pwm[i][b]).product::<f64>();
+            let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| rand_pwm[i][b.complement()]).product::<f64>();
 
             let is_rev = reverse_defect > forward_defect;
 
             let proper_defect = if is_rev {reverse_defect} else {forward_defect};
 
-            println!("for {forward_defect} rev {reverse_defect} is_rev {is_rev}");
+            println!("alter for {forward_defect} rev {reverse_defect} is_rev {is_rev}");
 
-            let bindy = unsafe{ motif.prop_binding(&altermot)};
+            let bindy = unsafe{ random_motif.prop_binding(&altermot)};
 
             assert!(((bindy.0-proper_defect).abs() < 1e-6) && (bindy.1 == is_rev));
 
