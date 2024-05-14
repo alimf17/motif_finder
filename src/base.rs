@@ -276,6 +276,23 @@ impl Bp {
     }
 }
 
+impl fmt::Display for Bp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+        //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
+        
+        let chara = match self{
+            Bp::A => "A",
+            Bp::C => "C", 
+            Bp::G => "G", 
+            Bp::T => "T",
+        };
+        write!(f, "{}", chara);
+        Ok(())
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Base {
    props: [ f64; BASE_L],
@@ -5088,7 +5105,48 @@ mod tester{
                 assert!(((bindy.0-defect).abs() < 1e-6) && !bindy.1);
                 assert!(((rbind.0-defect).abs() < 1e-6) && rbind.1);
 
+                println!("for pre {:?}, rev pre {:?}", for_mot, rev_mot);
+                for k in 0..motif.len() {
+                    if k != i {
+                        for m in BP_ARRAY {
+
+                            let defect_2 = defect*pwm[k][m];
+                            let mut for_mot_2 = for_mot.clone();
+                            for_mot_2[k] = m;
+                            let mut rev_mot_2 = rev_mot.clone();
+                            rev_mot_2[motif.len()-1-k] = m.complement();
+
+                            println!("for {k} {m} {:?}, rev {k} {m} {:?}", for_mot_2, rev_mot_2);
+                            let bindy = unsafe{ motif.prop_binding(&for_mot_2)};
+                            let rbind = unsafe{ motif.prop_binding(&rev_mot_2) };
+
+                            println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
+                            assert!(((bindy.0-defect_2).abs() < 1e-6) && !bindy.1);
+                            assert!(((rbind.0-defect_2).abs() < 1e-6) && rbind.1);
+                        }
+                    }
+                }
+            
             }
+        }
+
+        for _ in 0..100 {
+        
+            let altermot = data_seq.data().seq().random_valid_motif(motif.pwm().len());
+
+            let forward_defect = altermot.iter().enumerate().map(|(i, &b)| pwm[i][b]).product::<f64>();
+            let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| pwm[i][b.complement()]).product::<f64>();
+
+            let is_rev = reverse_defect > forward_defect;
+
+            let proper_defect = if is_rev {reverse_defect} else {forward_defect};
+
+            println!("for {forward_defect} rev {reverse_defect} is_rev {is_rev}");
+
+            let bindy = unsafe{ motif.prop_binding(&altermot)};
+
+            assert!(((bindy.0-proper_defect).abs() < 1e-6) && (bindy.1 == is_rev));
+
         }
 
         let wave_block: Vec<u8> = vec![2,0,0,0, 170, 170, 170, 170, 170, 170, 170, 170,170, 170, 170, 170, 170, 170, 170]; 
