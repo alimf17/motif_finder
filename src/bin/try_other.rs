@@ -9,8 +9,9 @@ use std::{fs};
 
 fn main() {
 
-    let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
+    //let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
 
+    let bincode_file = "/Users/afarhat/Downloads/sequence(1)_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
     let bincode_string = bincode_file.to_owned();
 
     println!("db {bincode_file}");
@@ -78,7 +79,18 @@ fn main() {
 */
     
     let reg_mot: Motif = Motif::raw_pwm(vec![
-                                       Base::new([1.0, 0.5, 0.125, 0.125]),
+                                         Base::new([0.700000, 0.300000, 0.000000, 0.000000]),
+                                         Base::new([0.000000, 0.000000, 0.600000, 0.400000]),
+                                         Base::new([0.200000, 0.100000, 0.000000, 0.700000]),
+                                         Base::new([0.000000, 0.000000, 0.700000, 0.300000]),
+                                         Base::new([0.600000, 0.000000, 0.000000, 0.400000]),
+                                         Base::new([0.900000, 0.000000, 0.100000, 0.000000]),
+                                         Base::new([0.000000, 1.000000, 0.000000, 0.000000]),
+                                         Base::new([0.000000, 0.000000, 0.100000, 0.900000]),
+                                         Base::new([0.800000, 0.000000, 0.200000, 0.000000]),
+                                         Base::new([0.000000, 0.000000, 1.000000, 0.000000]),
+                                         Base::new([0.000000, 0.000000, 0.000000, 1.000000]),
+                                     /*  Base::new([1.0, 0.5, 0.125, 0.125]),
                                        Base::new([1./7., 1./7., 1.0, 5./7.]),
                                        Base::new([0.375, 0.25, 0.125, 1.0]),
                                        Base::new([1.0, 1./7., 1./7., 5./7.]),
@@ -87,9 +99,10 @@ fn main() {
                                        Base::new([0.1, 0.1, 0.2, 1.0]),
                                        Base::new([1./11., 1./11., 1./11., 1.0]),
                                        Base::new([1.0, 1./6., 1./3., 2./3.]),
-                                       Base::new([0.25, 1.0, 0.125, 0.375]),
-                                       Base::new([1./7., 1./7., 5./7., 1.0]),
-                                       Base::new([0.75, 0.99, 1.0, 0.75])], 10.0);
+                                       //Base::new([0.25, 1.0, 0.125, 0.375]),
+                                       //Base::new([1./7., 1./7., 5./7., 1.0]),
+                                       //Base::new([0.75, 0.99, 1.0, 0.75]) */
+    ], 10.0);
 
 
 
@@ -108,8 +121,10 @@ fn main() {
 
 //    let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
    
-    reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod");
-    reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod", 0);
+    //reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod");
+    //reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod", 0);
+    reg_trace.save_initial_state("/Users/afarhat/Downloads/", "reg_set_omit");
+    reg_trace.save_trace("/Users/afarhat/Downloads/", "reg_set_omit", 0);
   /*  let swi_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.2, 0.1, 0.1, 1.0]),
                                        Base::new([0.1, 0.2, 0.1, 1.0]),

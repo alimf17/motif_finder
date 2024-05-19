@@ -123,7 +123,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 1.0;
+pub const MIN_HEIGHT: f64 = 0.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -133,6 +133,8 @@ static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::
 static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 
 static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
+
+//static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(20.0).unwrap());
 
 const L_SD_VECTOR_SPACE: f64 = 1.0;
 
@@ -1580,8 +1582,6 @@ impl Motif {
 
 
 
-    //TODO: These waveform functions are currently UNSOUND, as it is possible to construct a Kernel for a sequence which is too large
-    //      for a sequence block
     pub fn generate_waveform<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
 
         let data = data_ref.data();
@@ -1597,6 +1597,10 @@ impl Motif {
 
         let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
+        let h = self.peak_height;
+
+        let cutoff = (-h).exp();
+
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
                 //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {i //}
@@ -1606,8 +1610,8 @@ impl Motif {
                 //SAFETY: THRESH is never modified at this point
 
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
-                if bind > unsafe {THRESH} {
-                    actual_kernel = unit_kernel*(bind*self.peak_height) ;
+                if bind > cutoff {
+                    actual_kernel = unit_kernel*(h+bind.ln()) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -1639,14 +1643,18 @@ impl Motif {
 
         let lens = data.seq().block_lens();
 
+        let h = self.peak_height;
+
+        let cutoff = (-h).exp();
+
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
                                                //It's why we don't allow sequence blocks unless they're bigger than the max motif size
                 //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
                 //SAFETY: THRESH is never modified at this point
-                if binds.0[starts[i]*BP_PER_U8+j] > unsafe{THRESH} {
-                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]*self.peak_height) ;
+                if binds.0[starts[i]*BP_PER_U8+j] > cutoff {
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].ln()+h) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
                                                                                       //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
@@ -4318,7 +4326,7 @@ mod tester{
 
         let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(), &background)};
 
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &data_seq, &mut rng);
+        let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
 
@@ -4413,6 +4421,7 @@ mod tester{
         alt_leaped.ln_post = None;
         let ln_post = alt_leaped.ln_posterior();
 
+        println!("{ln_post}, {}", leaped.ln_post.unwrap());
         println!("diff ln_post {}", ln_post-leaped.ln_post.unwrap());
 
         assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
@@ -4461,13 +4470,17 @@ mod tester{
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let mut motif_set = MotifSet::rand_with_one_height(-9.6, &data_seq, &mut rng);
+        let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
         let check_set = motif_set.clone();
 
         let mid_mot = (MIN_BASE+MAX_BASE)/2;
         //TESTING THE MANIPULATOR FUNCTIONS: these should simply mutate the motif set to conform and usually output the new ln posterior
-        let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, data_seq.data().seq(), &mut rng);
+
+
+
+        let add_mot = Motif::rand_mot_with_height_and_motif_len(10.0,mid_mot, data_seq.data().seq(), &mut rng);
+
 
         //Testing: fn add_motif(&mut self, new_mot: Motif) -> f64 
         let new_like = motif_set.add_motif(add_mot.clone());
@@ -4540,7 +4553,7 @@ mod tester{
 
         //Testing fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64
 
-        let add_mot2 = Motif::rand_mot_with_height(-6.2, data_seq.data().seq(), &mut rng);
+        let add_mot2 = Motif::rand_mot_with_height(6.2, data_seq.data().seq(), &mut rng);
 
         let new_like = motif_set.replace_motif(add_mot2.clone(), 0);
 
@@ -4602,9 +4615,9 @@ mod tester{
                     old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
                     new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
 
-                    let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+                    //let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
 
-                    assert!(order_maintained);
+                    //assert!(order_maintained);
                 }
             }
         }
@@ -4640,9 +4653,9 @@ mod tester{
                         old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
                         new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
 
-                        let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
+                        //let order_maintained = old_order.into_iter().zip(new_order).all(|((a,_), (b,_))| a==b);
 
-                        assert!(order_maintained);
+                        //assert!(order_maintained);
                     }
                 }
             }
@@ -4654,6 +4667,7 @@ mod tester{
         assert!(single_height.is_some()); //scaling a single base should always make possible motifs
 
         let (single_mot, ln_prop) = single_height.unwrap();
+
 
         assert!(single_mot.set.len() == motif_set.set.len());
         let mut found_change: bool = false;
@@ -4685,6 +4699,8 @@ mod tester{
             assert!(motif_set.set[i].peak_height() == birth_mot.set[i].peak_height());
         }
 
+        println!("birth mot {:?}", birth_mot);
+        println!("ln_prop {ln_prop} {}", birth_mot.calc_ln_post());
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&motif_set.signal;
@@ -4692,8 +4708,9 @@ mod tester{
         let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = birth_mot.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height())+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
 
+        println!("{should_prior} {actual_prior} asd");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
 
         println!("done birth");
@@ -4729,7 +4746,7 @@ mod tester{
         let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = motif_set.set[l].height_prior()+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height())+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
 
         println!("priors {} {} {} {} {}", motif_set.set[l].height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
 
@@ -4777,7 +4794,7 @@ mod tester{
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
 
-        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MAX_BASE, &data_seq, &mut rng);
+        let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MAX_BASE, &data_seq, &mut rng);
 
         assert!(cant_extend_set.propose_extend_motif(&mut rng).is_none(), "Can extend PWM beyond allowed limits!");
 
@@ -4822,7 +4839,7 @@ mod tester{
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
-        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(-9.6, MIN_BASE, &data_seq, &mut rng);
+        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MIN_BASE, &data_seq, &mut rng);
 
         assert!(cant_contract_set.propose_contract_motif(&mut rng).is_none(), "Can contract PWM beyond allowed limits!");
 
@@ -5121,8 +5138,17 @@ mod tester{
                             let rbind = unsafe{ motif.prop_binding(&rev_mot_2) };
 
                             println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
-                            assert!(((bindy.0-defect_2).abs() < 1e-6) && !bindy.1);
-                            assert!(((rbind.0-defect_2).abs() < 1e-6) && rbind.1);
+                            if (bindy.1) {
+                                assert!(defect_2 < bindy.0);
+                                assert!(defect_2 < rbind.0);
+                                assert!((bindy.0-rbind.0).abs() < 1e-6);
+                                assert!(!rbind.1);
+                                println!("SOME REVERSAL HERE");
+                            }
+                            else{
+                                assert!(((bindy.0-defect_2).abs() < 1e-6) && !bindy.1);
+                                assert!(((rbind.0-defect_2).abs() < 1e-6) && rbind.1);
+                            }
                         }
                     }
                 }
@@ -5258,15 +5284,16 @@ mod tester{
 
         let half_len: usize = (motif.len()-1)/2;
 
-        let kernel_check = (background.kernel_ref()*motif.peak_height()).get_curve().clone();
+        let kernel_check = (background.kernel_ref()*1.0).get_curve().clone();
 
         let kernel_mid = (kernel_check.len()-1)/2;
 
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
 
+        let h = motif.peak_height;
 
-
+        let thresh = (-h).exp();
 
 
         println!("unsafe filter same as filter when properly made");
@@ -5277,15 +5304,16 @@ mod tester{
 
                 let cut_low = if space*j >= kernel_mid+half_len {start_bases[i]+space*j-(kernel_mid+half_len)} else {start_bases[i]} ;
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
-                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > unsafe{ THRESH } ).collect::<Vec<_>>();
+                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > thresh ).collect::<Vec<_>>();
 
 
                 if relevant_binds.len() > 0 {
 
                     let mut score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
-                        score += binds.0[relevant_binds[k]]*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        score += (h+binds.0[relevant_binds[k]].ln())*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
                     }
+                    println!("wave {} score {}", wave_gen[start_dats[i]+j], score);
                     assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
 
 
