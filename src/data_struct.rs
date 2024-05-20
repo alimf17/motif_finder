@@ -48,13 +48,15 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
 pub struct AllData {
 
     seq: Sequence,
-    data: WaveformDef, 
+    data: WaveformDef,
+    start_genome_coordinates: Vec<usize>,
     background: Background,
 
 }
 
 pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
+    start_genome_coordinates: &'a Vec<usize>,
     background: &'a Background,
 }
 
@@ -156,10 +158,10 @@ impl AllData {
 
         let pre_seq_len = pre_seq.len();
 
-        let (seq, data) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_seq_len, spacing); 
+        let (seq, data, starts) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_seq_len, spacing); 
 
         println!("synchronized fasta and data");
-        let full_data: AllData = AllData {seq: seq, data: data, background: background};
+        let full_data: AllData = AllData {seq: seq, data: data, start_genome_coordinates: starts, background: background};
 
         let _ = AllDataUse::new(&full_data)?; //This won't be returned: it's just a validation check.
 
@@ -801,9 +803,10 @@ impl AllData {
 
     //TODO: I need a function which marries my processed FASTA file and my processed data
     //      By the end, I should have a Sequence and WaveformDef, which I can use in my public function to create an AllData instance
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, WaveformDef) {
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, WaveformDef, Vec<usize>) {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
+        let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
 
         let mut i = 0_usize;
 
@@ -836,6 +839,7 @@ impl AllData {
 
             if no_null_base {
                 sequence_blocks.push(bases_batch);
+                starting_coords.push(bp_prior);
                 start_data.append(&mut float_batch);
             } else {
                 //This gives the 1-indexed position of the null base in vim
@@ -853,7 +857,7 @@ impl AllData {
 
         let wave_ret = WaveformDef::from(&wave);
 
-        (seq, wave_ret)
+        (seq, wave_ret, starting_coords)
 
 
     }
@@ -1188,6 +1192,7 @@ impl<'a> AllDataUse<'a> {
 
         Ok( Self{ 
                data: reference_struct.validated_data()?,
+               start_genome_coordinates: &reference_struct.start_genome_coordinates,
                background: reference_struct.background(),
         })
 
@@ -1196,9 +1201,11 @@ impl<'a> AllDataUse<'a> {
     //SAFETY: This must uphold the safety invariant that the kernel length
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
-    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, background: &'a Background) -> Self {
+    //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, start_genome_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
         Self{
-            data: data, 
+            data: data,
+            start_genome_coordinates: start_genome_coordinates,
             background: background,
         }
     }

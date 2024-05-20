@@ -79,17 +79,21 @@ fn main() {
 */
     
     let reg_mot: Motif = Motif::raw_pwm(vec![
-                                         Base::new([0.700000, 0.300000, 0.000000, 0.000000]),
-                                         Base::new([0.000000, 0.000000, 0.600000, 0.400000]),
-                                         Base::new([0.200000, 0.100000, 0.000000, 0.700000]),
-                                         Base::new([0.000000, 0.000000, 0.700000, 0.300000]),
-                                         Base::new([0.600000, 0.000000, 0.000000, 0.400000]),
-                                         Base::new([0.900000, 0.000000, 0.100000, 0.000000]),
-                                         Base::new([0.000000, 1.000000, 0.000000, 0.000000]),
-                                         Base::new([0.000000, 0.000000, 0.100000, 0.900000]),
-                                         Base::new([0.800000, 0.000000, 0.200000, 0.000000]),
-                                         Base::new([0.000000, 0.000000, 1.000000, 0.000000]),
-                                         Base::new([0.000000, 0.000000, 0.000000, 1.000000]),
+                                         Base::new_with_pseudo([0.700000, 0.300000, 0.000000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 0.000000, 0.600000, 0.400000], 10., 0.1),
+                                         Base::new_with_pseudo([0.200000, 0.100000, 0.000000, 0.700000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 0.000000, 0.700000, 0.300000], 10., 0.1),
+                                         Base::new_with_pseudo([0.600000, 0.000000, 0.000000, 0.400000], 10., 0.1),
+                                         Base::new_with_pseudo([0.900000, 0.000000, 0.100000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 1.000000, 0.000000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 0.000000, 0.100000, 0.900000], 10., 0.1),
+                                         Base::new_with_pseudo([0.800000, 0.000000, 0.200000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 0.000000, 1.000000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.000000, 0.000000, 0.000000, 1.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.500000, 0.000000, 0.200000, 0.300000], 10., 0.1),
+                                         Base::new_with_pseudo([0.100000, 0.700000, 0.000000, 0.200000], 10., 0.1),
+                                         Base::new_with_pseudo([0.600000, 0.000000, 0.400000, 0.000000], 10., 0.1),
+                                         Base::new_with_pseudo([0.300000, 0.300000, 0.200000, 0.200000], 10., 0.1),
                                      /*  Base::new([1.0, 0.5, 0.125, 0.125]),
                                        Base::new([1./7., 1./7., 1.0, 5./7.]),
                                        Base::new([0.375, 0.25, 0.125, 1.0]),
@@ -123,8 +127,8 @@ fn main() {
    
     //reg_trace.save_initial_state("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod");
     //reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod", 0);
-    reg_trace.save_initial_state("/Users/afarhat/Downloads/", "reg_set_omit");
-    reg_trace.save_trace("/Users/afarhat/Downloads/", "reg_set_omit", 0);
+    reg_trace.save_initial_state("/Users/afarhat/Downloads/", "reg_set_ln");
+    reg_trace.save_trace("/Users/afarhat/Downloads/", "reg_set_ln", 0);
   /*  let swi_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.2, 0.1, 0.1, 1.0]),
                                        Base::new([0.1, 0.2, 0.1, 1.0]),
