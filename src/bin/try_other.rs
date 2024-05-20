@@ -112,6 +112,8 @@ fn main() {
 
     let mut reg_set: MotifSet = MotifSet::rand_with_one(&using, &mut rng);
 
+
+
     let like = reg_set.replace_motif(reg_mot, 0);
 
     println!("mot {:?}", reg_set.get_nth_motif(0).best_motif());

@@ -1628,6 +1628,49 @@ impl Motif {
     }
 
 
+    pub fn generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str) -> Result<(), Box<dyn Error>> {
+
+        let chr = chromosome_name.unwrap_or("chr");
+
+        let data = data_seq.data();
+
+        let (binds, revs) = self.return_bind_score(data.seq());
+
+        let starts = data.seq().block_u8_starts();
+        let lens = data.seq().block_lens();
+
+        let zero_locs = data_seq.zero_locs();
+
+        let block_and_id = (0_usize..starts.len()).map(|i| (0_usize..(lens[i]-self.len())).map(move |j| (i,j))).flatten().collect::<Vec<(usize, usize)>>();
+
+        assert!(binds.len() == block_and_id.len());
+
+        let mut binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (n, r, zero_locs[l]+j)).collect::<Vec<_>>();
+
+        binds_locs.sort_by(|(f,_,_), (g,_,_)| f.partial_cmp(g).unwrap());
+
+        let mut file = fs::File::create(file_name)?;
+
+        let mut buffer: Vec<u8> = Vec::with_capacity(binds_locs.len()*(chr.len()+22));
+
+        for (id, (bind, is_rev, base)) in binds_locs.into_iter().enumerate() {
+
+            let strand = if is_rev { "-" } else { "+" };
+            let end_base = base+self.len();
+            let thousand_score = (bind*1000.) as usize;
+
+            if thousand_score == 0 { break; }
+
+            let line = format!("{chr}\t{base}\t{end_base}\tbind_{id}\t{thousand_score}\t{strand}\n");
+            let mut buffer_line = line.into_bytes();
+            buffer.append(&mut buffer_line);
+        }
+
+        file.write(&buffer)?;
+
+        Ok(())
+
+    }
 
 
 

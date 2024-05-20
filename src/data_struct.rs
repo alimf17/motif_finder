@@ -208,6 +208,9 @@ impl AllData {
         &self.seq
     }
 
+    pub fn zero_locs(&self) -> &Vec<usize> {
+        &self.start_genome_coordinates
+    }
 
 
     //SAFETY: I'm spending a lot of effort to validate your FASTA file
@@ -1228,6 +1231,10 @@ impl<'a> AllDataUse<'a> {
 
     pub fn number_bp(&self) -> usize {
         self.data.number_bp()
+    }
+    
+    pub fn zero_locs(&self) -> &Vec<usize> {
+        &self.start_genome_coordinates
     }
    
     /*
