@@ -1220,6 +1220,8 @@ mod tests{
         let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
 
+        let zeros: Vec<usize> = vec![0, 465, 892];
+
         unsafe{
 
         signal.place_peak(&k, 1, 20);
@@ -1266,7 +1268,7 @@ mod tests{
 
         let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &background)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &zeros, &background)};
 
         let noise: Noise = signal.produce_noise(&data_seq);
 

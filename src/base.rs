@@ -4374,7 +4374,7 @@ mod tester{
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, 350./6.,Some(&corrs));
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(), &background)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&start_bases, &background)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -4516,7 +4516,7 @@ mod tester{
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, 350./6., Some(&corrs));
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &background) };
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &start_bases, &background) };
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
@@ -5025,7 +5025,7 @@ mod tester{
         std::env::set_var("RUST_BACKTRACE", "1");
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
-
+        let spacing_dist = rand::distributions::Uniform::from(500..5000);
         let block_n: usize = 5;
         let u8_per_block: usize = 90;
         let bp_per_block: usize = u8_per_block*4;
@@ -5041,12 +5041,13 @@ mod tester{
         let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
         let corrs: Vec<f64> = vec![0.9, -0.1];
         let background = Background::new(0.25, 2.64, 20., Some(&corrs));
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &background) }; 
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave, &coordinate_bases, &background) }; 
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -5064,7 +5065,7 @@ mod tester{
         let duration = start.elapsed();
 
         let waveform2 = &waveform + &(motif2.generate_waveform(&data_seq));
-        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &background) }; 
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &coordinate_bases,&background) }; 
 
         let noise: Noise = waveform.produce_noise(&data_seq_2);
 
@@ -5230,12 +5231,13 @@ mod tester{
         let wave_inds: Vec<usize> = vec![0, 9]; 
         let wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
+        let wave_start_bases: Vec<usize> = vec![0, 9324];
         let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
         let wave_background = Background::new(0.25, 2.64, 1.0, Some(&corrs));
 
 
-        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave, &wave_background) }; 
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&wave_start_bases, &wave_background) }; 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
