@@ -301,6 +301,25 @@ pub struct Base {
    props: [ f64; BASE_L],
 }
 
+#[derive(Debug)]
+pub enum InvalidBase {
+    NegativeBase,
+    NoNonZeroBase,
+}
+
+impl fmt::Display for InvalidBase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            InvalidBase::NegativeBase => "No negative bases allowed!",
+            InvalidBase::NoNonZeroBase => "You don't have any non zero bases!",
+        };
+        write!(f, "{}",message);
+        Ok(())
+    }
+}
+
+impl Error for InvalidBase {}
+
 impl PartialEq for Base {
     fn eq(&self, other: &Self) -> bool {
         self.dist_sq(Some(other)) < CLOSE    
@@ -327,7 +346,7 @@ impl IndexMut<Bp> for Base {
 impl Base {
 
     //Note: This will break if all the bindings are zeros, or any are negative
-    pub fn new(props: [ f64; BASE_L]) -> Base {
+    pub fn new(props: [ f64; BASE_L]) -> Result<Base, InvalidBase> {
 
         let mut props = props;
 
@@ -341,11 +360,14 @@ impl Base {
         }
         
         if any_neg{
-           println!("props off {:?}", props);
-           panic!("All base entries must be positive!"); 
+            return Err(InvalidBase::NegativeBase);
         }
 
         let max = Self::max(&props);
+
+        if max == 0.0 {
+            return Err(InvalidBase::NoNonZeroBase);
+        }
         
         for i in 0..props.len() {
                 props[i] = props[i]/max;
@@ -354,7 +376,32 @@ impl Base {
 
 
 
-        Base { props }
+        Ok(Base { props })
+    }
+
+    pub fn new_with_pseudo(props: [f64; BASE_L], counts: f64, pseudo: f64) -> Result<Base, InvalidBase> {
+
+        let mut props = props;
+        
+        let mut any_neg: bool = false;
+
+        for i in 0..props.len() {
+            any_neg |= props[i] < 0.0 ;
+        }
+
+        if any_neg{
+            return Err(InvalidBase::NegativeBase);
+        }
+
+        let sum = props.iter().sum::<f64>();
+
+        if sum == 0.0 { 
+            for p in props.iter_mut() { *p += pseudo; } 
+        } else {
+            for p in props.iter_mut() {*p = (*p/sum)*counts+pseudo;}
+        }
+
+        Base::new(props)
     }
 
 
@@ -540,7 +587,8 @@ impl Base {
 
         let unnormalized_base: [f64; BASE_L] = core::array::from_fn(|a| (pre_exp_base[a]-max_val).exp());
 
-        Base::new(unnormalized_base)
+        //SAFETY: reflect_triple_to_finite is written so that no operation on exp returns all zeros here
+        unsafe { Base::new(unnormalized_base).unwrap_unchecked()}
     }
 
     //If ratio_sd and small_sd are negative, the move generated is just the opposite
@@ -867,7 +915,8 @@ impl Base {
 
         revved.reverse();
 
-        Self::new(revved)
+        //SAFETY: the reverse of a valid Base is still valid
+        unsafe{ Self::new(revved).unwrap_unchecked() }
 
 
     }
@@ -1938,7 +1987,7 @@ impl<'a> MotifSet<'a> {
                     props[j] = prop;
                 }
 
-                base_vec.push(Base::new(props));
+                base_vec.push(Base::new(props)?);
             }
 
             let mut motif = Motif::rand_height_pwm(base_vec, rng);
@@ -4188,7 +4237,7 @@ mod tester{
         //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
 
 
-        let random_base_dist = SymmetricBaseDirichlet::new(0.001).expect("obviously valid");
+        let random_base_dist = SymmetricBaseDirichlet::new(0.06).expect("obviously valid");
 
         let t = Instant::now();
         for i in 0..10000 {
@@ -5189,7 +5238,7 @@ mod tester{
         let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave, &wave_background) }; 
         let theory_base = [1.0, 1e-5, 1e-5, 0.2];
 
-        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
+        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
 
 
         println!("DF");
@@ -5204,7 +5253,7 @@ mod tester{
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
         let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
-        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
+        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0); //small
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.gen::<bool>()).collect();

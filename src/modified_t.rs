@@ -441,11 +441,14 @@ pub struct SymmetricBaseDirichlet {
     gamma_sample: Gamma,
 }
 
+//This is approximately 53/1022, but you can't do float divisions in const contexts. 
+pub const MIN_WELL_DEFINED_ALPHA: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3faa8d46a351a8d4)};
+
 impl SymmetricBaseDirichlet{
 
     pub fn new(alpha: f64) -> Result<Self, String> {
 
-        if alpha <= 0.0 || alpha.is_infinite() || alpha.is_nan() { return Err("alpha must be well-defined, finite, and strictly positive".to_owned()); }
+        if alpha <= MIN_WELL_DEFINED_ALPHA || alpha.is_infinite() || alpha.is_nan() { return Err(format!("alpha must be well-defined, finite, and at least {MIN_WELL_DEFINED_ALPHA}")); }
 
         let ln_normalize = ln_gamma((BASE_L as f64)*alpha)-(BASE_L as f64)*ln_gamma(alpha); 
 
@@ -471,7 +474,18 @@ impl ::rand::distributions::Distribution<Base> for SymmetricBaseDirichlet {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
         //Note a small optimization: we don't actually divide by the sum of the samples here. 
         //This is because Base's implementation automatically regularizes its inputs for us
-        Base::new(core::array::from_fn(|_| self.gamma_sample.sample(rng)))
+
+        //SAFETY: we already guarenteed that none of the sampled bases will have even a single zero entry
+        //        because we defined MIN_WELL_DEFINED_ALPHA as 53/1022. At most, there is a small probability
+        //        that this will be slower because we need to delve into subnormal numbers.
+        //        How am I able to make this guarentee? The gamma distribution is usually generated with the
+        //        GS algorithm from Ahrens and Dieter's 1973 paper "Computer Methods for Sampling from Gamma, Beta,
+        //        Poisson and Binomial Distributions", and when alpha is small (the only time we'd have an issue), 
+        //        we stay in normal numbers from the gamma sample if 2^(-53), the small uniform random number from (0,1),
+        //        taken to the root of alpha, is at least 2^(-1022), the smallest normal number. We DO divide by
+        //        gamma(alpha) after, but at 53/1022, that's a little over 18 (less than 2^5), and we have leeway 
+        //        with subnormals
+        unsafe{ Base::new(core::array::from_fn(|_| self.gamma_sample.sample(rng))).unwrap_unchecked()}
     }
 
 }
