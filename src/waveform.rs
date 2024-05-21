@@ -455,6 +455,26 @@ impl<'a> Waveform<'a> {
 
     }
 
+    pub fn generate_all_indexed_locs_and_data(&self, start_lens: &[usize]) -> Option<Vec<(Vec<usize>, Vec<f64>)>> {
+
+        if self.start_dats.len() != start_lens.len() {
+            return None;
+        }
+
+        let mut locations_and_data: Vec<(Vec<usize>, Vec<f64>)> = Vec::with_capacity(start_lens.len());
+
+        for i in 0..start_lens.len() {
+
+            let small_loc: Vec<usize> = (0..self.point_lens[i]).map(|j| start_lens[i]+(j*self.spacer)).collect();
+            let end_len = if i < (start_lens.len()-1) { i+1 } else { self.wave.len() };
+            let small_dat: Vec<f64> = self.wave[self.start_dats[i]..end_len].to_owned();
+            locations_and_data.push((small_loc, small_dat));
+        }
+
+        Some(locations_and_data)
+
+    }
+
     pub fn spacer(&self) -> usize {
         self.spacer
     }
