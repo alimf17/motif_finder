@@ -607,7 +607,8 @@ impl AllData {
         
         for block in lerped_blocks {
 
-            let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
+            //This was previously b.abs(), but I no longer bother with negative peaks, so I only care about positive peaks
+            let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b > peak_thresh).collect();
    
 
             let mut next_ar_ind = 0_usize;

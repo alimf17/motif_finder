@@ -1692,7 +1692,7 @@ impl Motif {
 
         let h = self.peak_height;
 
-        let cutoff = (-h).exp();
+        let cutoff = (-h).exp2();
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
@@ -1704,7 +1704,7 @@ impl Motif {
 
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
                 if bind > cutoff {
-                    actual_kernel = unit_kernel*(h+bind.ln()) ;
+                    actual_kernel = unit_kernel*(h+bind.log2()) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -1738,7 +1738,7 @@ impl Motif {
 
         let h = self.peak_height;
 
-        let cutoff = (-h).exp();
+        let cutoff = (-h).exp2();
 
 
         for i in 0..starts.len() { //Iterating over each block
@@ -1747,7 +1747,7 @@ impl Motif {
                 //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
                 //SAFETY: THRESH is never modified at this point
                 if binds.0[starts[i]*BP_PER_U8+j] > cutoff {
-                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].ln()+h) ;
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].log()+h) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
                                                                                       //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
