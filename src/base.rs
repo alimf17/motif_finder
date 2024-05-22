@@ -1707,7 +1707,7 @@ impl Motif {
                     actual_kernel = unit_kernel*(h+bind.log2()) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
-
+ 
                 }
             }
         }
