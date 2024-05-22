@@ -1747,7 +1747,7 @@ impl Motif {
                 //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
                 //SAFETY: THRESH is never modified at this point
                 if binds.0[starts[i]*BP_PER_U8+j] > cutoff {
-                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].log()+h) ;
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].log2()+h) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
                                                                                       //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
@@ -3178,6 +3178,17 @@ impl<'a> SetTrace<'a> {
         let buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
 
         outfile_handle.write(&buffer).expect("buffer should write");
+    }
+
+
+    pub fn save_current_bedgraph(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error>> { 
+
+        //generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str)
+
+        self.loan_active().set.iter().enumerate().map(|(i,mot)| {
+            let bedgraph_file:  String = format!("{}/{}_bedgraph_{:0>7}_motif_{i}.bed",output_dir,run_name,zeroth_step);
+            mot.generate_bedgraph(self.data_ref, None, &bedgraph_file)
+        }).collect::<Result<_,_>>()
     }
 
     //We don't need to worry about saving any state in trace, since inference works on the ACTIVE state

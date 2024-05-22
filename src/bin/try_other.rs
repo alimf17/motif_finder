@@ -11,7 +11,7 @@ fn main() {
 
     //let bincode_file = "/expanse/lustre/scratch/alimf/temp_project/motif_runs/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
 
-    let bincode_file = "/Users/afarhat/Downloads/sequence(1)_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
+    let bincode_file = "/Users/afarhat/Downloads/NC_000913.2_TrpR_Trp_lb_ratio_unstranded_minus_mean_25_data.bin";
     let bincode_string = bincode_file.to_owned();
 
     println!("db {bincode_file}");
