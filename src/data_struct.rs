@@ -596,7 +596,7 @@ impl AllData {
             peak_scale = peak_scale.abs();
         }
 
-        let peak_thresh = 2.0_f64.sqrt()*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = 1.25_f64*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
