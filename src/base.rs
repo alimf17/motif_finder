@@ -1641,13 +1641,13 @@ impl Motif {
 
         let zero_locs = data_seq.zero_locs();
 
-        let block_and_id = (0_usize..starts.len()).map(|i| (0_usize..(lens[i]-self.len())).map(move |j| (i,j))).flatten().collect::<Vec<(usize, usize)>>();
+        let block_and_id = (0_usize..starts.len()).map(|i| (0_usize..lens[i]).map(move |j| (i,j))).flatten().collect::<Vec<(usize, usize)>>();
 
-        assert!(binds.len() == block_and_id.len());
+        assert!(binds.len() == block_and_id.len(), "{} {}", binds.len(), block_and_id.len());
 
         let mut binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (n, r, zero_locs[l]+j)).collect::<Vec<_>>();
 
-        binds_locs.sort_by(|(f,_,_), (g,_,_)| f.partial_cmp(g).unwrap());
+        binds_locs.sort_by(|(f,_,_), (g,_,_)| g.partial_cmp(f).unwrap());
 
         let mut file = fs::File::create(file_name)?;
 

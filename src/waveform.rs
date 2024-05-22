@@ -466,7 +466,7 @@ impl<'a> Waveform<'a> {
         for i in 0..start_lens.len() {
 
             let small_loc: Vec<usize> = (0..self.point_lens[i]).map(|j| start_lens[i]+(j*self.spacer)).collect();
-            let end_len = if i < (start_lens.len()-1) { i+1 } else { self.wave.len() };
+            let end_len = if i < (start_lens.len()-1) { self.start_dats[i+1] } else { self.wave.len() };
             let small_dat: Vec<f64> = self.wave[self.start_dats[i]..end_len].to_owned();
             locations_and_data.push((small_loc, small_dat));
         }
