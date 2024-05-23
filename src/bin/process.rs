@@ -171,6 +171,8 @@ pub fn main() {
         buffer.clear();
     }
 
+    let all_data_file = set_trace_collections[0].data_name().to_owned();
+
     //TODO: change out data_name for a way to supply the correct data file to the processing directly
     /*let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
     all_dat_file.read_to_end(&mut buffer);
@@ -189,9 +191,20 @@ pub fn main() {
 
     let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
 
+    buffer.clear();
 
+    let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+    let _ = try_bincode.read_to_end(&mut buffer);
+
+    let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
+
+    let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
 
     println!("Best motif set: {:?}", best_single_motif_set);
+
+    let save_file = format!("{}_best_trace", base_file);
+
+    best_single_motif_set.save_this_trace(&data_ref, &out_dir.clone(), &save_file);
 
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 

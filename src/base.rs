@@ -2813,6 +2813,108 @@ impl StrippedMotifSet {
     pub fn get_nth_motif(&self, index: usize) -> &Motif {
         &self.set[index]
     }
+    
+    pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
+
+        let current_active = &self.reactivate_set(data_ref);
+
+        let signal = current_active.recalced_signal();
+
+        let current_resid = data_ref.data()-&signal;
+
+        let blocked_locs_and_signal = signal.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+
+        let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
+
+        let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+
+        let signal_directory: String = format!("{}/{}_occupancy",output_dir,file_name);
+
+        let mut trials: usize = 0;
+        let mut failure_to_check = true;
+
+        if let Err(creation) = std::fs::create_dir_all(&signal_directory) {
+            warn!("Could not make or find directory \"{}\"! \n{}", signal_directory, creation);
+            return;
+        };
+
+        for i in 0..blocked_locs_and_signal.len() {
+       
+            let loc_block = &blocked_locs_and_signal[i].0;
+            let sig_block = &blocked_locs_and_signal[i].1;
+            let dat_block = &blocked_locs_and_data[i].1;
+            let res_block = &blocked_locs_and_resid[i].1;
+
+            let signal_file = format!("{}/{i}.png", signal_directory);
+
+            let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
+
+            let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
+
+            plot.fill(&WHITE).unwrap();
+
+            let (left, right) = plot.split_horizontally((95).percent_width());
+
+            let (right_space, _) = right.split_vertically((95).percent_height());
+
+            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+
+            bar.configure_mesh()
+                .y_label_style(("sans-serif", 40))
+                .disable_mesh().draw().unwrap();
+
+            let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
+
+            bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
+
+            let (upper, lower) = left.split_vertically((86).percent_height());
+
+            let mut chart = ChartBuilder::on(&upper)
+                .set_label_area_size(LabelAreaPosition::Left, 100)
+                .set_label_area_size(LabelAreaPosition::Bottom, 100)
+                .caption("Signal Comparison", ("Times New Roman", 80))
+                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
+
+
+            chart.configure_mesh()
+                .x_label_style(("sans-serif", 40))
+                .y_label_style(("sans-serif", 40))
+                .x_label_formatter(&|v| format!("{:.0}", v))
+                .x_desc("Genome Location (Bp)")
+                .y_desc("Signal Intensity")
+                .disable_mesh().draw().unwrap();
+
+            const horiz_offset: i32 = -5;
+
+            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+
+
+            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), BLUE.filled())).unwrap().label("Motif Set Occupancy").legend(|(x, y)| Rectangle::new([(x+4*horiz_offset, y-4), (x+4*horiz_offset + 20, y+3)], Into::<ShapeStyle>::into(&BLUE).filled()));
+
+            const THICKEN: usize = 20;
+            for j in 1..=THICKEN{
+                chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k+0.01*2_f64.powf(k*0.15)*(j as f64))), BLUE.filled())).unwrap();
+
+            }
+            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+
+            let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
+
+                let tup = data_ref.background_ref().cd_and_sf(a);
+                if tup.0 >= tup.1 { (tup.0-0.5)*2.0 } else {(tup.1-0.5)*2.0} } ).zip(loc_block.iter()).map(|(a, &b)| (a, b as f64)).collect();
+
+            let mut map = ChartBuilder::on(&lower)
+                .set_label_area_size(LabelAreaPosition::Left, 100)
+                .set_label_area_size(LabelAreaPosition::Bottom, 50)
+                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
+
+            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+
+
+            map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
+
+        }
+    }
 
 }
 
@@ -2962,6 +3064,7 @@ pub enum InitializeSet<'a,'b, R: Rng + ?Sized>{
 pub struct SetTrace<'a> {
     trace: Vec<StrippedMotifSet>,
     active_set: MotifSet<'a>,
+    all_data_file: String,
     data_ref: &'a AllDataUse<'a>, 
     sparse: usize, 
     sparse_count: usize,
@@ -2972,7 +3075,7 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
+    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
 
         thermo_beta = thermo_beta.abs();
 
@@ -2984,7 +3087,8 @@ impl<'a> SetTrace<'a> {
 
         SetTrace{
             trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
-            active_set: active_set, 
+            active_set: active_set,
+            all_data_file: all_data_file,
             data_ref: data_ref, 
             sparse: sparse.unwrap_or(10),
             sparse_count: 0_usize,
@@ -3248,6 +3352,7 @@ impl<'a> SetTrace<'a> {
 
         let buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
             trace: trace,
+            all_data_file: self.all_data_file.clone(),
             thermo_beta: self.thermo_beta,
         })).expect("serializable");
 
@@ -3373,6 +3478,7 @@ impl<'a> SetTrace<'a> {
 pub struct SetTraceDef {
 
     trace: Vec<StrippedMotifSet>,
+    all_data_file: String,
     thermo_beta: f64,
 
 }
@@ -3409,6 +3515,7 @@ impl SetTraceDef {
         SetTrace {
             trace: self.trace,
             data_ref: data_ref,
+            all_data_file: self.all_data_file,
             active_set: last_state,
             sparse: sparse.unwrap_or(10),
             sparse_count: 0,
@@ -3446,6 +3553,9 @@ impl SetTraceDef {
         self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
     }
 
+    pub fn data_name(&self) -> &str {
+        &self.all_data_file
+    }
 
     pub fn initial_set_pwm(&self) -> Motif {
         self.trace[0].set[0].clone()
@@ -3525,6 +3635,8 @@ impl SetTraceDef {
 
     pub fn save_best_trace(&self, buffer: &mut Vec<u8>, output_dir: &str, run_name: &str) {
 
+        let mut try_bincode = fs::File::open(self.all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+        let _ = try_bincode.read_to_end(buffer);
 
         let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
@@ -3855,7 +3967,7 @@ impl<'a> TemperSetTraces<'a> {
     //      parallel_traces.len() >= 2
     //      parallel_traces[0] will always have thermo_beta = 1_f64. Because of this, it is the "canonical" trace, and the others "just" seed it periodically
     //      parallel_traces.last().unwrap() will never panic, and will always have thermo_beta = min_thermo_beta
-    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
+    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: TrackingOptions, all_data_file: String, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
         if let Some(a) = initial_condition.as_ref(){
             if !ptr::eq(a.data_ref, data_ref) { return Err(InitializationError::UnsynchedData); }
         }
@@ -3888,7 +4000,7 @@ impl<'a> TemperSetTraces<'a> {
                 TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),
                 TrackingOptions::TrackTrueTrace => if past_initial { None } else { Some(MoveTracker::new(step_num_estimate)) },
             };
-            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), data_ref, thermo_beta, sparse, rng), potential_tracker));
+            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, sparse, rng), potential_tracker));
         }
 
         Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
@@ -3991,7 +4103,6 @@ impl<'a> TemperSetTraces<'a> {
 
     }
 
-    //    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
 
     pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
 
