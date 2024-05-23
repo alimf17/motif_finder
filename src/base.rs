@@ -36,9 +36,13 @@ use statrs::{consts, StatsError};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp};
 use statrs::statistics::{Min, Max, Distribution as StatrsDist};
 
+use ordered_float::*;
+
 use once_cell::sync::Lazy;
 
 use rayon::prelude::*;
+
+use pathfinding::*;
 
 use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
@@ -2743,6 +2747,8 @@ impl StrippedMotifSet {
         revived
     }
 
+    pub fn num_motifs(&self) -> usize { self.set.len() }
+
     pub fn motif_num_prior(&self) -> f64 {
         -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
@@ -2750,6 +2756,8 @@ impl StrippedMotifSet {
     pub fn ln_prior(&self, seq: &Sequence) -> f64 {
         self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
     }
+
+    pub fn ln_posterior(&self) -> f64 { self.ln_post }
 
     pub fn set_iter(&self) -> Iter<'_, Motif> {
         self.set.iter()
@@ -2774,6 +2782,37 @@ impl StrippedMotifSet {
         Ok(())
     }
 
+    //The ith position of the vector is:
+    //  Some(j), if the ith set in the reference set was matched to the jth set in self
+    //  None, if the ith set in the reference set failed to match
+    //The vector has length equal to reference_set.num_motifs()
+    //Notice that the lifetime of the potential &Motif also matches the lifetime of &self. This is also intentional
+    pub fn pair_to_other_set(&self, reference_set: &StrippedMotifSet) -> Vec<Option<(f64, bool, &Motif)>>/*Some type here */ {
+    
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self.set[j].distance_function(&reference_set.set[i]).0);
+        let rev_comp_by_index = |(i, j): (usize, usize)| self.set[j].distance_function(&reference_set.set[i]).1;
+
+        //We want the self to act like the columns, because the positions of the reference set should be pulled
+        let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
+        let rev_c_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), rev_comp_by_index);
+
+        if self.num_motifs() >= reference_set.num_motifs() {
+            let (_, matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(), *rev_c_matrix.get((i,x)).unwrap(),&self.set[x]))).collect()
+        } else {
+            let transpose = check_matrix.transposed();
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
+            let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; reference_set.num_motifs()];
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), &self.set[i]));
+            }
+            matches
+        }
+    }
+
+    pub fn get_nth_motif(&self, index: usize) -> &Motif {
+        &self.set[index]
+    }
 
 }
 
@@ -3451,6 +3490,10 @@ impl SetTraceDef {
 
     }
 
+    pub fn extract_highest_posterior_set(&self, tail_start: usize) -> &StrippedMotifSet {
+        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_post.partial_cmp(&b.ln_post).expect("No NaNs allowed in posterior")).expect("trace should have at least one motif set")
+    }
+
     pub fn create_distance_traces(&self, reference_mots: &Vec<Motif>) -> Vec<Vec<f64>> {
 
         let mut distances: Vec<Vec<f64>> = vec![vec![0_f64; self.trace.len()] ; reference_mots.len()];
@@ -3534,7 +3577,14 @@ impl SetTraceDef {
     pub fn index_into(&self, range: std::ops::Range<usize>) -> &[StrippedMotifSet] {
         &self.trace[range]
     }
+
+    pub fn ref_to_trace(&self) -> &Vec<StrippedMotifSet> {
+        &self.trace
+    }
+
+    
 }
+
 
 /*
 

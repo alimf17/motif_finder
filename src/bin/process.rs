@@ -14,6 +14,9 @@ use kmedoids;
 
 use ndarray::prelude::*;
 
+use rayon::iter::ParallelIterator;
+use rayon::iter::IntoParallelIterator;
+
 use regex::Regex;
 
 use poloto;
@@ -176,8 +179,21 @@ pub fn main() {
 
     //set_trace_collections is now the chains we want
     
-    let reference_motifs: Vec<Motif> = set_trace_collections.iter().map(|a| a.initial_set_pwm()).collect();
+    let mut min_len: usize = usize::MAX;
+    for trace in set_trace_collections.iter() {
+        min_len = min_len.min(trace.len());
+        println!("Min len {}", min_len);
+    }
+    
+    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
 
+    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
+
+
+
+    println!("Best motif set: {:?}", best_single_motif_set);
+
+    let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 
     let distances_file = format!("{}/{}_distances_to_refs.png",out_dir.clone(), base_file);
     let autocorrs_file = format!("{}/{}_distance_autocorrelations.png",out_dir.clone(), base_file);
@@ -218,6 +234,8 @@ pub fn main() {
                                                .y_desc("Mean of motif set distance to reference")
                                                .draw().unwrap(); }
 
+    let correlation_len = 1000;
+
     for (chain, collection) in set_trace_collections.iter().enumerate() {
 
         let chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
@@ -230,7 +248,7 @@ pub fn main() {
         //          2-Calculate autocorrelations for each REFERENCE motif and plot them as well
         let distance_traces = collection.create_distance_traces(&reference_motifs);
 
-        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, 1000);
+        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, correlation_len);
 
         println!("Collection Autocorrelation: {:?}", collection_autocorrelation);
 
@@ -268,7 +286,7 @@ pub fn main() {
                                .caption("Autocorrelations of each trace's ln posterior density", ("Times New Roman", 30))
                                .set_label_area_size(LabelAreaPosition::Left, 40)
                                .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1.5_f64)
+                               .build_cartesian_2d(0..correlation_len, 0_f64..1.5_f64)
                                .unwrap();
 
     autocorrelations_post.configure_mesh()
@@ -345,11 +363,6 @@ pub fn main() {
 
     //let num_ref_pwm = ref_per_chain*set_trace_collections.len();
 
-    let mut min_len: usize = usize::MAX;
-    for trace in set_trace_collections.iter() {
-        min_len = min_len.min(trace.len());
-        println!("Min len {}", min_len);
-    }
 
     let cluster_per_chain: usize = min_len.min(2000);
 
@@ -358,12 +371,6 @@ pub fn main() {
     //TODO: generate motif_num_traces plot here
     println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
 
-    let best_motif_sets = set_trace_collections.iter().map(|a| {
-        let ind = a.ln_posterior_trace().iter().enumerate().max_by(|(_,a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
-        a.index_into(ind..ind+1)
-    }).collect::<Vec<_>>();
-
-    println!("Best motif sets for each trace: {:?}", best_motif_sets);
 
     println!("Finish best motif sets");
 
@@ -372,39 +379,71 @@ pub fn main() {
 
     let num_sort_mots: usize = cluster_per_chain*set_trace_collections.len();
     
-    let mut clustering_motifs: Vec<Motif> = Vec::with_capacity(num_sort_mots);
 
+    //If I don't document this as I'm writing it, it's going to blow a hole 
+    //through my head and the head of anybody reading it
+    //"pairings" is nested in the following way:
+    //      1) Over the independent chains
+    //      2) For each independent chain, over the StrippedMotifSets in that chain
+    //      3) For each StrippedMotifSet in the chain, there's a best_single_motif_set.len() number of pairings: 
+    //                                                 which, if they exist, are the motif and distance of that pairing
+    let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
+        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&best_single_motif_set)).collect::<Vec<_>>()
+    }).collect();
 
+    let num_clusts = best_single_motif_set.num_motifs();
+    let likely_cap = pairings[0].len()*pairings.len();
 
-    for trace in set_trace_collections.iter() {
-        clustering_motifs.append(&mut (trace.ret_rand_motifs(cluster_per_chain, &mut rng)));
+    //This is nested so that the outer layer corresponds to the Motifs in the 
+    //best_single_motif_set, and the inner layer to all the matches, regardless of chain
+    let mut results: Vec<Vec<((f64, bool, &Motif), usize)>> = (0..num_clusts).map(|i| {
+        let mut cluster: Vec<((f64, bool, &Motif), usize)> = Vec::with_capacity(likely_cap);
+        for (c_id, chain) in pairings.iter().enumerate() {
+            for pairing in chain.iter() {
+                if let Some(dist_mot_tup) = pairing[i] {
+                    cluster.push((dist_mot_tup, c_id));
+                };
+            }
+        }
+        cluster
+    }).collect();
+
+    for result in results.iter_mut() {
+        result.sort_by(|((a, _, _),_), ((b,_, _),_)| b.partial_cmp(a).unwrap())
     }
 
-    let mut meds = kmedoids::random_initialization(num_sort_mots, tf_num, &mut rng);
-    
-   
-    println!("clust {:?}", &clustering_motifs[0..5]);
-    let dist_array = establish_dist_array(&clustering_motifs);
-    let (_loss, _assigns, n_iter, n_swap): (f64, Vec<usize>,_, _) = kmedoids::fasterpam(&dist_array, &mut meds, 100);
+    //This is nested over 
+    //      1) the Motifs in the best_single_motif_set
+    //      2) the indepdendent chains
+    //      3) the distances present in those chains (NOTE: we skip over nones)
+    let distance_assessments: Vec<Vec<Vec<f64>>> = (0..num_clusts).map(|i| {
+        pairings.iter().map(|chain| {
+            let mut dist_vec: Vec<f64> = Vec::with_capacity(chain.len());
+            for pairing in chain.iter() {
+                if let Some((dist,_, _)) = pairing[i] {dist_vec.push(dist);};
+            }
+            dist_vec
+        }).collect()
+    }).collect();
 
-    println!("iter {} swap {}", n_iter, n_swap);
+
+
+
     println!("min {}", min_len);
-    for (i, medoid) in meds.iter().enumerate() {
-        println!("Medoid {}: \n {:?}", i, medoid);
-        println!("Rhat medoid {}: {}", i, rhat(&set_trace_collections.iter().map(|a| a.trace_min_dist(&clustering_motifs[*medoid])).collect::<Vec<_>>(), min_len));
-        println!("Medoid: \n {:?}", clustering_motifs[*medoid]);
-        let mut num_good_motifs: usize = 0; 
-        let mut good_motifs_count: Vec<usize> = vec![0];
-        let mot_size = set_trace_collections[0].len() as f64;
-        let distance_cutoff = f64::INFINITY;
-        let trace_scoop = set_trace_collections.iter().map(|a| {
-            let set_extracts = a.extract_best_motif_per_set(&clustering_motifs[*medoid], min_len, distance_cutoff);
-            num_good_motifs+= set_extracts.len();
-            good_motifs_count.push(num_good_motifs);
-            set_extracts
-        }).flatten().collect::<Vec<_>>();
-        let pwm_traces = create_offset_traces(trace_scoop);
-        graph_tetrahedral_traces(&pwm_traces, &good_motifs_count,0.95, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
+    for (i, mut trace) in results.into_iter().enumerate() {
+        println!("Motif {}: \n", i);
+        println!("Rhat motif {}: {}", i, rhat(&distance_assessments[i], min_len));
+        println!("Motif: \n {:?}", best_single_motif_set.get_nth_motif(i));
+        
+        let credible_percent: usize = 95;
+        let cluster_term = (trace.len()*credible_percent)/100;
+
+        trace.truncate(cluster_term);
+
+        //trace now holds the credible_percent region
+
+        let (pwm_traces, chain_ids) = create_offset_traces(trace);
+        graph_tetrahedral_traces(&pwm_traces, &chain_ids, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
         println!("tetrad");
         /*let cis = create_credible_intervals(&pwm_traces, 0.95, &good_motifs_count);
 
@@ -475,12 +514,13 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 }
 
 
-pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, bool))>) -> Array3<f64> {
+pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (Array3<f64>, Vec<usize>){
 
 
     let num_samples = best_motifs.len();
+    let chain_ids = best_motifs.iter().map(|(_,i)| *i).collect::<Vec<usize>>();
     let pwms_offsets = best_motifs.into_iter()
-                                  .map(|(a, (_, c))| {
+                                  .map(|((_, c, a), _)| {
                                       if c {a.rev_complement()} else {a.pwm()}
                                   }).collect::<Vec<Vec<Base>>>();
 
@@ -505,11 +545,11 @@ pub fn create_offset_traces(best_motifs: Vec<(Motif, (f64, bool))>) -> Array3<f6
 
     }
 
-    samples
+    (samples, chain_ids)
 
 }
 
-pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec<usize>, credible: f64, file_name: &str){
+pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>, file_name: &str){
 
     let (_ , num_bases, _) = samples.dim();
 
@@ -521,7 +561,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
 
     let panels = plot.split_evenly((num_rows as usize, 4));
 
-    let cis = create_credible_intervals(samples, credible);
+    let cis = create_credible_intervals(samples);
 
     println!("Finished cred");
     for j in 0..num_bases {
@@ -567,21 +607,15 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, good_motifs_count: &Vec
         })).unwrap();
         
         
-        for m in 0..(good_motifs_count.len()-1){
-            if good_motifs_count[m] < good_motifs_count[m+1] {
 
-                let slice_bases: Vec<(f64, f64, f64)> = ((good_motifs_count[m])..(good_motifs_count[m+1])).map(|k| (samples[[k,j,0]], samples[[k,j,1]], samples[[k,j,2]]) ).collect::<Vec<_>>();
+        let slice_bases: Vec<(f64, f64, f64)> = (0..chain_ids.len()).map(|k| (samples[[k,j,0]], samples[[k,j,1]], samples[[k,j,2]]) ).collect::<Vec<_>>();
 
-                let tetra_traces = create_tetrahedral_traces(&slice_bases);
-
+        let tetra_traces = create_tetrahedral_traces(&slice_bases);
             
-                for little_trace in tetra_traces.iter() {
-                    chart.draw_series(little_trace.iter().step_by(10).map(|&a| Circle::new(a,2_u32,  PALETTE[(m+BASE_L) % 26]))).unwrap();
-                }
-            } else { warn!("The motifs in trace {} are nowhere close to the medoid", m);}
+        for (m, little_trace) in tetra_traces.iter().enumerate() {
+            chart.draw_series(little_trace.iter().step_by(10).map(|&a| Circle::new(a,2_u32, PALETTE[(chain_ids[m]+BASE_L) % 26]))).unwrap();
         }
 
-        println!("Creating credible region at {} samples", credible);
         
  
         let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| {
@@ -644,18 +678,13 @@ fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
 //need anymore as much as humanly possible.
-pub fn create_credible_intervals(samples: &Array3<f64>, credible: f64) -> Vec<(Vec<(f64, f64, f64)>, [f64; BASE_L-1])>{
+pub fn create_credible_intervals(samples: &Array3<f64>) -> Vec<(Vec<(f64, f64, f64)>, [f64; BASE_L-1])>{
 
-    if credible <= 0.0 {
-        panic!("Can't make credible intervals of literally at most zero length!");
-    } else if credible >= 1.0 {
-        warn!("Will make credible intervals out of literally all of the data!");
-    }
 
     //I haven't removed num_bases entirely because I might need it if I uncomment
     //some currently commented code
     let (num_samples, _num_bases, _) = samples.dim();
-    let credible = credible.min(1.0);
+    let credible = 1.0_f64;
     let num_interval = ((num_samples as f64)*credible).floor() as u32;
     println!("samples dim  {:?}, num_interval {} credible {credible}", samples.dim(), num_interval);
 
