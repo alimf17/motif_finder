@@ -128,7 +128,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 0.0;
+pub const MIN_HEIGHT: f64 = 3.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -1260,7 +1260,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*HEIGHT_PROPOSAL_DIST.sample(rng);
+        let peak_height: f64 = sign*(HEIGHT_PROPOSAL_DIST.sample(rng)+MIN_HEIGHT);
 
 
         Motif {
@@ -2259,7 +2259,7 @@ impl<'a> MotifSet<'a> {
 
         let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -2279,7 +2279,7 @@ impl<'a> MotifSet<'a> {
 
             let pick_prob = self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.set[rem_id].peak_height)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.set[rem_id].peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
