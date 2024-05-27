@@ -24,5 +24,6 @@ fn main() {
 
     let using: AllDataUse = AllDataUse::new(&prior_state).unwrap();
     println!("{} {}", using.size(), using.number_bp());
+    println!("Back: {:?}", using.background_ref());
 }
 
