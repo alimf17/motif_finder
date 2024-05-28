@@ -5,6 +5,7 @@ use std::rc::Rc;
 //use std::time::{Duration, Instant};
 
 use core::f64::consts::PI;
+use std::error::Error;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel};
 use crate::sequence::{Sequence, BP_PER_U8};
@@ -1236,6 +1237,57 @@ impl<'a> AllDataUse<'a> {
     
     pub fn zero_locs(&self) -> &Vec<usize> {
         &self.start_genome_coordinates
+    }
+
+    pub fn basic_peaks(&self, min_height_sens: f64, bed_name: &str, chromosome_name: Option<&str>) -> Result<(), Box<dyn Error>> {
+
+        let num_forward = self.background.bp_span()/self.data.spacer();
+
+        let spacing_float = self.data.spacer() as f64;
+
+        let kern_sd = self.background.kernel_sd();
+
+        let target_integral = min_height_sens*kern_sd*(2.0*PI).sqrt();
+
+        let locs_and_data = self.data.generate_all_indexed_locs_and_data(&self.start_genome_coordinates).expect("It is an invariant that the start_genome_coordinates vector length matches the data number of blocks");
+
+        //Each entry is "((start position, end position), integral)." We estimate about one peak per location block, on average
+        let mut location_vs_integral: Vec<((usize, usize), f64)> = Vec::with_capacity(locs_and_data.len());
+
+        for block in locs_and_data {
+       
+            let integrals = block.1.windows(num_forward).map(|a| a.iter().sum::<f64>()*spacing_float).collect::<Vec<_>>();
+
+            for (i, integral) in integrals.iter().enumerate() {
+                if *integral >= target_integral { location_vs_integral.push(((block.0[i], block.0[i+num_forward]), *integral));}
+            }
+        }
+
+        let chr = chromosome_name.unwrap_or("chr");
+
+        location_vs_integral.sort_by(|(_,f), (_,g)| g.partial_cmp(f).unwrap());
+
+        let max_integral = location_vs_integral[0].1;
+
+        for i in 0..location_vs_integral.len() { location_vs_integral[i].1 = (location_vs_integral[i].1/max_integral)*1000.;} 
+
+        let mut file = fs::File::create(bed_name)?;
+
+        let mut buffer: Vec<u8> = Vec::with_capacity(location_vs_integral.len()*(chr.len()+32));
+
+        for (id, ((base, end_base), score)) in location_vs_integral.iter().enumerate() {
+
+            let thousand_score = *score as usize;
+            if thousand_score == 0 { break;}
+            let line = format!("{chr}\t{base}\t{end_base}\tpeak_{id}\t{thousand_score}\n");
+            let mut buffer_line = line.into_bytes();
+            buffer.append(&mut buffer_line);
+        }
+
+        file.write(&buffer)?;
+
+        Ok(())
+
     }
    
     /*

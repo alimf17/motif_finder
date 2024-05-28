@@ -892,6 +892,13 @@ impl Background {
         &self.kernel
     }
 
+    pub fn bp_span(&self) -> usize{
+        self.kernel.len()
+    }
+
+    pub fn kernel_sd(&self) -> f64 {
+        self.kernel.peak_width
+    }
 
 }
 
