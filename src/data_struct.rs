@@ -1238,8 +1238,8 @@ impl<'a> AllDataUse<'a> {
     pub fn zero_locs(&self) -> &Vec<usize> {
         &self.start_genome_coordinates
     }
-
-    pub fn basic_peaks(&self, min_height_sens: f64, bed_name: &str, chromosome_name: Option<&str>) -> Result<(), Box<dyn Error>> {
+    
+    pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {
 
         let num_forward = self.background.bp_span()/self.data.spacer();
 
@@ -1251,17 +1251,25 @@ impl<'a> AllDataUse<'a> {
 
         let locs_and_data = self.data.generate_all_indexed_locs_and_data(&self.start_genome_coordinates).expect("It is an invariant that the start_genome_coordinates vector length matches the data number of blocks");
 
-        //Each entry is "((start position, end position), integral)." We estimate about one peak per location block, on average
         let mut location_vs_integral: Vec<((usize, usize), f64)> = Vec::with_capacity(locs_and_data.len());
 
         for block in locs_and_data {
        
             let integrals = block.1.windows(num_forward).map(|a| a.iter().sum::<f64>()*spacing_float).collect::<Vec<_>>();
 
-            for (i, integral) in integrals.iter().enumerate() {
-                if *integral >= target_integral { location_vs_integral.push(((block.0[i], block.0[i+num_forward]), *integral));}
+            for (i, integral_slice) in integrals.windows(3).enumerate() {
+                if (integral_slice[1] >= target_integral) && (integral_slice[1] >= integral_slice[0]) && (integral_slice[1] >= integral_slice[2]) { 
+                    location_vs_integral.push(((block.0[i+1], block.0[i+1+num_forward]), integral_slice[1]));
+                }
             }
         }
+
+        location_vs_integral
+    }
+
+    pub fn basic_peak_output(&self, min_height_sens: f64, bed_name: &str, chromosome_name: Option<&str>) -> Result<(), Box<dyn Error>> {
+        
+        let mut location_vs_integral = self.basic_peak(min_height_sens);
 
         let chr = chromosome_name.unwrap_or("chr");
 

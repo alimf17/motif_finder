@@ -1631,10 +1631,7 @@ impl Motif {
 
     }
 
-
-    pub fn generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str) -> Result<(), Box<dyn Error>> {
-
-        let chr = chromosome_name.unwrap_or("chr");
+    pub fn gen_single_mot_binding_report(&self, data_seq: &AllDataUse) -> Vec<(usize, bool, f64)> {
 
         let data = data_seq.data();
 
@@ -1649,15 +1646,24 @@ impl Motif {
 
         assert!(binds.len() == block_and_id.len(), "{} {}", binds.len(), block_and_id.len());
 
-        let mut binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (n, r, zero_locs[l]+j)).collect::<Vec<_>>();
+        let mut binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (zero_locs[l]+j, r, n)).collect::<Vec<_>>();
 
+        binds_locs
+    }
+
+    pub fn generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str) -> Result<(), Box<dyn Error>> {
+
+        let chr = chromosome_name.unwrap_or("chr");
+
+        let mut binds_locs = self.gen_single_mot_binding_report(data_seq);
+        
         binds_locs.sort_by(|(f,_,_), (g,_,_)| g.partial_cmp(f).unwrap());
 
         let mut file = fs::File::create(file_name)?;
 
         let mut buffer: Vec<u8> = Vec::with_capacity(binds_locs.len()*(chr.len()+22));
 
-        for (id, (bind, is_rev, base)) in binds_locs.into_iter().enumerate() {
+        for (id, (base, is_rev, bind)) in binds_locs.into_iter().enumerate() {
 
             let strand = if is_rev { "-" } else { "+" };
             let end_base = base+self.len();
@@ -2137,6 +2143,143 @@ impl<'a> MotifSet<'a> {
 
             }
         }
+
+    }
+
+    //I deliberately chose not to scale anything by peak heights here
+    pub fn generate_set_binding_report(&self, data_ref:&AllDataUse) -> Vec<(usize, usize, usize, f64)> {
+
+        let mut binding = self.set[0].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+
+        if self.set.len() > 1 { for i in 1..self.set.len() {
+
+            let new_binding = self.set[i].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[i].len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+
+            for j in 0..binding.len() {
+                if new_binding[j].2 > binding[j].2 {
+                    binding[j] = new_binding[j];
+                }
+            }
+
+        }}
+
+        binding
+
+    }
+
+    pub fn generate_set_binding_report_with_omission(&self, data_ref:&AllDataUse, omit: usize) -> Vec<(usize, usize, usize, f64)>  {
+
+        if self.set.len() == 1 { return Vec::new();} 
+
+        if omit >= self.set.len() { return self.generate_set_binding_report(data_ref); }
+
+        let mut binding = if omit == 0 {
+            self.set[1].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
+        } else {
+            self.set[0].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
+        };
+
+        if self.set.len() == 2 { return binding;}
+
+        let start_id = if omit == 1 {2_usize} else {1};
+
+        for i in start_id..self.set.len() {
+
+            if i != omit {
+                let new_binding = self.set[i].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[i].len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+
+                for j in 0..binding.len() {
+                    if new_binding[j].2 > binding[j].2 {
+                        binding[j] = new_binding[j];
+                    }
+                }
+            }
+        }
+
+        binding
+
+
+    }
+
+    //This gives a vector of precisions for each peak recalled
+    //If somehow, nothing pings on a peak that should be recalled, there will be a zero entry
+    //So for example, if this gives vec![1.0, 0.5, 0.6, 0.0, 0.0], there were five peaks that 
+    //should have been recalled: one was found at the top, one was found in position 4, 
+    //one was found in position 5, and the other two were never found somehow (this is probably an error)
+    pub fn precision_for_each_recall(&self, data_ref:&AllDataUse, peak_locations: &[((usize, usize), f64)]) -> Vec<f64> {
+
+        let mut binding_scores = self.generate_set_binding_report(data_ref);
+        binding_scores.sort_by(|(_,_,_,f), (_,_,_,g)| g.partial_cmp(f).unwrap());
+
+        let mut precisions: Vec<f64> = vec![0.0; peak_locations.len()];
+
+        let mut try_hits: f64 = 0.0;
+        let mut hits: f64 = 0.0; 
+        let mut hit_id: usize = 0;
+
+        for (start_loc, end_loc, _, _) in binding_scores {
+            
+            try_hits += 1.0;
+
+            let mut found = false;
+
+            for ((kern_start, kern_end), _) in peak_locations {
+
+                if start_loc >= *kern_end { break; }
+
+                if (start_loc >= *kern_start) && (end_loc <= *kern_end) {
+                    found = true;
+                }
+
+            }
+
+            if found {
+                hits += 1.0;
+                precisions[hit_id] = hits/try_hits;
+                hit_id += 1;
+            }
+
+        }
+
+        precisions
+    }
+
+    pub fn precision_for_each_recall_omit_motif(&self, data_ref:&AllDataUse, peak_locations: &[((usize, usize), f64)], omit: usize) -> Vec<f64> {
+
+        let mut binding_scores = self.generate_set_binding_report_with_omission(data_ref, omit);
+        binding_scores.sort_by(|(_,_,_,f), (_,_,_,g)| g.partial_cmp(f).unwrap());
+
+        let mut precisions: Vec<f64> = vec![0.0; peak_locations.len()];
+
+        let mut try_hits: f64 = 0.0;
+        let mut hits: f64 = 0.0;
+        let mut hit_id: usize = 0;
+
+        for (start_loc, end_loc, _, _) in binding_scores {
+
+            try_hits += 1.0;
+
+            let mut found = false;
+
+            for ((kern_start, kern_end), _) in peak_locations {
+
+                if start_loc >= *kern_end { break; }
+
+                if (start_loc >= *kern_start) && (end_loc <= *kern_end) {
+                    found = true;
+                }
+
+            }
+
+            if found {
+                hits += 1.0;
+                precisions[hit_id] = hits/try_hits;
+                hit_id += 1;
+            }
+
+        }
+
+        precisions
 
     }
 
