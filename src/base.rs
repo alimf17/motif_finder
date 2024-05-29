@@ -2283,6 +2283,48 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, omit_weakest: bool, base_file_name: &str) {
+
+        let file = format!("{}{}", base_file_name,"_pr_curve.png");
+        
+        let area = BitMapBackend::new(&file, (8000, 4000)).into_drawing_area();
+
+        let mut pr = ChartBuilder::on(&area);
+
+        pr.margin(10).y_label_area_size(200).x_label_area_size(200);
+
+        pr.caption("Precision vs recall", ("Times New Roman", 80));
+
+        let peak_locations = data_ref.basic_peak(MIN_HEIGHT);
+
+        let recall: Vec<f64> = (0..peak_locations.len()).map(|a| ((a+1) as f64)/(peak_locations.len() as f64)).collect();
+
+        let precision: Vec<f64> = self.precision_for_each_recall(data_ref, &peak_locations);
+
+        let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+
+        pr_context.configure_mesh().x_label_style(("sans-serif", 70))
+            .y_label_style(("sans-serif", 70))
+            .x_label_formatter(&|v| format!("{:.0}", v))
+            .axis_desc_style(("sans-serif",90))
+            .x_desc("Recall")
+            .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
+
+        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Total Motif Set");
+
+        if omit_weakest && self.set.len() > 1 {
+
+            let weakest = self.set.iter().map(|a| a.peak_height()).enumerate().min_by(|(_, a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
+
+            let precision_weakest: Vec<f64> = self.precision_for_each_recall_omit_motif(data_ref,&peak_locations, weakest);
+
+            pr_context.draw_series(LineSeries::new(precision_weakest.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Omit Weakest Motif");
+
+        }
+
+
+    }
+
     //Note: It is technically allowed to have a negative thermodynamic beta
     //      This will invert your mechanics to find your LOWEST likelihood region
     //      Which is bad for most use cases! So be warned. 

@@ -1298,60 +1298,6 @@ impl<'a> AllDataUse<'a> {
 
     }
    
-    /*
-    pub fn generate_initial_condition_jsons<R: Rng>(&self, self_file_name: String, base_set: StrippedMotifSet,  rng: R, init_dir: &str, init_name: String, shuffles: &[usize], noises: &[f64]) {
-
-
-        
-        let mut real_noises = noises.into_iter().filter(|&a| *a >= 0.0).map(|&a| a).collect::<Vec<f64>>();
-
-        let max_shuffle = base_set.set_iter().map(|a| a.len()).max().expect("Don't start with a comparison set that has no motifs");
-
-        let mut real_shuffles = shuffles.into_iter().filter(|&a| *a <= max_shuffle).map(|&a| a).collect::<Vec<_>>();
-
-        if real_shuffles.len() == 0 { real_shuffles = vec![0]; }
-        if real_noises.len() == 0 { real_noises = vec![0.0] };
-       
-        for &noi in real_noises.iter()  {
-        
-            //If noise is exactly 0, we want this to be none and know not to add any noise
-            for &shuf in real_shuffles.iter(){ 
-            
-
-
-                let mut new_set = base_set.clone();
-
-                for motif in new_set.mutable_set_iter() {
-
-                    let mot_len = motif.len();
-                    let shuffle_num = shuf.min(mot_len);
-
-                    let Some(&new_mot_id) = self.data.seq().all_kmers_with_exact_hamming(&motif.best_motif(), shuffle_num).choose(&mut rng) else { 
-                        println!("Did not generate hamming distance {} because there are no relevant motifs with that hamming distance", shuf); 
-                        continue; 
-                    };
-
-                    *motif = motif.scramble_by_id_to_valid(new_mot_id, false, self.data.seq());
-
-                    if noi > 0.0 {
-                        *motif = motif.add_noise([noi;3], &mut rng);
-                    }
-                        
-                }
-
-                //TODO: when I want to generate random initial conditions, I need to fix this to generate SetTraceDefs directly
-
-                let base_trace = SetTrace::new_trace(1, self_file_name.clone(), Some(new_set.reactivate_set(&self)), rng, &self, None);
-
-                let name_of_init = format!("{}_shuffle_{}_bases_with_noise_{}", init_name, shuf, noi);
-
-                base_trace.save_initial_state(init_dir, &name_of_init);
-
-            }
-        };
-
-
-    }*/
 
 }
 
