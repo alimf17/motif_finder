@@ -1468,6 +1468,7 @@ dependencies = [
  "assume",
  "bincode",
  "criterion",
+ "csv",
  "fastrand",
  "flamegraph",
  "indxvec",

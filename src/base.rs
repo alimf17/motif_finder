@@ -2,6 +2,8 @@
 
 use std::{f64, fmt, fs};
 
+use std::collections::HashSet;
+
 use std::ops::{Index, IndexMut};
 
 use std::io::{Read, Write};
@@ -10,6 +12,7 @@ use std::error::Error;
 use std::ptr;
 
 use std::mem::MaybeUninit;
+use std::process::*;
 use std::ptr::addr_of_mut;
 
 use core::fmt::{Debug, Formatter};
@@ -1846,20 +1849,22 @@ impl Motif {
 
     }
 
-    fn for_meme(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn for_meme(&self) -> String {
 
         const MEME_DIGITS: usize = 6;
 
-        write!(f, "letter-probability matrix: alength= {} w= {}\n", BPS.len(), self.len());
+        let mut meme_string = format!("letter-probability matrix: alength= {} w= {}\n", BPS.len(), self.len());
 
         for base in self.pwm.iter() {
             let probs = base.as_probabilities();
             for prob in probs.iter() {
-                write!(f, " {:.MEME_DIGITS$} ", prob);
+                meme_string = format!("{} {:.MEME_DIGITS$} ", meme_string, prob);
             }
-            write!(f, "\n");
+            meme_string = format!("{}\n", meme_string);
         }
-        write!(f, "\n")
+        meme_string = format!("{}\n", meme_string);
+
+        meme_string
     }
 
 
@@ -2283,7 +2288,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, omit_weakest: bool, base_file_name: &str) {
+    /*pub fn generate_pr_curve(&self, data_ref: &AllDataUse, omit_weakest: bool, base_file_name: &str) {
 
         let file = format!("{}{}", base_file_name,"_pr_curve.png");
         
@@ -2323,7 +2328,7 @@ impl<'a> MotifSet<'a> {
         }
 
 
-    }
+    }*/
 
     //Note: It is technically allowed to have a negative thermodynamic beta
     //      This will invert your mechanics to find your LOWEST likelihood region
@@ -2971,17 +2976,105 @@ impl StrippedMotifSet {
         self.set.iter_mut()
     }
 
-    pub fn output_to_meme(self, output_dir: &str, run_name: &str) -> std::io::Result<()> {
+    pub fn output_to_meme(&self, output_dir: &str, run_name: &str) -> std::io::Result<String> {
 
-        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.meme";
 
-        let mut outfile_handle = fs::File::create(savestate_file)?;
+        let mut outfile_handle = fs::File::create(&savestate_file)?;
 
         outfile_handle.write(b"MEME Version 4\n\n")?;
 
         let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>();
 
         outfile_handle.write(&alphabet.into_bytes())?;
+
+        for (i, mot) in self.set_iter().enumerate() {
+            
+            let header_str = format!("MOTIF motif_{i} {i}\n");
+            outfile_handle.write(&header_str.into_bytes())?;
+
+            let body_str = mot.for_meme();
+            outfile_handle.write(&body_str.into_bytes());
+        }
+
+        Ok((savestate_file))
+    }
+
+    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
+
+        let peak_locations = data_ref.basic_peak(MIN_HEIGHT);
+        
+        let meme_file = self.output_to_meme(output_dir, run_name)?;
+       
+        let fimo_output = format!("{}/{}_fimo", output_dir, run_name);
+
+        Command::new("fimo").arg("--oc").arg(&fimo_output).arg(&meme_file).arg(fasta_file).output()?;
+
+        let fimo_tsv = format!("{}/fimo.tsv", fimo_output);
+
+        let tsv_file_handle = std::fs::File::open(&fimo_tsv)?;
+
+        let mut reader = csv::ReaderBuilder::new().has_headers(true)
+                                           .delimiter(b'\t')
+                                           .comment(Some(b'#'))
+                                           .from_reader(tsv_file_handle);
+
+        type Record = (String, String, String, usize, usize, char, f64, f64, f64, String);
+
+        let mut number_hits: f64 = 0.0;
+        let mut number_correct_hits: f64 = 0.0;
+
+        let mut precision: Vec<f64> = Vec::with_capacity(peak_locations.len());
+        let mut recall: Vec<f64> = Vec::with_capacity(peak_locations.len());
+        let mut hit_peaks: HashSet<usize> = HashSet::new();
+
+        let mut number_hit_peaks: f64 = 0.0;
+        let number_peaks = peak_locations.len() as f64;
+
+        for line in reader.deserialize() {
+            let record: Record = line?;
+            number_hits+=1.0;
+            let start = record.3;
+            let end = record.4;
+            for (i, ((start_check, end_check), _)) in peak_locations.iter().enumerate() {
+                if start > *end_check {break;}
+                if (start >= *start_check) && (end <= *end_check) {
+                    number_correct_hits += 1.0;
+                    precision.push(number_correct_hits/number_hits);
+                    if hit_peaks.insert(i) { //This returns true if this is a new insertion
+                        number_hit_peaks += 1.0;
+                    }
+                    recall.push(number_hit_peaks/number_peaks);
+                    break;
+                }
+            }
+        }
+
+        let file = format!("{}/{}{}", output_dir, run_name,"_pr_curve.png");
+
+        let area = BitMapBackend::new(&file, (8000, 4000)).into_drawing_area();
+
+        let mut pr = ChartBuilder::on(&area);
+
+        pr.margin(10).y_label_area_size(200).x_label_area_size(200);
+
+        pr.caption("Precision vs recall", ("Times New Roman", 80));
+
+
+        let recall: Vec<f64> = (0..peak_locations.len()).map(|a| ((a+1) as f64)/(peak_locations.len() as f64)).collect();
+
+
+        let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+
+        pr_context.configure_mesh().x_label_style(("sans-serif", 70))
+            .y_label_style(("sans-serif", 70))
+            .x_label_formatter(&|v| format!("{:.0}", v))
+            .axis_desc_style(("sans-serif",90))
+            .x_desc("Recall")
+            .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
+
+        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Total Motif Set");
+
 
         Ok(())
     }
