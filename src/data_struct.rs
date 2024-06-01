@@ -1257,9 +1257,24 @@ impl<'a> AllDataUse<'a> {
        
             let integrals = block.1.windows(num_forward).map(|a| a.iter().sum::<f64>()*spacing_float).collect::<Vec<_>>();
 
-            for (i, integral_slice) in integrals.windows(3).enumerate() {
+            /*for (i, integral_slice) in integrals.windows(3).enumerate() {
                 if (integral_slice[1] >= target_integral) && (integral_slice[1] >= integral_slice[0]) && (integral_slice[1] >= integral_slice[2]) { 
                     location_vs_integral.push(((block.0[i+1], block.0[i+1+num_forward]), integral_slice[1]));
+                }
+            }*/
+            for (i, integral) in integrals.iter().enumerate() {
+                
+                if (*integral >= target_integral) {
+                    if let Some(last_entry) = location_vs_integral.last_mut() {
+                        if last_entry.0.1 >= block.0[i] { 
+                            last_entry.0.1 = block.0[(i+num_forward).min(block.0.len()-1)];
+                            if last_entry.1 < *integral { last_entry.1 = *integral;}
+                        } else {
+                            location_vs_integral.push(((block.0[i], block.0[(i+num_forward).min(block.0.len()-1)]), *integral));
+                        }
+                    } else {
+                        location_vs_integral.push(((block.0[i], block.0[(i+num_forward).min(block.0.len()-1)]), *integral));
+                    }
                 }
             }
         }

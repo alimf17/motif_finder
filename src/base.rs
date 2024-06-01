@@ -2144,7 +2144,8 @@ impl<'a> MotifSet<'a> {
             for (i, mot) in self.set.iter().enumerate() {
 
                 let sub_directory = format!("{}/Motif_{}", signal_directory, i);
-                signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN);
+                let sub_signal = self.set[i].generate_waveform(data_ref);
+                sub_signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN);
 
             }
         }
@@ -3002,17 +3003,25 @@ impl StrippedMotifSet {
 
     pub fn generate_pr_curve(&self, data_ref: &AllDataUse, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
 
-        let peak_locations = data_ref.basic_peak(MIN_HEIGHT);
+        println!("start pr");
+        let mut peak_locations = data_ref.basic_peak(5.0);
         
+        peak_locations.sort_by(|((a, _), _), ((b, _), _)| a.cmp(b));
+
         let meme_file = self.output_to_meme(output_dir, run_name)?;
        
         let fimo_output = format!("{}/{}_fimo", output_dir, run_name);
 
+        let _ = fs::create_dir(&fimo_output);
+
+        println!("created dir");
         Command::new("fimo").arg("--oc").arg(&fimo_output).arg(&meme_file).arg(fasta_file).output()?;
 
         let fimo_tsv = format!("{}/fimo.tsv", fimo_output);
 
         let tsv_file_handle = std::fs::File::open(&fimo_tsv)?;
+
+        println!("tsv read");
 
         let mut reader = csv::ReaderBuilder::new().has_headers(true)
                                            .delimiter(b'\t')
@@ -3037,7 +3046,8 @@ impl StrippedMotifSet {
             let start = record.3;
             let end = record.4;
             for (i, ((start_check, end_check), _)) in peak_locations.iter().enumerate() {
-                if start > *end_check {break;}
+                println!("Record start and end {} {} locs start and end {} {}", start, end, start_check, end_check);
+                if *start_check > end {break;}
                 if (start >= *start_check) && (end <= *end_check) {
                     number_correct_hits += 1.0;
                     precision.push(number_correct_hits/number_hits);
@@ -3045,14 +3055,29 @@ impl StrippedMotifSet {
                         number_hit_peaks += 1.0;
                     }
                     recall.push(number_hit_peaks/number_peaks);
+                    println!("Success {} {}", start, end);
                     break;
                 }
+                println!("Start {} End {}", start_check, end_check);
             }
+            println!("Fail {} {}", start, end);
         }
 
+        for i in 0..peak_locations.len() {
+            if hit_peaks.contains(&i) {
+                println!("Hit peak {:?}", peak_locations[i].0);
+            } else {
+                println!("Miss peak {:?}", peak_locations[i].0);
+            }
+        }
+    
+        println!("Precision {:?} Recall {:?}", precision, recall);
+        
         let file = format!("{}/{}{}", output_dir, run_name,"_pr_curve.png");
 
-        let area = BitMapBackend::new(&file, (8000, 4000)).into_drawing_area();
+        let area = BitMapBackend::new(&file, (4000, 4200)).into_drawing_area();
+
+        area.fill(&full_palette::WHITE).unwrap();
 
         let mut pr = ChartBuilder::on(&area);
 
@@ -3061,9 +3086,8 @@ impl StrippedMotifSet {
         pr.caption("Precision vs recall", ("Times New Roman", 80));
 
 
-        let recall: Vec<f64> = (0..peak_locations.len()).map(|a| ((a+1) as f64)/(peak_locations.len() as f64)).collect();
 
-
+        
         let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
         pr_context.configure_mesh().x_label_style(("sans-serif", 70))
@@ -3073,7 +3097,7 @@ impl StrippedMotifSet {
             .x_desc("Recall")
             .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
-        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Total Motif Set");
+        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), BLUE.filled().stroke_width(10))).unwrap().label("Total Motif Set");
 
 
         Ok(())
