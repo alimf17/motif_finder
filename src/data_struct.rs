@@ -604,7 +604,7 @@ impl AllData {
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
-        let data_zone: usize = 100.max(fragment_length/spacing);
+        let data_zone: usize = 100.max(fragment_length/spacing)*3;
         
         for block in lerped_blocks {
 
