@@ -494,12 +494,6 @@ impl AllData {
 
         dat = Data::new(refined_locs_data.iter().map(|&(_, a)| (a-median).abs()).collect::<Vec<f64>>());
 
-        let mad_as_sd = dat.median()*MAD_ADJUSTER;
-
-        for (_, dat) in refined_locs_data.iter_mut() {
-            *dat = (*dat-median)/mad_as_sd;
-        }
-
         println!("refined data values");
         //Here, refined_locs_data ultimately has one data value for every represented location in the data,
         //with the data sorted by location in ascending order
