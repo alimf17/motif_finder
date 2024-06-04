@@ -95,7 +95,7 @@ impl<'a> CostFunction for FitTDist<'a> {
             return Err(argmin_error!(InvalidParameter, "t distribution must have two parameters!"));
         }
 
-        if (p[0] < 0.0) || (p[1] < 2.0) {
+        if (p[0] < 0.0) || (p[1] < 2.0) || (p[1] > 50.0) { //We need to include a limit on the degrees of freedom, or else we just blow up too big sometimes
             return Ok(f64::INFINITY);
         }
 
@@ -494,6 +494,13 @@ impl AllData {
 
         dat = Data::new(refined_locs_data.iter().map(|&(_, a)| (a-median).abs()).collect::<Vec<f64>>());
 
+        let mad_adjust = dat.median()*MAD_ADJUSTER;
+        println!("rough sd is {}", mad_adjust);
+
+        for (_, dat) in refined_locs_data.iter_mut() {
+            *dat = (*dat-median);
+        }
+
         println!("refined data values");
         //Here, refined_locs_data ultimately has one data value for every represented location in the data,
         //with the data sorted by location in ascending order
@@ -591,7 +598,7 @@ impl AllData {
             peak_scale = peak_scale.abs();
         }
 
-        let peak_thresh = 1.25_f64*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = 1.25*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
@@ -641,6 +648,8 @@ impl AllData {
         if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
+
+        println!("past first");
 
         if ar_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
@@ -766,6 +775,8 @@ impl AllData {
         if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
+
+        println!("past second");
 
         if ar_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
@@ -1063,12 +1074,13 @@ impl AllData {
 
         let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64);
 
-        let init_dfs = vec![2.1, 3.0, 25.0]; //df really close to 2, df sanely close to 2, and df above our "give up to normal" point
+        let init_dfs = vec![2.01, 4.0, 23.0]; //df really close to 2, df sanely close to 2, and df above our "give up to normal" point
 
         let init_simplex: Vec<Vec<f64>> = init_dfs.iter().map(|&a| vec![(total_sample_variance*(a-2.0)/a).sqrt(), a]).collect();
 
         let cost = FitTDist { decorrelated_data };
 
+        println!("began nelder mead");
         //This is fine to unwrap because we are setting a valid tolerance
         let solver = NelderMead::new(init_simplex).with_sd_tolerance(1e-6).unwrap();
 
@@ -1079,7 +1091,11 @@ impl AllData {
         let res = executor.run().unwrap();
 
 
+        println!("end nelder mead");
+
         let best_vec = res.state().get_best_param().unwrap();
+
+        println!("Results (sd then df) {:?}", best_vec);
 
         let sd_guess = best_vec[0];
         let df_guess = best_vec[1];
