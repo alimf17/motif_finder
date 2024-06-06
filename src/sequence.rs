@@ -479,7 +479,130 @@ impl Sequence {
 
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NullSequence {
+    seq_blocks: Vec<u8>,
+    block_u8_starts: Vec<usize>,
+    block_lens: Vec<usize>,
+    max_len: usize,
+}
 
+
+/*Minor note: if your blocks total more bases than about 2 billion, you
+              will likely want to run on a 64 bit system, for hardware limitation
+              reasons. If you manage to reach those limitations on a 64 bit system, 
+              why on EARTH are you shoving in tens of millions of 
+              Paris japonica genome equivalents into this????
+*/
+impl NullSequence {
+    
+
+    //PANICS: if a block has a length not divisible by BP_PER_U8 (4), a length shorter than MAX_BASE, or a usize not less than BASE_L (4)
+    //        This should not panic in our crate
+    pub fn new(blocks: Vec<Vec<usize>>) -> NullSequence {
+
+        let mut block_is: Vec<usize> = Vec::new();
+
+        let mut s_bases: Vec<usize> = Vec::new();
+
+        let mut block_ls: Vec<usize> = Vec::new();
+
+        let mut seq_bls: Vec<u8> = Vec::new();
+
+        let mut p_len: usize = 0;
+
+        let mut b_len: usize = 0;
+
+        let mut max_len: usize = 0;
+
+        
+        for block in blocks {
+            
+            s_bases.push(b_len);
+            
+            block_is.push(p_len);
+
+            //SAFETY: We have unsafe code that relies on these invariants being upheld
+            if block.len() % BP_PER_U8 != 0 {
+                panic!("All blocks must have a number of base pairs divisible by {}.", BP_PER_U8);
+            }
+
+            if block.len() <= MAX_BASE {
+                panic!("All blocks must be longer than your maximum possible motif size!");
+            }
+
+            //SAFETY: This is quite possibly the most important guarentee this code has of safety. 
+            //If you're getting a panic here, don't try to bull around it. The entire 
+            //likelihood calculation algorithm relies on this assertion being statically guarenteed in all
+            //uses of Sequence
+            if block.iter().any(|&a| a >= BASE_L) {
+                panic!("All sequence bases must map to a valid base!")
+            }
+
+            let num_entries = block.len()/BP_PER_U8;
+            
+            for i in 0..num_entries {
+                //SAFETY: the check on the block having the right number of BPs guarentees that this is sound
+                let precoded = &block[(BP_PER_U8*i)..(BP_PER_U8*i+BP_PER_U8)].iter().map(|&a| unsafe{Bp::usize_to_bp(a)}).collect::<Vec<_>>().try_into().expect("slice with incorrect length");
+                seq_bls.push(Sequence::bases_to_code(precoded));
+            }
+
+            p_len += block.len()/BP_PER_U8;
+            b_len += block.len();
+
+            block_ls.push(block.len());
+
+            max_len = if block.len() > max_len {block.len()} else {max_len};
+
+        }
+
+        const F: Vec<u64> = Vec::new();
+
+        let mut seq = NullSequence {
+                    seq_blocks: seq_bls,
+                    block_u8_starts: block_is,
+                    block_lens: block_ls,
+                    max_len: max_len,
+                    };
+
+        seq
+
+    }
+    
+    //Regular reader functions
+
+    //This can TECHNICALLY panic in debug mode and produce incorrect answers 
+    //when compiled with optimizations. For 32 bit platforms, I'd watch out
+    //if somehow operating on an entire human genome at once without any 
+    //omissions, but for 64 bit platforms (or more), there are no known genome 
+    //sizes on which this could be a concern.
+    pub fn number_bp(&self) -> usize {
+        self.seq_blocks.len() << 2 //Each u8 contains four bp, so we multiply by 4
+    }
+
+    pub fn seq_blocks(&self) -> &Vec<u8> {
+        &self.seq_blocks
+    }
+
+    pub fn coded_place(&self, i: usize) -> u8 {
+        self.seq_blocks[i]
+    }
+
+    pub fn block_lens(&self) -> Vec<usize> {
+        self.block_lens.clone()
+    }
+    
+    pub fn max_len(&self) -> usize {
+        self.max_len
+    }
+
+    pub fn block_u8_starts(&self) -> Vec<usize> {
+        self.block_u8_starts.clone()
+    }
+
+
+
+}
 
 #[cfg(test)]
 mod tests {

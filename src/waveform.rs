@@ -364,8 +364,7 @@ impl<'a> Waveform<'a> {
         
         let residual = self-data_ref.data();
 
-        residual.produce_resid_noise(data_ref.background_ref())
-
+        return Noise::new(residual.wave, data_ref.background_ref());
     }
 
     pub fn median_distance_between_waves(&self, data: &Self) -> f64 {
@@ -379,67 +378,6 @@ impl<'a> Waveform<'a> {
         }
     }
    
-    pub fn account_auto<'b>(&self, background: &'b Background) -> Noise<'b> {
-
-        (self*(1.)).produce_resid_noise(background)
-
-    }
-
-    pub fn produce_resid_noise<'b>(&self, background: &'b Background) -> Noise<'b> {
-       
-        let residual = self;
-
-        if !(background.is_ar()){
-            return Noise::new(self.wave.clone(), background);
-        }
-
-        let mut end_dats = residual.start_dats()[1..residual.start_dats.len()].to_vec();
-
-        let resid = &residual.wave;
-        
-        end_dats.push(resid.len());
-
-        let mut len_penalties = vec![0usize; end_dats.len()];
-
-        for k in 0..end_dats.len() {
-            len_penalties[k] = (k+1)*background.ar_corrs.as_ref().expect("We short circuited if this was None.").len();
-        }
-
-        let filt_lens: Vec<usize> = end_dats.iter().zip(len_penalties).map(|(a, b)| a-b).collect();
-
-        let l_c = background.ar_corrs.as_ref().expect("We short circuited if this was None.").len();
-
-        let mut fin_noise: Vec<f64> = vec![0.0; filt_lens.iter().sum()];
-
-        for k in 0..end_dats.len(){
-
-            let sind: usize = if k == 0 {0} else {end_dats[k-1]};
-
-
-            let mut block: Vec<f64> = resid[(sind+l_c)..end_dats[k]].to_vec();
-            
-            for i in 0..l_c {
-                for j in 0..block.len() {
-                    block[j] -= background.ar_corrs.as_ref().expect("We short circuited if this was None.")[i]*resid[sind+l_c+j-(i+1)];
-                }
-            }
-
-            let sind: usize = if k == 0 {0} else {filt_lens[k-1]};
-
-            let block_ref = &mut fin_noise[sind..filt_lens[k]];
-
-            for i in 0..block_ref.len(){
-
-                block_ref[i] = block[i];
-
-            }
-
-        }
-
-        Noise::new(fin_noise,background)
-
-
-    }
 
     pub fn generate_all_locs(&self) -> Vec<usize> {
 
@@ -789,39 +727,17 @@ impl From<StudentsTDef> for StudentsT {
 pub struct Background {
     pub dist: BackgroundDist,
     pub kernel: Kernel,
-    pub ar_corrs: Option<Vec<f64>>,
 }
 
 impl Background {
 
-    pub fn new(sigma_background : f64, df : f64, peak_width: f64, poss_ar_corrs: Option<&Vec<f64>>) -> Background {
+    pub fn new(sigma_background : f64, df : f64, peak_width: f64) -> Background {
 
         let dist = BackgroundDist::new(sigma_background, df);
         
         let kernel = Kernel::new(peak_width, 1.0);
 
-        match poss_ar_corrs {
-            
-            Some(ar_corrs) => {
-                let mut poly = ar_corrs.iter().map(|a| -1.0*a).collect::<Vec<f64>>();
-                poly.splice(0..0, [1.0]);
-
-                let roots = aberth_vec(&poly, EPSILON).unwrap();
-
-                for root in roots {
-                    if root.abs() <= 1.0+EPSILON { //Technically, the +EPSILON means that we might rule out some stationary models
-                        panic!("AR model is not stationary!")
-                    }
-                }
-                
-                Background{dist: dist, kernel: kernel, ar_corrs:Some(ar_corrs.clone())}
-            }, 
-            None => Background{dist: dist, kernel: kernel, ar_corrs: None},
-        }
-    }
-
-    pub fn is_ar(&self) -> bool {
-        self.ar_corrs.is_some()
+        Background{dist: dist, kernel: kernel}
     }
 
 
@@ -1398,9 +1314,7 @@ mod tests{
         let base_w = &signal*0.4;
 
 
-        let ar: Vec<f64> = vec![0.9, -0.1];
-
-        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0);
 
         let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &zeros, &background)};
 
@@ -1414,37 +1328,6 @@ mod tests{
         let w = raw_resid.raw_wave();
 
         println!("Noi {:?}", noi);
-        for i in 0..raw_resid.raw_wave().len(){
-
-
-            let chopped = raw_resid.start_dats().iter().fold(false, |acc, ch| acc || ((i >= *ch) && (i < *ch+ar.len())));
-
-
-            let block_id = raw_resid.start_dats().iter().enumerate().filter(|(_, &a)| a <= i).max_by_key(|(_, &value)| value).map(|(idx, _)| idx).unwrap();
-            //This gives the index of the maximum start value that still doesn't exceed i, identifying its data block.
-
-            let block_loc = i-raw_resid.start_dats()[block_id];
-
-            if !chopped {
-
-                let start_noi = raw_resid.start_dats()[block_id]-block_id*ar.len();
-
-
-
-                let piece: Vec<_> = w[(i-ar.len())..i].iter().rev().collect();
-
-                let sst = ar.iter().zip(piece.clone()).map(|(a, r)| a*r).sum::<f64>() as f64;
-
-                println!("i {} noi raw res {}",i, ((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)));
-                assert!(((noi[start_noi+block_loc-ar.len()] as f64) - ((raw_resid.raw_wave()[i] as f64)-(sst) as f64)).abs() < 1e-6);
-
-            }
-
-        }
-
-
-
-
 
 
 
@@ -1458,9 +1341,8 @@ mod tests{
     #[test]
     fn noise_check(){
 
-        let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0);
 
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], &background);
@@ -1556,24 +1438,14 @@ mod tests{
     #[test]
     #[should_panic(expected = "Residuals aren't the same length?!")]
     fn panic_noise() {
-        let ar: Vec<f64> = vec![0.9, -0.1];
         
-        let background: Background = Background::new(0.25, 2.64, 5.0, Some(&ar));
+        let background: Background = Background::new(0.25, 2.64, 5.0);
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], &background);
 
         let _ = &n1*&n2.resids();
     }
 
-
-    #[test]
-    #[should_panic(expected = "AR model is not stationary!")]
-    fn panic_background() {
-
-        let ar: Vec<f64> = vec![1.5, 1.0];
-        
-        let background: Background = Background::new(0.25, 2.64,5.0, Some(&ar));
-    }
 
 
 

@@ -167,7 +167,7 @@ fn main() {
     println!("Args parsed");
 
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, false, &NULL_CHAR, peak_cutoff).unwrap();
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
 
 
     let data_ref = AllDataUse::new(&total_data).unwrap();

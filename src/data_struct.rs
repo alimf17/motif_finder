@@ -110,7 +110,7 @@ impl AllData {
     //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, use_ar_model: bool, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
+                                 fragment_length: usize, spacing: usize, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
 
 
         let file_out = if peak_scale.is_some() {
@@ -151,7 +151,7 @@ impl AllData {
             Err(E) => Err(E.clone()),
         };
 
-        let (pre_data, background) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, is_circular, use_ar_model, peak_scale)?;
+        let (pre_data, background, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, is_circular, peak_scale)?;
  
         println!("processed data");
 
@@ -322,7 +322,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, is_ar: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background, Vec<Vec<(usize, f64)>>), AllProcessingError> {
        
         let att_file = fs::read_to_string(data_file_name);
 
@@ -803,14 +803,16 @@ impl AllData {
         //mean that this will not be the case. There ARE pathological cases in
         //the inference of the results, but only if we have like fewer than 2 data
         //points, which doesn't happen with the way we defined data_zone
-        let background_dist = if is_ar {Self::yule_walker_ar_coefficients_with_bic(&ar_inference, data_zone.min(30), fragment_length)} else { 
+        let background_dist = { 
             let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
-            Background::new(sd, df, (fragment_length as f64)/(2.0*WIDE), None)
+            Background::new(sd, df, (fragment_length as f64)/(2.0*WIDE))
         } ;
         println!("inferred background dist");
 
+        let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.iter().map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
+
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        Ok((trimmed_data_blocks, background_dist))
+        Ok((trimmed_data_blocks, background_dist, trimmed_ar_blocks))
 
 
 
@@ -896,6 +898,11 @@ impl AllData {
     //coefficients in general, and I solve the Yule-Walker equations with Cholesky decomposition, not Levinson recursion
     //I use Cholesky decomposition because I usually have a clear cap on the order size--capping computational cost--
     //and it was what I saw first saw
+
+    //This is now legacy code. I had previous allowed an input of an AR model to decorrelate noises
+    //But this actively hurt prediction: it muted peaks to the point of uselessness
+    //It doesn't even compile, since I removed the ability of background to have AR coefficients
+    /*
     fn yule_walker_ar_coefficients_with_bic(raw_data_blocks: &Vec<Vec<f64>>, max_order: usize, fragment_length: usize) -> Background {
 
 
@@ -942,9 +949,11 @@ impl AllData {
         Background::new(*sd, *df, (fragment_length as f64)/6.0, Some(coeffs))
 
 
-    }
+    }*/
 
 
+    //While this was originally in place to compute autocorrelation coefficients I no longer need, I since actually adapted it to something useful:
+    //calculating autocorrelations of my inference
     pub fn compute_autocorrelation_coeffs(data: &Vec<Vec<f64>>, mut num_coeffs: usize) -> Vec<f64>{
 
         let min_data_len = data.iter().map(|a| a.len()).min().expect("Why are you trying to get autocorrelations from no data?");
