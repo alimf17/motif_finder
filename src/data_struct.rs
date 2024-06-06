@@ -786,6 +786,14 @@ impl AllData {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
         }
 
+        let ar_info = ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
+        let data_info = data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
+
+        println!("AR lens, start loc, and end datas {:?}", ar_info);
+        println!("total AR amount {}", ar_info.iter().map(|a| a.0).sum::<usize>());
+        println!("data lens, start loc, and end datas {:?}", data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>());
+        println!("total data amount {}", data_info.iter().map(|a| a.0).sum::<usize>());
+
         let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
 

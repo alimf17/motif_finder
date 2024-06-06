@@ -2985,7 +2985,7 @@ impl StrippedMotifSet {
 
         outfile_handle.write(b"MEME Version 4\n\n")?;
 
-        let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>();
+        let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>()+"\n";
 
         outfile_handle.write(&alphabet.into_bytes())?;
 
