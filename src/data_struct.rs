@@ -8,8 +8,8 @@ use core::f64::consts::PI;
 use std::error::Error;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel};
-use crate::sequence::{Sequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, StrippedMotifSet, SetTrace, InitializeSet};
+use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
+use crate::base::{BPS, BASE_L, StrippedMotifSet, SetTrace, InitializeSet, MAX_BASE};
 
 use thiserror::Error;
 
@@ -49,6 +49,7 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
 pub struct AllData {
 
     seq: Sequence,
+    null_seq: NullSequence,
     data: WaveformDef,
     start_genome_coordinates: Vec<usize>,
     background: Background,
@@ -57,6 +58,7 @@ pub struct AllData {
 
 pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
+    null_seq: &'a NullSequence, 
     start_genome_coordinates: &'a Vec<usize>,
     background: &'a Background,
 }
@@ -159,10 +161,10 @@ impl AllData {
 
         let pre_seq_len = pre_seq.len();
 
-        let (seq, data, starts) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_seq_len, spacing); 
+        let (seq, null_seq, data, starts) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing); 
 
         println!("synchronized fasta and data");
-        let full_data: AllData = AllData {seq: seq, data: data, start_genome_coordinates: starts, background: background};
+        let full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, background: background};
 
         let _ = AllDataUse::new(&full_data)?; //This won't be returned: it's just a validation check.
 
@@ -823,8 +825,9 @@ impl AllData {
 
     //TODO: I need a function which marries my processed FASTA file and my processed data
     //      By the end, I should have a Sequence and WaveformDef, which I can use in my public function to create an AllData instance
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, WaveformDef, Vec<usize>) {
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, NullSequence, WaveformDef, Vec<usize>) {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
+        let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_null_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
         let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
 
@@ -872,12 +875,50 @@ impl AllData {
             i += 1;
         }
 
+        i = 0_usize;
+
+        while i < pre_null_data.len() {
+
+            let mut bp_ind = pre_data[i][0].0;
+            let mut bp_prior = bp_ind;
+            let min_target_bp = (*(pre_null_data[i].last().unwrap())).0+1;
+            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+
+            let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_null_data[i].len()*spacing);
+
+            while bp_ind < target_bp {
+                match pre_sequence[bp_ind % sequence_len] {
+                    Some(bp) => bases_batch.push(bp),
+                    None => {
+
+                        let final_prev_bp = bp_ind-((bp_ind-bp_prior) % BP_PER_U8);//This keeps our number of bases in each block divisible by BP_PER_U8
+
+                        let previous_batch: Vec<usize> = bases_batch.drain(0..(final_prev_bp-bp_prior)).collect();
+                        
+                        if previous_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                            null_sequence_blocks.push(previous_batch);
+                        }
+                        bases_batch.clear(); //In case there are a couple of straggling bases before the current bp
+                        bp_prior = bp_ind+1; //We want to skip the null base
+                    },
+                };
+                bp_ind += 1;
+            }
+
+            if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                null_sequence_blocks.push(bases_batch);
+            }
+
+            i += 1;
+        }
+
         let seq = Sequence::new(sequence_blocks);
+        let null_seq = NullSequence::new(null_sequence_blocks);
         let wave = Waveform::new(start_data, &seq, spacing);
 
         let wave_ret = WaveformDef::from(&wave);
 
-        (seq, wave_ret, starting_coords)
+        (seq, null_seq, wave_ret, starting_coords)
 
 
     }
@@ -1224,6 +1265,7 @@ impl<'a> AllDataUse<'a> {
 
         Ok( Self{ 
                data: reference_struct.validated_data()?,
+               null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
                background: reference_struct.background(),
         })
@@ -1234,9 +1276,10 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, start_genome_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
         Self{
             data: data,
+            null_seq: null_seq,
             start_genome_coordinates: start_genome_coordinates,
             background: background,
         }
