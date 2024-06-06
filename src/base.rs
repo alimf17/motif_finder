@@ -19,7 +19,7 @@ use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
 use crate::waveform::{Kernel, Waveform, WaveformDef, Noise};
-use crate::sequence::{Sequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
+use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF};
 use crate::{MAX_IND_RJ, MAX_IND_LEAP};
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
@@ -1633,6 +1633,60 @@ impl Motif {
 
 
     }
+    
+    pub fn return_any_null_binds(&self, seq: &NullSequence) -> Vec<f64> {
+
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
+
+
+        let mut bind_scores: Vec<f64> = Vec::new();
+
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+
+        let mut ind: usize;
+
+        let mut store: [Bp; BP_PER_U8];
+
+        let max_ignore_bind = (-self.peak_height).exp2();
+
+        {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..((block_lens[i])-self.len()) {
+
+                    ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+                    let (bind, _) = unsafe {self.prop_binding(binding_borrow) };
+
+                    if bind > max_ignore_bind {
+                        bind_scores.push(bind);
+                    }
+                }
+
+            }
+        }
+
+        bind_scores
+
+    }
 
     pub fn gen_single_mot_binding_report(&self, data_seq: &AllDataUse) -> Vec<(usize, bool, f64)> {
 
@@ -1728,6 +1782,14 @@ impl Motif {
         //println!("num peaks {}", count);
 
         occupancy_trace
+
+    }
+
+    pub fn generate_extraneous_binding(&self, data_ref: &AllDataUse) -> Vec<f64> {
+
+        let extraneous_bindings = self.return_any_null_binds(data_ref.null_seq());
+
+        todo!()
 
     }
 

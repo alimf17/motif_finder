@@ -1289,6 +1289,10 @@ impl<'a> AllDataUse<'a> {
         &self.data
     }
 
+    pub fn null_seq(&self) -> &NullSequence{
+        &self.null_seq
+    }
+
     pub fn size(&self) -> usize {
         self.data.amount_data()
     }
