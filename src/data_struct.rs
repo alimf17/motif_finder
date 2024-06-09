@@ -52,6 +52,7 @@ pub struct AllData {
     null_seq: NullSequence,
     data: WaveformDef,
     start_genome_coordinates: Vec<usize>,
+    start_nullbp_coordinates: Vec<usize>,
     background: Background,
 
 }
@@ -60,6 +61,7 @@ pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
     null_seq: &'a NullSequence, 
     start_genome_coordinates: &'a Vec<usize>,
+    start_nullbp_coordinates: &'a Vec<usize>,
     background: &'a Background,
 }
 
@@ -161,10 +163,10 @@ impl AllData {
 
         let pre_seq_len = pre_seq.len();
 
-        let (seq, null_seq, data, starts) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing); 
+        let (seq, null_seq, data, starts, start_nulls) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing); 
 
         println!("synchronized fasta and data");
-        let full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, background: background};
+        let full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background};
 
         let _ = AllDataUse::new(&full_data)?; //This won't be returned: it's just a validation check.
 
@@ -824,12 +826,22 @@ impl AllData {
 
 
     //TODO: I need a function which marries my processed FASTA file and my processed data
-    //      By the end, I should have a Sequence and WaveformDef, which I can use in my public function to create an AllData instance
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, NullSequence, WaveformDef, Vec<usize>) {
+    //      By the end, I should have a Sequence and WaveformDef, which I can 
+    //      use in my public function to create an AllData instance
+    //
+    //      If you're eagle eyed, you'll notice that there's some bits of the 
+    //      sequence that get assigned neither to null sequence nor to positive
+    //      Yes, you're very clever. This issue exists because I don't actually 
+    //      care: I'm losing about spacer bps for each block in both data sets
+    //      But these are on the edge between being positive and negative data,
+    //      so they're in a little bit of a grey area to classify, and saving 
+    //      them isn't my highest priority anyway.
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> (Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>) {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_null_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
         let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
+        let mut null_starts_bps: Vec<usize> = Vec::with_capacity(pre_null_data.len());
 
         let mut i = 0_usize;
 
@@ -896,6 +908,7 @@ impl AllData {
                         let previous_batch: Vec<usize> = bases_batch.drain(0..(final_prev_bp-bp_prior)).collect();
                         
                         if previous_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                            null_starts_bps.push(bp_prior);
                             null_sequence_blocks.push(previous_batch);
                         }
                         bases_batch.clear(); //In case there are a couple of straggling bases before the current bp
@@ -918,7 +931,7 @@ impl AllData {
 
         let wave_ret = WaveformDef::from(&wave);
 
-        (seq, null_seq, wave_ret, starting_coords)
+        (seq, null_seq, wave_ret, starting_coords, null_starts_bps)
 
 
     }
@@ -1267,6 +1280,7 @@ impl<'a> AllDataUse<'a> {
                data: reference_struct.validated_data()?,
                null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
+               start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
                background: reference_struct.background(),
         })
 
@@ -1276,11 +1290,12 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
         Self{
             data: data,
             null_seq: null_seq,
             start_genome_coordinates: start_genome_coordinates,
+            start_nullbp_coordinates: start_nullbp_coordinates,
             background: background,
         }
     }
@@ -1311,6 +1326,9 @@ impl<'a> AllDataUse<'a> {
     
     pub fn zero_locs(&self) -> &Vec<usize> {
         &self.start_genome_coordinates
+    }
+    pub fn null_zero_locs(&self) -> &Vec<usize> {
+        &self.start_nullbp_coordinates
     }
     
     pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {

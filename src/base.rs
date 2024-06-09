@@ -1634,17 +1634,18 @@ impl Motif {
 
     }
     
-    pub fn return_any_null_binds(&self, seq: &NullSequence) -> Vec<f64> {
+    //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
+    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, groups: &[usize]) -> Vec<f64> {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
         let block_starts = seq.block_u8_starts(); //stored index space
 
-
         let mut bind_scores: Vec<f64> = Vec::new();
-
+        
         let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
+        let num_blocks = block_lens.len();
 
         let mut ind: usize;
 
@@ -1652,10 +1653,16 @@ impl Motif {
 
         let max_ignore_bind = (-self.peak_height).exp2();
 
+        
+
         {
             let uncoded_seq = uncoded_seq.as_mut_slice();
-            for i in 0..(block_starts.len()) {
+            
+            for &i in groups.iter() {
 
+                if i >= num_blocks {
+                    continue;
+                }
 
                 for jd in 0..(block_lens[i]/BP_PER_U8) {
 
@@ -1784,15 +1791,6 @@ impl Motif {
         occupancy_trace
 
     }
-
-    pub fn generate_extraneous_binding(&self, data_ref: &AllDataUse) -> Vec<f64> {
-
-        let extraneous_bindings = self.return_any_null_binds(data_ref.null_seq());
-
-        todo!()
-
-    }
-
 
 
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 

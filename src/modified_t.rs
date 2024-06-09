@@ -79,6 +79,15 @@ impl BackgroundDist {
             BackgroundDist::FastT(fast) => fast.cd_and_sf(x)
         }
     }
+
+    pub fn get_spread_par(&self) -> f64 {
+        match self {
+            //UGH. I wish statrs let me access the standard deviation directly, rather than requiring me to square root their squared sd
+            //SAFETY: the normal distribution must always have a valid f64 as its standard deviation
+            BackgroundDist::Normal(norm) => unsafe{ norm.std_dev().unwrap_unchecked()},
+            BackgroundDist::FastT(fast) => fast.scale,
+        }
+    }
 }
 
 impl ContinuousCDF<f64, f64> for BackgroundDist {

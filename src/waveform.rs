@@ -104,7 +104,6 @@ impl Kernel {
         self*scale_by
     }
 
-
 }
 
 //CANNOT BE SERIALIZED
@@ -132,6 +131,8 @@ impl<'a> Waveform<'a> {
        */
     pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
 
+
+        if spacer == 0 {panic!("Spacer has to be positive, or else we're going to divide by zero a bunch.");}
 
         let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
        
@@ -233,8 +234,8 @@ impl<'a> Waveform<'a> {
        
         let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
 
-        let _min_kern_bp: usize = max(0, place_bp) as usize;
-        let _nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
+        //let _min_kern_bp: usize = max(0, place_bp) as usize;
+        //let _nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
  
         //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
         //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
@@ -359,12 +360,87 @@ impl<'a> Waveform<'a> {
 
     }
 
+    pub fn generate_extraneous_binding(data_ref: &AllDataUse, extraneous_bind_array: &[f64], peak_height: f64 ) -> Vec<f64> {
+
+        //Is our potential binding strong enough to even attempt to try extraneous binding?
+        let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
+        let min_binding_account = (caring_threshold-peak_height).exp2();
+        if min_binding_account > 1.0 { return Vec::new();}
+
+
+        let extraneous_bindings: Vec<_> = extraneous_bind_array.iter().filter(|&a| *a > min_binding_account).collect();
+
+        //Do we have any extraneous binding that we need to account for?
+        if extraneous_bindings.len() == 0 { return Vec::new();}
+
+        let scaled_heights = extraneous_bindings.into_iter().map(|a| peak_height+a.log2()).collect::<Vec<f64>>();
+
+        let sd_over_spacer = data_ref.unit_kernel_ref().get_sd()/(data_ref.data().spacer() as f64);
+
+        let ln_caring_threshold = caring_threshold.ln();
+
+
+        //TODO: if Kernel goes from being exclusively Gaussians to incorporating other shapes, this needs to change to check those shapes
+        //Note: this relies on the fact that casting an f64 to a usize uses the floor function
+        let generate_size_kernel = |x: f64| (sd_over_spacer*(2.0*(x.ln()-ln_caring_threshold)).sqrt()) as usize;
+        let quadriatic_ratio = (-0.5*(sd_over_spacer).powi(-2)).exp();
+
+        let size_hint: usize = generate_size_kernel(scaled_heights[0]);
+
+        let mut output_vec: Vec<f64> = Vec::with_capacity(size_hint*scaled_heights.len());
+
+        for height in scaled_heights {
+
+            let kernel_size = generate_size_kernel(height);
+
+            //If the size of your kernel is genuinely overflowing integers after filtering out by spacer
+            //You have such massive problems that this should really be the least of your concerns
+            //SAFETY: we have a panic set on BackgroundDist in case this conversion could fail. 
+            //        We choose to do that because my word, if your log2 data's 
+            //        background distribution has an SD of > a MILLION, your experiment is horribly degenerate
+            //        It should be completely impossible to unless you're getting
+            //        heights more than exp((i32::MAX/sd_over_spacer)^2) times larger than caring_threshold
+            //        And it's only possible for that to happen within f64's specs if the background sd
+            //        is more than a million. MORE than that if spacer is bigger than 1
+
+            let kernel_size_i32: i32 = unsafe{ kernel_size.try_into().unwrap_unchecked() };
+            let mut kernel_bit: Vec<f64> = Vec::with_capacity(2*kernel_size+1);
+
+            kernel_bit.push(height);
+
+            if kernel_size > 0 {
+                for i in 1..=kernel_size_i32 {
+                    let ele = height*quadriatic_ratio.powi(i*i);
+                    kernel_bit.push(ele);
+                    kernel_bit.push(ele);
+                }
+            }
+
+            output_vec.append(&mut kernel_bit);
+        }
+
+        output_vec
+
+
+    }
 
     pub fn produce_noise<'b>(&self, data_ref: &'b AllDataUse) -> Noise<'b> {
         
         let residual = self-data_ref.data();
 
-        return Noise::new(residual.wave, data_ref.background_ref());
+        return Noise::new(residual.wave, Vec::new(), data_ref.background_ref());
+    }
+
+    pub fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64], peak_height: f64) -> Noise<'b> {
+
+        let mut noise = self.produce_noise(data_ref);
+
+        let null_sequence_binding = Self::generate_extraneous_binding(data_ref, extraneous_bind_array, peak_height);
+
+        noise.replace_extraneous(null_sequence_binding);
+
+        noise
+
     }
 
     pub fn median_distance_between_waves(&self, data: &Self) -> f64 {
@@ -804,6 +880,11 @@ impl Background {
     pub fn ln_pdf(&self, calc: f64) -> f64{
         self.dist.ln_pdf(calc)
     }
+
+    pub fn noise_spread_par(&self) -> f64 {
+        self.dist.get_spread_par()
+    }
+
     pub fn kernel_ref(&self) -> &Kernel {
         &self.kernel
     }
@@ -816,33 +897,52 @@ impl Background {
         self.kernel.peak_width
     }
 
+    
+
 }
 
 
 #[derive(Clone)]
 pub struct Noise<'a> {
     resids: Vec<f64>,
+    extraneous_resids: Vec<f64>,
     pub background: &'a Background,
 }
 
 impl<'a> Noise<'a> {
 
 
-    pub fn new(resids: Vec<f64>, background: &'a Background) -> Noise<'a> {
-        Noise{ resids: resids, background: background}
+    pub fn new(resids: Vec<f64>, extraneous_resids: Vec<f64>, background: &'a Background) -> Noise<'a> {
+        Noise{ resids: resids, extraneous_resids: extraneous_resids, background: background}
 
     }
 
     pub fn resids(&self) -> Vec<f64> {
         self.resids.clone()
     }
+    pub fn extraneous_resids(&self) -> Vec<f64> {
+        self.extraneous_resids.clone()
+    }
+    
     
     pub fn dist(&self) -> BackgroundDist {
         self.background.dist.clone()
     }
 
+    pub fn replace_extraneous(&mut self, extraneous_resids: Vec<f64>) {
+        self.extraneous_resids = extraneous_resids;
+    }
+
+    pub fn noise_with_new_extraneous(&self, extraneous_resids: Vec<f64>) -> Noise<'a> {
+
+        let mut new_noise = self.clone();
+        new_noise.extraneous_resids = extraneous_resids;
+        new_noise
+
+    }
+
     
-    pub fn rank(&self) -> Vec<f64> {
+    /*pub fn rank(&self) -> Vec<f64> {
 
         
         //This generates a vector where each element is tagged with its original position
@@ -867,13 +967,16 @@ impl<'a> Noise<'a> {
         ranks
         
         
-    }
+    }*/
 
 
     pub fn ad_calc(&self) -> f64 {
 
         //let time = Instant::now();
         let mut forward: Vec<f64> = self.resids();
+        let mut extras: Vec<f64> = self.extraneous_resids();
+        forward.append(&mut extras);
+        drop(extras);
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let n = forward.len();
@@ -888,7 +991,7 @@ impl<'a> Noise<'a> {
     }
 
     
-    pub fn ad_grad(&self) -> Vec<f64> {
+    /*pub fn ad_grad(&self) -> Vec<f64> {
 
         //let start = Instant::now();
         let ranks = self.rank();
@@ -913,7 +1016,7 @@ impl<'a> Noise<'a> {
         //println!("ad_grad {:?}", start.elapsed());
         derivative
 
-    }
+    }*/
 
     //My low approximation is screwed up. It's derived from the low tail approximation of the
     //marsaglia (2004) paper
