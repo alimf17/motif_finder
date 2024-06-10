@@ -600,6 +600,9 @@ impl NullSequence {
         self.block_u8_starts.clone()
     }
 
+    pub fn num_sequence_blocks(&self) -> usize {
+        self.block_lens.len()
+    }
 
 
 }

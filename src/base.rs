@@ -3384,15 +3384,16 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
+    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, null_attention: Vec<usize>, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
 
         thermo_beta = thermo_beta.abs();
 
-        let active_set = match initial_condition {
+        let mut active_set = match initial_condition {
             Some(set) => set,
             None => MotifSet::rand_with_one(data_ref, rng),
         };
 
+        active_set.give_new_attention(null_attention);
 
         SetTrace{
             trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
@@ -4192,6 +4193,12 @@ impl<'a> TemperSetTraces<'a> {
         //So I always want to randomly 
         let mut thermos = vec![1_f64; num_intermediate_traces+2];
 
+        let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
+
+        let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
+
+        for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
+
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
         *thermos.last_mut().expect("thermos always has elements") = min_thermo_beta;
@@ -4207,13 +4214,13 @@ impl<'a> TemperSetTraces<'a> {
 
         let mut past_initial: bool = false;
 
-        for thermo_beta in thermos {
+        for (i, thermo_beta) in thermos.into_iter().enumerate() {
             let potential_tracker = match how_to_track {
                 TrackingOptions::NoTracking => None, 
                 TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),
                 TrackingOptions::TrackTrueTrace => if past_initial { None } else { Some(MoveTracker::new(step_num_estimate)) },
             };
-            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, sparse, rng), potential_tracker));
+            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, null_block_groups[i].clone(), sparse, rng), potential_tracker));
         }
 
         Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
