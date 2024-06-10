@@ -360,20 +360,20 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn generate_extraneous_binding(data_ref: &AllDataUse, extraneous_bind_array: &[f64], peak_height: f64 ) -> Vec<f64> {
+    pub fn generate_extraneous_binding(data_ref: &AllDataUse, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
-        let min_binding_account = (caring_threshold-peak_height).exp2();
+        let min_binding_account = (caring_threshold).exp2();
         if min_binding_account > 1.0 { return Vec::new();}
 
 
-        let extraneous_bindings: Vec<_> = extraneous_bind_array.iter().filter(|&a| *a > min_binding_account).collect();
+        let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > min_binding_account).collect();
 
         //Do we have any extraneous binding that we need to account for?
         if extraneous_bindings.len() == 0 { return Vec::new();}
 
-        let scaled_heights = extraneous_bindings.into_iter().map(|a| peak_height+a.log2()).collect::<Vec<f64>>();
+        let scaled_heights = extraneous_bindings;
 
         let sd_over_spacer = data_ref.unit_kernel_ref().get_sd()/(data_ref.data().spacer() as f64);
 
@@ -385,13 +385,13 @@ impl<'a> Waveform<'a> {
         let generate_size_kernel = |x: f64| (sd_over_spacer*(2.0*(x.ln()-ln_caring_threshold)).sqrt()) as usize;
         let quadriatic_ratio = (-0.5*(sd_over_spacer).powi(-2)).exp();
 
-        let size_hint: usize = generate_size_kernel(scaled_heights[0]);
+        let size_hint: usize = generate_size_kernel(*scaled_heights[0]);
 
         let mut output_vec: Vec<f64> = Vec::with_capacity(size_hint*scaled_heights.len());
 
         for height in scaled_heights {
 
-            let kernel_size = generate_size_kernel(height);
+            let kernel_size = generate_size_kernel(*height);
 
             //If the size of your kernel is genuinely overflowing integers after filtering out by spacer
             //You have such massive problems that this should really be the least of your concerns
@@ -406,7 +406,7 @@ impl<'a> Waveform<'a> {
             let kernel_size_i32: i32 = unsafe{ kernel_size.try_into().unwrap_unchecked() };
             let mut kernel_bit: Vec<f64> = Vec::with_capacity(2*kernel_size+1);
 
-            kernel_bit.push(height);
+            kernel_bit.push(*height);
 
             if kernel_size > 0 {
                 for i in 1..=kernel_size_i32 {
@@ -431,11 +431,11 @@ impl<'a> Waveform<'a> {
         return Noise::new(residual.wave, Vec::new(), data_ref.background_ref());
     }
 
-    pub fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64], peak_height: f64) -> Noise<'b> {
+    pub fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64]) -> Noise<'b> {
 
         let mut noise = self.produce_noise(data_ref);
 
-        let null_sequence_binding = Self::generate_extraneous_binding(data_ref, extraneous_bind_array, peak_height);
+        let null_sequence_binding = Self::generate_extraneous_binding(data_ref, extraneous_bind_array);
 
         noise.replace_extraneous(null_sequence_binding);
 

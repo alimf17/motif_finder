@@ -1637,6 +1637,8 @@ impl Motif {
     //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
     pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, groups: &[usize]) -> Vec<f64> {
 
+        if groups.len() == 0 { return Vec::new();}
+
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
         let block_starts = seq.block_u8_starts(); //stored index space
@@ -1996,15 +1998,13 @@ impl fmt::Debug for Motif {
 #[derive(Clone)]
 //DEFINITELY CANNOT BE DIRECTLY SERIALIZED
 //
-//SAFETY: any method which adds a Motif to the set directly, without checking
-//        that the kernel length is less than the length of data in all sequence
-//        blocks, is IMMEDIATELY unsafe. I do not include such methods here, 
-//        but if YOU do, you MUST enforce this invariant.
 pub struct MotifSet<'a> {
 
     set: Vec<Motif>, 
     signal: Waveform<'a>,
     ln_post: Option<f64>,
+    null_seq_attentions: Vec<usize>,
+    null_peak_scores: Vec<f64>,
     data_ref: &'a AllDataUse<'a>, 
 }
 
@@ -2020,7 +2020,7 @@ impl<'a> MotifSet<'a> {
 
             let signal = set[0].generate_waveform(data_ref);
 
-            let mut mot_set_try = MotifSet{ set: set, signal: signal, ln_post: None, data_ref: data_ref};
+            let mut mot_set_try = MotifSet{ set: set, signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
 
             let like = mot_set_try.ln_posterior();
 
@@ -2040,7 +2040,7 @@ impl<'a> MotifSet<'a> {
 
         let signal = set[0].generate_waveform(data_ref);
 
-        let mut mot_set = MotifSet{ set: set,  signal: signal, ln_post: None, data_ref: data_ref};
+        let mut mot_set = MotifSet{ set: set,  signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
 
         let _ = mot_set.ln_posterior();
 
@@ -2054,7 +2054,7 @@ impl<'a> MotifSet<'a> {
 
         let signal = set[0].generate_waveform(data_ref);
 
-        let mut mot_set = MotifSet{ set: set, signal: signal, ln_post: None, data_ref: data_ref};
+        let mut mot_set = MotifSet{ set: set, signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
 
         let _ = mot_set.ln_posterior();
 
@@ -2133,6 +2133,8 @@ impl<'a> MotifSet<'a> {
             set: set,
             signal: signal, 
             ln_post: None, 
+            null_seq_attentions: Vec::new(),
+            null_peak_scores: Vec::new(),
             data_ref: data_ref, 
         };
 
@@ -2414,6 +2416,8 @@ impl<'a> MotifSet<'a> {
         MotifSet {
             set: self.set.clone(),
             signal: self.signal.clone(),
+            null_seq_attentions: self.null_seq_attentions.clone(),
+            null_peak_scores: self.null_peak_scores.clone(),
             ln_post: None,
             data_ref: self.data_ref, //pointer
         }
@@ -2441,7 +2445,7 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn ln_likelihood(&self) -> f64 {
-        Noise::ad_like((self.signal).produce_noise(self.data_ref).ad_calc())
+        Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores).ad_calc())
     }
 
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
@@ -2518,6 +2522,19 @@ impl<'a> MotifSet<'a> {
         self.set[rem_id] = new_mot;
         self.ln_post = None;
         self.ln_posterior()
+    }
+
+    pub fn give_new_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
+
+        self.null_seq_attentions = negative_blocks;
+
+        self.null_peak_scores = if {self.null_seq_attentions.len() == 0} {Vec::new()} else {
+            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| a.peak_height()+b.ln()).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+        };
+
+        self.ln_post = None;
+        self.ln_posterior()
+
     }
 
 
@@ -3005,6 +3022,8 @@ impl StrippedMotifSet {
             set: self.set.clone(),
             signal: data_ref.data().derive_zero(),
             ln_post: None,
+            null_seq_attentions: Vec::new(),
+            null_peak_scores: Vec::new(),
             data_ref: data_ref,
         };
 
@@ -3312,6 +3331,8 @@ impl MotifSetDef {
             set: set,
             signal: signal,
             ln_post: None,
+            null_seq_attentions: Vec::new(),
+            null_peak_scores: Vec::new(), 
             data_ref: data_ref, 
         };
 
