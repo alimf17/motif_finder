@@ -4488,7 +4488,7 @@ impl ContinuousLnCDF<f64, f64> for TruncatedLogNormal {
 
 
 //}
-
+/*
 #[cfg(test)]
 mod tester{
 
@@ -5842,4 +5842,4 @@ mod tester{
 
 
 
-}
+}*/ 

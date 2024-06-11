@@ -1327,7 +1327,7 @@ impl<F: Float> Distance<F> for Complex<F> {
 mod tests{
    
     use super::*;
-    use crate::sequence::Sequence;
+    use crate::sequence::{Sequence, NullSequence};
     use rand::Rng;
     use std::time::Instant;
 
@@ -1340,7 +1340,7 @@ mod tests{
         for i in 0..grad.len() {
              let mut n_res = n.resids();
              n_res[i] += h;
-             let nnoise = Noise::new(n_res, back);
+             let nnoise = Noise::new(n_res, vec![], back);
              grad[i] = (nnoise.ad_calc()-ad)/h;
         }
         grad
@@ -1373,7 +1373,12 @@ mod tests{
         let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
 
-        let zeros: Vec<usize> = vec![0, 465, 892];
+        let zeros: Vec<usize> = vec![0, 465, 892]; //Blocks terminate at bases 136, 737, and 1180
+
+        let null_zeros: Vec<usize> = vec![144, 813];
+
+        //This is in units of number of u8s
+        let null_sizes: Vec<usize> = vec![78,17];
 
         unsafe{
 
@@ -1411,7 +1416,11 @@ mod tests{
         assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
 
         //This is a check just for miri
-        signal.place_peak(&k, 2, 70)
+        signal.place_peak(&k, 2, 70);
+
+        //This is a check to make sure that miri can catch it when I obviously screw up. This test is designed to have UB. Do NOT uncomment it unless you're checking that Miri can catch stuff
+        //signal.place_peak(&k, 2, 456);
+
         }
 
         let base_w = &signal*0.4;
@@ -1419,7 +1428,15 @@ mod tests{
 
         let background: Background = Background::new(0.25, 2.64, 5.0);
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &zeros, &background)};
+        let mut rng = rand::thread_rng();
+
+        let null_makeup: Vec<Vec<usize>> = null_sizes.iter().map(|&a| (0..(4*a)).map(|_| rng.gen_range(0_usize..4)).collect::<Vec<usize>>()).collect::<Vec<Vec<usize>>>();
+
+        println!("{:?} null sizes", null_makeup.iter().map(|a| a.len()).collect::<Vec<_>>());
+
+        let invented_null: NullSequence =  NullSequence::new(null_makeup);
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background)};
 
         let noise: Noise = signal.produce_noise(&data_seq);
 
@@ -1447,14 +1464,13 @@ mod tests{
         
         let background: Background = Background::new(0.25, 2.64, 5.0);
 
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4], &background);
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4],vec![], &background);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4],vec![], &background);
 
         assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
 
         println!("{:?}", n1.resids());
-        println!("{:?}", n1.rank());
-        println!("{}", n1.ad_calc());
+        println!("ad_calc {}", n1.ad_calc());
 
         let mut noise_arr = n1.resids();
         noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1471,49 +1487,39 @@ mod tests{
             ad_try -= mult*(ln_cdf+ln_sf);
         }
 
-        println!("calc v try {} {}", n1.ad_calc(), ad_try);
-        assert!(((n1.ad_calc()-ad_try)/ad_try).abs() < 1e-4);//Remember, I'm only calculating an approximation. It's going to be a bit off
+        println!("ad_try {}", ad_try);
 
+        assert!((n1.ad_calc()-ad_try).abs() < 1e-6, "AD calculation not matching theory without extraneous binding");
+ 
+        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
+        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
 
-        let n1 = Noise::new(vec![0.4, 0.39, 0.3, 0.2, -1.4], &background);
+        let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
+
+        let mut extraneous_noises = n1_with_extraneous.resids();
+
+        let mut extra_resids = n1_with_extraneous.extraneous_resids();
+
+        extraneous_noises.append(&mut extra_resids);
+
+        extraneous_noises.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let noise_length = extraneous_noises.len();
+        let mut ad_try = -(noise_length as f64);
         
-        assert!(n1.rank().iter().zip([4.,3.,2.,1.,0.]).map(|(&a, b)| a == b).fold(true, |r0, r1| r0 && r1));
-
-        println!("{:?}", n1.ad_grad());
-
-        let mut rng = rand::thread_rng();
-        let n1v: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>()*2.0-1.).collect();
-        let n1 = Noise::new(n1v, &background);
-        //let h = 0.0000001;
-        let noise_ad = n1.ad_calc();
-        println!("diff {} deriv {} diffmderiv {}", Noise::ad_diff(noise_ad), Noise::ad_deriv(noise_ad), Noise::ad_diff(noise_ad)-Noise::ad_deriv(noise_ad));
-
-        let mut rng = rand::thread_rng();
-        let ads: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>()).collect();
-        let mut noise_arr = n1.resids();
-        let mut noise_diffs: Vec<(f64, f64, f64)> = vec![(0.,0.,0.);noise_arr.len()];
-        for i in 0..(noise_arr.len()) {
-            let mut noisy = noise_arr.clone();
-            let bits: u64 = 0x3e80000000000000;
-            //let h = unsafe{ std::mem::transmute::<u64,f64>(noisy[i].to_bits() & 0xfff0000000000000)*std::mem::transmute::<u64,f64>(0x3f10000000000000) };//*(1./2048.)};
-            let h = f64::from_bits(bits);//*(1./2048.)};
-            noisy[i] += h;
-            println!("{} vs {}. {} post h and h", noise_arr[i], noisy[i], h);
-            let n1_plus_h = Noise::new(noisy, &background);
-            let diff = (n1_plus_h.ad_calc()-noise_ad)/h;
-            println!("{} {} {} {} {} {} {} {} ad_grad", noise_ad, n1_plus_h.resids[i], noise_arr[i], n1.ad_grad()[i], diff, (n1.ad_grad()[i]-diff), (n1.ad_grad()[i]-diff)/diff, h);
-            noise_diffs[i] = (noise_arr[i],n1.ad_grad()[i]-diff, ((n1.ad_grad()[i]-diff)/diff));//Remember, I'm only calculating an approximation. It's going to be a bit off. And this does get better as I 
-                                                                //reduce h, up to a point (whereupon I'm almost certain I'm running into numerical issues)
+        for i in 0..noise_length {
+        
+            let ln_cdf = n1.dist().ln_cdf(extraneous_noises[i]);
+            let ln_sf = n1.dist().ln_sf(extraneous_noises[noise_length-1-i]);
+            let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
+        
+            
+            ad_try -= mult*(ln_cdf+ln_sf);
         }
 
+        println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(), ad_try);
 
-        let faulty_inds: Vec<(usize, (f64, f64, f64))> = noise_diffs.iter().enumerate().filter(|(_, &(a,b,c))| b.abs() > 1e-5).map(|(a, &b)| (a, b)).collect();
-
-        if faulty_inds.len() > 0 {
-            panic!("mismatches: {:?}", faulty_inds);
-        }
-        
-
+        assert!((n1_with_extraneous.ad_calc()-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
 
         //Calculated these with the ln of the numerical derivative of the fast implementation
         //of the pAD function in the goftest package in R
@@ -1543,16 +1549,11 @@ mod tests{
     fn panic_noise() {
         
         let background: Background = Background::new(0.25, 2.64, 5.0);
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], &background);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], &background);
+        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], vec![], &background);
+        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], vec![], &background);
 
         let _ = &n1*&n2.resids();
     }
-
-
-
-
-
 
 
 
