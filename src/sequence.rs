@@ -569,6 +569,37 @@ impl NullSequence {
 
     }
 
+    //Contract: block_lens.iter().sum() == seq_blocks.len(). block_lens[i] >= the max length of your motifs
+    //          Failure to uphold this will result in this panicking for your own good.
+    pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> NullSequence {
+
+        let mut block_u8_starts: Vec<usize> = vec![0];
+
+        for i in 0..(block_lens.len()-1) {
+            if block_lens[i] >= MAX_BASE && block_lens[i] % BP_PER_U8 == 0{
+                block_u8_starts.push(block_u8_starts[i]+block_lens[i]/BP_PER_U8);
+            } else {
+                panic!("All blocks must be longer than your maximum possible motif size and divisible by {}!", BP_PER_U8);
+            }
+        }
+
+        if block_lens.iter().map(|b| b/4).sum::<usize>() != seq_blocks.len() {
+            panic!("stated block lengths do not equal the length of your data!");
+        }
+
+
+        let max_len: usize = *block_lens.iter().max().unwrap();
+    
+        NullSequence{
+                    seq_blocks: seq_blocks,
+                    block_u8_starts: block_u8_starts,
+                    block_lens: block_lens,
+                    max_len: max_len,
+        }
+
+    }
+
+
     //Regular reader functions
 
     //This can TECHNICALLY panic in debug mode and produce incorrect answers 

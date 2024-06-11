@@ -1631,7 +1631,7 @@ impl std::fmt::Display for AllProcessingError {
                                You should probably increase the threshold at which you consider something peak-y, 
                                but I can't help you more than that, because this platform is apparently
                                exotically sized, which I don't think std Rust supports. Or maybe your
-                               platform is 256 bits or more, in which case: Hi! You should DEFINITELY not
+                               platform is 256 bits or more, in which case: Hi! You DEFINITELY should not
                                have genome sizes large enough to get this error! I am not even going to 
                                compare it to the largest genome I'm aware of (Paris japonica), because
                                genomes big enough to break the motif finder like this MUST violate some
