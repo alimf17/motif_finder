@@ -362,16 +362,19 @@ impl<'a> Waveform<'a> {
 
     pub fn generate_extraneous_binding(data_ref: &AllDataUse, scaled_heights_array: &[f64]) -> Vec<f64> {
 
+        println!("in extra, {}", data_ref.background_ref().noise_spread_par());
+
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
-        let min_binding_account = (caring_threshold).exp2();
-        if min_binding_account > 1.0 { return Vec::new();}
 
+        println!("pase first min");
 
-        let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > min_binding_account).collect();
+        let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
 
         //Do we have any extraneous binding that we need to account for?
         if extraneous_bindings.len() == 0 { return Vec::new();}
+
+        println!("past second min");
 
         let scaled_heights = extraneous_bindings;
 
@@ -1426,7 +1429,7 @@ mod tests{
         let base_w = &signal*0.4;
 
 
-        let background: Background = Background::new(0.25, 2.64, 5.0);
+        let background: Background = Background::new(0.25, 2.64, 25.0);
 
         let mut rng = rand::thread_rng();
 
@@ -1451,7 +1454,18 @@ mod tests{
 
 
 
+        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
+        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
 
+        let generated_extraneous = Waveform::generate_extraneous_binding(&data_seq, &[1.5]);
+
+        println!("theoretical extra {:?}, gen extra {:?}", fake_extraneous, generated_extraneous);
+
+        assert!(fake_extraneous.len() == generated_extraneous.len(), "Not even generating the right length of kernel from binding heights!");
+
+        for i in 0..fake_extraneous.len() {
+            assert!((fake_extraneous[i]-generated_extraneous[i]).abs() < 1e-7, "generated noise not generating correctly");
+        }
 
 
     }
@@ -1493,6 +1507,7 @@ mod tests{
  
         //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
         let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
+
 
         let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
 
