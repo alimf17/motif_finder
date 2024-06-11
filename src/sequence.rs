@@ -568,7 +568,7 @@ impl NullSequence {
         seq
 
     }
-    
+
     //Regular reader functions
 
     //This can TECHNICALLY panic in debug mode and produce incorrect answers 
@@ -602,6 +602,25 @@ impl NullSequence {
 
     pub fn num_sequence_blocks(&self) -> usize {
         self.block_lens.len()
+    }
+
+    pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<Bp> {
+
+        let start_dec = self.block_u8_starts[block_id]+(start_id/BP_PER_U8);
+        let end_dec = self.block_u8_starts[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
+
+        let all_coded = &self.seq_blocks[start_dec..end_dec];
+
+        let all_bases: Vec<_> = all_coded.iter().map(|a| Sequence::code_to_bases(*a)).flatten().collect();
+
+
+
+        let new_s = start_id % BP_PER_U8;
+
+        let ret: Vec<Bp> = all_bases[new_s..(new_s+num_bases)].to_vec();
+
+        ret
+
     }
 
 
@@ -728,7 +747,7 @@ mod tests {
                 if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
             }
 
-            println!("{neighbors}, {neigh} neighbs");
+            //println!("{neighbors}, {neigh} neighbs");
             assert!(neighbors == neigh);
 
             for _ in 0..100 {
@@ -745,7 +764,7 @@ mod tests {
                     if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
                 }
 
-                println!("{neighbors}, {neigh} neighbs");
+                //println!("{neighbors}, {neigh} neighbs");
                 assert!(neighbors == neigh);
 
             }
