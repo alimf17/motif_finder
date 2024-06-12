@@ -5580,6 +5580,7 @@ mod tester{
 
         println!("null dur {:?}", duration_null);
 
+
         let start_b = Instant::now();
         let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
         let duration_b = start_b.elapsed();
@@ -5733,6 +5734,36 @@ mod tester{
             assert!(((bindy.0-proper_defect).abs() < 1e-6) && (bindy.1 == is_rev));
 
         }
+        
+        for i in 0..null_block_lens.len() {
+        
+            let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[i]);
+
+            let group = [i];
+
+            let mut binds = motif.return_any_null_binds_in_group(&null_seq,&group);
+
+            for j in 0..(null_block_lens[i]-motif.len()) {
+
+                let mot = null_seq.return_bases(i, j, motif.len());
+                let (prop, _) = unsafe{ motif.prop_binding(&mot)};
+
+                if prop > (-motif.peak_height).exp2() { significant_binds.push(prop); }
+
+            }
+
+            binds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            significant_binds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
+            for k in 0..binds.len() {
+
+                assert!((binds[k]-significant_binds[k]).abs() < 1e-6, "not capturing proper binding {} {} {}", k, binds[k], significant_binds[k]);
+
+            }
+
+        }
+
 
         let wave_block: Vec<u8> = vec![2,0,0,0, 170, 170, 170, 170, 170, 170, 170, 170,170, 170, 170, 170, 170, 170, 170]; 
         let wave_inds: Vec<usize> = vec![0, 9]; 
