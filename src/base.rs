@@ -1754,6 +1754,7 @@ impl Motif {
     pub fn generate_waveform<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
 
         let data = data_ref.data();
+        
         let unit_kernel = data_ref.unit_kernel_ref();
 
         let mut occupancy_trace: Waveform = data.derive_zero();
@@ -1766,9 +1767,7 @@ impl Motif {
 
         let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
-        let h = self.peak_height;
-
-        let cutoff = (-h).exp2();
+        let thresh = (-self.peak_height).exp2();
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
@@ -1779,16 +1778,17 @@ impl Motif {
                 //SAFETY: THRESH is never modified at this point
 
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
-                if bind > cutoff {
-                    actual_kernel = unit_kernel*(h+bind.log2()) ;
+                if bind > thresh {
+                    actual_kernel = unit_kernel*(bind.log2()+self.peak_height) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
- 
+
                 }
             }
         }
 
         //println!("num peaks {}", count);
+
 
         occupancy_trace
 
@@ -4818,7 +4818,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
@@ -4835,7 +4835,9 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 350./6.);
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases,&start_null_bases, &background)};
+        let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -4972,7 +4974,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
@@ -4989,7 +4991,9 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 350./6.);
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases,&start_null_bases, &background)};
+        let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background)};
         let block_n: usize = 5;
 
         let duration = start_gen.elapsed();
@@ -5233,7 +5237,7 @@ mod tester{
         let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height())+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
 
         println!("{should_prior} {actual_prior} asd");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
@@ -5271,7 +5275,7 @@ mod tester{
         let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height())+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
 
         println!("priors {} {} {} {} {}", motif_set.set[l].height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
 
@@ -5501,13 +5505,13 @@ mod tester{
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
         let spacing_dist = rand::distributions::Uniform::from(500..5000);
-        let block_n: usize = 5;
-        let u8_per_block: usize = 90;
+        let block_n: usize = 20;
+        let u8_per_block: usize = 5000;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
 
-        println!("DF");
+        println!("DF {}", block_n*bp_per_block);
         let start_gen = Instant::now();
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
@@ -5516,7 +5520,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let mut start_bases: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+        let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
@@ -5527,13 +5531,15 @@ mod tester{
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
 
+        let start_bases_copy = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+
+
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let background = Background::new(0.25, 2.64, 350./6.);
+        let background = Background::new(0.25, 2.64, 20.);
 
-        let start_bases_copy = start_bases.clone();
 
         let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background)};
         println!("Done gen {} bp {:?}", bp, duration);
@@ -5566,9 +5572,19 @@ mod tester{
 
         let binds = motif.return_bind_score(&sequence);
 
+        let null_blocks: Vec<usize> = (0..null_block_lens.len()).collect();
+
+        let start_null = Instant::now();
+        let null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
+        let duration_null = start_null.elapsed();
+
+        println!("null dur {:?}", duration_null);
+
         let start_b = Instant::now();
         let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
         let duration_b = start_b.elapsed();
+
+
 
         let unsafe_raw = unsafe_waveform.raw_wave();
 
@@ -5583,6 +5599,8 @@ mod tester{
         let random_motif = Motif::rand_mot(&sequence, &mut rng);
 
         println!("Random motif\n{}", random_motif);
+
+        println!("Kernel length {}", background.kernel_ref().len());
 
         assert!(background.kernel_ref().len() == 121);
 
@@ -5643,6 +5661,7 @@ mod tester{
 
         let pwm = motif.pwm();
 
+        
         for i in 0..motif.len() {
             for j in BP_ARRAY {
 
@@ -5661,7 +5680,7 @@ mod tester{
                 assert!(((bindy.0-defect).abs() < 1e-6) && !bindy.1);
                 assert!(((rbind.0-defect).abs() < 1e-6) && rbind.1);
 
-                println!("for pre {:?}, rev pre {:?}", for_mot, rev_mot);
+                //println!("for pre {:?}, rev pre {:?}", for_mot, rev_mot);
                 for k in 0..motif.len() {
                     if k != i {
                         for m in BP_ARRAY {
@@ -5672,11 +5691,11 @@ mod tester{
                             let mut rev_mot_2 = rev_mot.clone();
                             rev_mot_2[motif.len()-1-k] = m.complement();
 
-                            println!("for {k} {m} {:?}, rev {k} {m} {:?}", for_mot_2, rev_mot_2);
+                            //println!("for {k} {m} {:?}, rev {k} {m} {:?}", for_mot_2, rev_mot_2);
                             let bindy = unsafe{ motif.prop_binding(&for_mot_2)};
                             let rbind = unsafe{ motif.prop_binding(&rev_mot_2) };
 
-                            println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
+                            //println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
                             if (bindy.1) {
                                 assert!(defect_2 < bindy.0);
                                 assert!(defect_2 < rbind.0);
@@ -5766,10 +5785,10 @@ mod tester{
 
         let correct: Vec<bool> = rev_comp.iter().enumerate().map(|(a, &b)| if b {reverse[a]} else {forward[a]}).collect();
 
-        println!("correct: {:?}", correct);
+       // println!("correct: {:?}", correct);
 
-        println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_u8_starts(), small.return_bases(0, 0, 24));
-        println!("blocks in seq: {:?}", small.seq_blocks());
+        //println!("small bl: {:?} {:?} {:?} {:?}", small.seq_blocks(), small.block_lens(), small.block_u8_starts(), small.return_bases(0, 0, 24));
+        //println!("blocks in seq: {:?}", small.seq_blocks());
 
 
 
@@ -5781,7 +5800,7 @@ mod tester{
                     let bp = small.return_bases(i, ind, 1)[0];
                     let bp2 = small.return_bases(i, ind, 1)[0];
                     let matcher = if rev_comp[24*i+j] { bp == Bp::T } else { bp == Bp::A};
-                    println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {},  correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, correct[24*i+j]);
+                    //println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {},  correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, correct[24*i+j]);
                 }
             }
         }
@@ -5826,7 +5845,7 @@ mod tester{
         let start0 = Instant::now();
         let duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
-
+        let mut scores: Vec<f64> = vec![0.0;wave_gen.len()];
 
         let point_lens = wave_main.point_lens();
         start_bases.push(bp);
@@ -5842,9 +5861,8 @@ mod tester{
         //println!("STARTS: {:?}", sequence.block_u8_starts().iter().map(|a| a*BP_PER_U8).collect::<Vec<_>>());
 
 
-        let h = motif.peak_height;
 
-        let thresh = (-h).exp();
+
 
 
         println!("unsafe filter same as filter when properly made");
@@ -5855,16 +5873,23 @@ mod tester{
 
                 let cut_low = if space*j >= kernel_mid+half_len {start_bases[i]+space*j-(kernel_mid+half_len)} else {start_bases[i]} ;
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
-                let relevant_binds = (cut_low..cut_high).filter(|&a| binds.0[a] > thresh ).collect::<Vec<_>>();
+                let relevant_binds = (cut_low..cut_high).filter(|&a| {
+                    //println!("{a} bindslen {}", binds.0.len());
+                    binds.0[a] > (-motif.peak_height()).exp2() 
+                }).collect::<Vec<_>>();
 
 
                 if relevant_binds.len() > 0 {
 
                     let mut score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
-                        score += (h+binds.0[relevant_binds[k]].ln())*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        let to_add = (motif.peak_height()+binds.0[relevant_binds[k]].log2())*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        //println!("to_add {to_add}");
+                        score+=to_add;
                     }
-                    println!("wave {} score {}", wave_gen[start_dats[i]+j], score);
+
+                    scores[start_dats[i]+j] += score;
+                    //println!("wave {} score {} ratio {}", wave_gen[start_dats[i]+j], score, wave_gen[start_dats[i]+j]/score); 
                     assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
 
 
@@ -5876,6 +5901,7 @@ mod tester{
             }
         }
 
+        //println!("wave_gen-scores {:?}", scores.iter().zip(wave_gen.iter()).map(|(&a, &b)| a-b).collect::<Vec<_>>());
 
 
     }
