@@ -205,7 +205,7 @@ fn main() {
             }
         },
         Some(("json", json_file)) => {
-            match MotifSet::set_from_json(&data_ref, true, true, json_file, &mut rng) { 
+            match MotifSet::set_from_json(&data_ref, json_file, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Json file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None
@@ -214,7 +214,7 @@ fn main() {
             }
         },
         Some(("bincode", bincode_file)) => {
-            match MotifSet::set_from_bincode(&data_ref, true, true, bincode_file, &mut rng) { 
+            match MotifSet::set_from_bincode(&data_ref, bincode_file, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Bincode file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None

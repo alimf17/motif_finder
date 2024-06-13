@@ -2145,20 +2145,19 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, always_recalculate: bool, validate_motif: bool,json_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, json_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let json_string: String = fs::read_to_string(json_file)?;
 
-        let prior_state: MotifSetDef = serde_json::from_str(&json_string)?;
+        let prior_state: StrippedMotifSet = serde_json::from_str(&json_string)?;
 
-
-        Ok(prior_state.get_motif_set(always_recalculate, validate_motif, &mut Some(rng), data_ref))
+        Ok(prior_state.reactivate_set(data_ref))
 
         //self.push_set_def(always_recalculate, validate_motif, prior_state, rng);
 
     }
  
-    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, always_recalculate: bool, validate_motif: bool,bincode_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
 
         let mut bincode_file_handle = fs::File::open(bincode_file)?;
@@ -2167,13 +2166,10 @@ impl<'a> MotifSet<'a> {
 
         bincode_file_handle.read_to_end(&mut buffer)?;
 
-        let prior_state: MotifSetDef = match bincode::deserialize(&buffer) {
-            Ok(set_def) => set_def, 
-            Err(_) => (&bincode::deserialize::<StrippedMotifSet>(&buffer)?.reactivate_set(data_ref)).into(),
-        };
+        let prior_state: StrippedMotifSet = bincode::deserialize(&buffer)?;
 
         println!("bincode state {:?}", prior_state.set);
-        Ok(prior_state.get_motif_set(always_recalculate, validate_motif, &mut Some(rng), data_ref))
+        Ok(prior_state.reactivate_set(data_ref))
 
     }
 
@@ -2524,17 +2520,29 @@ impl<'a> MotifSet<'a> {
         self.ln_posterior()
     }
 
-    pub fn give_new_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
+    pub fn current_attention(&self) -> &Vec<usize> {
+        &self.null_seq_attentions
+    }
+
+    pub fn change_set_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
 
         self.null_seq_attentions = negative_blocks;
 
         self.null_peak_scores = if {self.null_seq_attentions.len() == 0} {Vec::new()} else {
-            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| a.peak_height()+b.ln()).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| a.peak_height()+b.log2()).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
         };
 
         self.ln_post = None;
         self.ln_posterior()
 
+    }
+
+    pub fn set_with_new_attention(&self, negative_blocks: Vec<usize>) -> (Self, f64) {
+
+        let mut clone = self.clone();
+        let clone_like = clone.change_set_attention(negative_blocks);
+
+        (clone, clone_like)
     }
 
 
@@ -3009,6 +3017,7 @@ impl Debug for MotifSet<'_> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrippedMotifSet {
     set: Vec<Motif>,
+    null_seq_attentions: Vec<usize>,
     ln_post: f64,
 }
 
@@ -3030,8 +3039,8 @@ impl StrippedMotifSet {
 
         revived.recalc_signal();
 
-        _ = revived.ln_posterior(); //I don't believe these ln posteriors if I'm going to be using them for inference. 
-                                    //I only have this struct save a ln posterior because I want to record it for post processing
+        let _ = revived.change_set_attention(self.null_seq_attentions.clone()); //I don't believe these ln posteriors if I'm going to be using them for inference. 
+                                                                                //I only have this struct save a ln posterior because I want to record it for post processing
 
         revived
     }
@@ -3055,6 +3064,8 @@ impl StrippedMotifSet {
     pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
         self.set.iter_mut()
     }
+
+    pub fn current_attention(&self) -> &Vec<usize> { &self.null_seq_attentions }
 
     pub fn output_to_meme(&self, output_dir: &str, run_name: &str) -> std::io::Result<String> {
 
@@ -3268,11 +3279,12 @@ impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
         let ln_post: f64 = other.calc_ln_post();
         StrippedMotifSet {
             set: other.set.clone(),
+            null_seq_attentions: other.null_seq_attentions.clone(),
             ln_post: ln_post,
         }
     }
 }
-
+/*
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MotifSetDef {
 
@@ -3355,7 +3367,7 @@ impl MotifSetDef {
     }
 
 }
-
+*/
 
 
 //Why this weird lifetime annotation?
@@ -3393,7 +3405,7 @@ impl<'a> SetTrace<'a> {
             None => MotifSet::rand_with_one(data_ref, rng),
         };
 
-        active_set.give_new_attention(null_attention);
+        active_set.change_set_attention(null_attention);
 
         SetTrace{
             trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
@@ -3543,12 +3555,12 @@ impl<'a> SetTrace<'a> {
 
     //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
     //      just give you a wrong answer that seems to work
-    pub fn push_set_def<R: Rng+?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, set: MotifSetDef, rng: &mut R) {
+    /*pub fn push_set_def<R: Rng+?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, set: MotifSetDef, rng: &mut R) {
         
         let mut validate_randomizer = if validate_motif { Some(rng) } else {None};
         let setter = set.get_motif_set(always_recalculate, validate_motif, &mut validate_randomizer,&self.data_ref);
         self.push_set_to_active(setter);
-    }
+    }*/
 
 
     /* pub fn try_replace_or_create_last<R: Rng + ?Sized>(&mut self, set: StrippedMotifSet) -> Result<(), String>{
@@ -4197,7 +4209,9 @@ impl<'a> TemperSetTraces<'a> {
 
         let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
-        for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
+        null_block_groups[0] = (0..num_null_blocks).collect();
+
+        for i in 0..num_null_blocks { null_block_groups[1+(i % (num_intermediate_traces+1))].push(i); }
 
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
@@ -4252,6 +4266,35 @@ impl<'a> TemperSetTraces<'a> {
             });
             //println!("Did {i} advance out of {iters_before_swaps}");
         }
+
+        //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
+        //Yes, we deliberately skip the first possible even swap: I want the beta = 1 chain to always pay attention to 
+        //ALL of the negative sequence
+        if self.parallel_traces.len() >= 4  {
+            let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| { 
+                let (c, d) = x.split_at_mut(1);
+                let (a, b) = (&mut c[0], &mut d[0]);
+                let mut rng = rng_maker();
+                let attention_0 = a.0.active_set.current_attention().clone();
+                let attention_1 = b.0.active_set.current_attention().clone();
+                let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1);
+                let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0);
+
+                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(),
+                                                        a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b, 1.0, &mut rng);
+
+                if accept_swap {
+                    std::mem::swap(&mut a.0.active_set, &mut swap_attention_a);
+                    std::mem::swap(&mut b.0.active_set, &mut swap_attention_b);
+                }
+
+                ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+            }).collect();
+
+            println!("Even attention swaps: {:?}", even_attention_swaps);
+        }
+                
+
         //This swaps the pairs of adjacent traces starting from index 1
         let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
@@ -4285,6 +4328,30 @@ impl<'a> TemperSetTraces<'a> {
         }).collect();
         
         println!("Even swaps: {:?}", even_swaps);
+        
+        if self.parallel_traces.len() >= 3  {
+            let odd_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
+                let (c, d) = x.split_at_mut(1);
+                let (a, b) = (&mut c[0], &mut d[0]);
+                let mut rng = rng_maker();
+                let attention_0 = a.0.active_set.current_attention().clone();
+                let attention_1 = b.0.active_set.current_attention().clone();
+                let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1);
+                let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0);
+
+                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(),
+                                                        a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b, 1.0, &mut rng);
+
+                if accept_swap {
+                    std::mem::swap(&mut a.0.active_set, &mut swap_attention_a);
+                    std::mem::swap(&mut b.0.active_set, &mut swap_attention_b);
+                }
+
+                ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+            }).collect();
+
+            println!("Odd attention swaps: {:?}", odd_attention_swaps);
+        }
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {

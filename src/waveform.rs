@@ -232,7 +232,7 @@ impl<'a> Waveform<'a> {
         let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
         let cc = (place_bp).rem_euclid(self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
        
-        let zerdat: usize = self.start_dats[block]; //This will ensure the peak is in the correct block
+        let zerdat: usize = *self.start_dats.get_unchecked(block); //This will ensure the peak is in the correct block
 
         //let _min_kern_bp: usize = max(0, place_bp) as usize;
         //let _nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
@@ -246,7 +246,7 @@ impl<'a> Waveform<'a> {
                                                                             //of the kernel to hit the next base in the cc
         
         let min_kern_cc = max(cc, place_bp);
-        let nex_kern_cc = min(((self.point_lens[block]*self.spacer) as isize)+place_bp, (peak.len()+completion) as isize);
+        let nex_kern_cc = min(((*self.point_lens.get_unchecked(block)*self.spacer) as isize)+place_bp, (peak.len()+completion) as isize);
         let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
         let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
 
@@ -263,7 +263,7 @@ impl<'a> Waveform<'a> {
   */
         let kern_start = min_kern_cc as usize;
         for i in 0..kern_change.len() {
-            kern_change[i] += peak.kernel.get_unchecked(kern_start+i*self.spacer);
+            *kern_change.get_unchecked_mut(i) += peak.kernel.get_unchecked(kern_start+i*self.spacer);
         }
 
 
