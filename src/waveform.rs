@@ -362,8 +362,6 @@ impl<'a> Waveform<'a> {
 
     pub fn generate_extraneous_binding(data_ref: &AllDataUse, scaled_heights_array: &[f64]) -> Vec<f64> {
 
-        println!("in extra, {}", data_ref.background_ref().noise_spread_par());
-
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
 
