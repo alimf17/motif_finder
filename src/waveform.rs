@@ -367,14 +367,10 @@ impl<'a> Waveform<'a> {
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
 
-        println!("pase first min");
-
         let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
 
         //Do we have any extraneous binding that we need to account for?
         if extraneous_bindings.len() == 0 { return Vec::new();}
-
-        println!("past second min");
 
         let scaled_heights = extraneous_bindings;
 
