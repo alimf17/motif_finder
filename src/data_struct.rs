@@ -925,12 +925,10 @@ impl AllData {
             }
 
             if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
-                println!("bases batch pushing");
                 null_sequence_blocks.push(bases_batch);
                 null_starts_bps.push(bp_prior);
             }
 
-            println!("Null {i}");
             i += 1;
         }
 
