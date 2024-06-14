@@ -2529,7 +2529,8 @@ impl<'a> MotifSet<'a> {
         self.null_seq_attentions = negative_blocks;
 
         self.null_peak_scores = if {self.null_seq_attentions.len() == 0} {Vec::new()} else {
-            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| a.peak_height()+b.log2()).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
+                                     .iter().map(|&b| a.peak_height()+b.log2()).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 3.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
         };
 
         self.ln_post = None;
