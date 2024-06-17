@@ -1699,7 +1699,7 @@ impl Motif {
             }
         }
 
-        bind_scores.sort_by(|(f,_,_), (g,_,_)| g.partial_cmp(f).unwrap());
+        //bind_scores.sort_by(|f, g| g.partial_cmp(f).unwrap());
 
         bind_scores
 
@@ -2449,7 +2449,7 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn ln_likelihood(&self) -> f64 {
-        Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores).ad_calc())
+        Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores).ad_calc(self.data_ref.data().spacer()))
     }
 
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary

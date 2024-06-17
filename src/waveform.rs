@@ -360,10 +360,10 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn generate_extraneous_binding(data_ref: &AllDataUse, scaled_heights_array: &[f64]) -> Vec<f64> {
+    pub fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
-        let caring_threshold = (3.0*data_ref.background_ref().noise_spread_par());
+        let caring_threshold = (4.0*background.noise_spread_par());
 
         let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
 
@@ -372,7 +372,7 @@ impl<'a> Waveform<'a> {
 
         let scaled_heights = extraneous_bindings;
 
-        let sd_over_spacer = data_ref.unit_kernel_ref().get_sd()/(data_ref.data().spacer() as f64);
+        let sd_over_spacer = background.kernel.get_sd()/(spacer as f64);
 
         let ln_caring_threshold = caring_threshold.ln();
 
@@ -432,9 +432,8 @@ impl<'a> Waveform<'a> {
 
         let mut noise = self.produce_noise(data_ref);
 
-        let null_sequence_binding = Self::generate_extraneous_binding(data_ref, extraneous_bind_array);
 
-        noise.replace_extraneous(null_sequence_binding);
+        noise.replace_extraneous(extraneous_bind_array.to_vec());
 
         noise
 
@@ -967,11 +966,14 @@ impl<'a> Noise<'a> {
     }*/
 
 
-    pub fn ad_calc(&self) -> f64 {
+    pub fn ad_calc(&self, spacer: usize) -> f64 {
 
         //let time = Instant::now();
         let mut forward: Vec<f64> = self.resids();
-        let mut extras: Vec<f64> = self.extraneous_resids();
+
+        let mut extras = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
+
+        //let mut extras: Vec<f64> = self.extraneous_resids();
         forward.append(&mut extras);
         drop(extras);
         forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1328,11 +1330,11 @@ mod tests{
     use rand::Rng;
     use std::time::Instant;
 
-    fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
+    /*fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
 
         let h = 0.00001;
         let back = n.background;
-        let ad = n.ad_calc();
+        let ad = n.ad_calc(1);
         let mut grad = vec![0_f64; n.resids.len()]; 
         for i in 0..grad.len() {
              let mut n_res = n.resids();
@@ -1341,7 +1343,7 @@ mod tests{
              grad[i] = (nnoise.ad_calc()-ad)/h;
         }
         grad
-    }
+    }*/
 
     #[test]
     fn wave_check(){
@@ -1448,10 +1450,10 @@ mod tests{
 
 
 
-        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
-        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
+        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer. Also, moved threshold to 4*spread
+        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356]; //, 0.90979599, 0.90979599];
 
-        let generated_extraneous = Waveform::generate_extraneous_binding(&data_seq, &[1.5]);
+        let generated_extraneous = Waveform::generate_extraneous_binding(data_seq.background_ref(),5, &[1.5]);
 
         println!("theoretical extra {:?}, gen extra {:?}", fake_extraneous, generated_extraneous);
 
@@ -1478,7 +1480,7 @@ mod tests{
         assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
 
         println!("{:?}", n1.resids());
-        println!("ad_calc {}", n1.ad_calc());
+        println!("ad_calc {}", n1.ad_calc(1));
 
         let mut noise_arr = n1.resids();
         noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1497,17 +1499,18 @@ mod tests{
 
         println!("ad_try {}", ad_try);
 
-        assert!((n1.ad_calc()-ad_try).abs() < 1e-6, "AD calculation not matching theory without extraneous binding");
+        assert!((n1.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory without extraneous binding");
  
         //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
-        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
+        //let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
 
+        let fake_extraneous: Vec<f64> = vec![1.5];
+        
+        let mut extra_resids = Waveform::generate_extraneous_binding(&background, 1, &fake_extraneous);//n1_with_extraneous.extraneous_resids();
 
         let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
 
         let mut extraneous_noises = n1_with_extraneous.resids();
-
-        let mut extra_resids = n1_with_extraneous.extraneous_resids();
 
         extraneous_noises.append(&mut extra_resids);
 
@@ -1526,9 +1529,9 @@ mod tests{
             ad_try -= mult*(ln_cdf+ln_sf);
         }
 
-        println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(), ad_try);
+        println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(1), ad_try);
 
-        assert!((n1_with_extraneous.ad_calc()-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
+        assert!((n1_with_extraneous.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
 
         //Calculated these with the ln of the numerical derivative of the fast implementation
         //of the pAD function in the goftest package in R
