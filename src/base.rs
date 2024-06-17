@@ -97,6 +97,8 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
                                                                  [  0.25          ,   0.25           ,   0.25            ,   0.25          ]];
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
+        
+pub const CAPACITY_FOR_NULL: usize = 10;
 
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
 const ADD_MULT_TRAJ_COMP: fn([f64; BASE_L-1], [f64; BASE_L-1], f64) -> [f64; BASE_L-1] = add_mult_traj;
@@ -1643,6 +1645,7 @@ impl Motif {
     //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
     pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, groups: &[usize]) -> Vec<f64> {
 
+
         if groups.len() == 0 { return Vec::new();}
 
         let coded_sequence = seq.seq_blocks();
@@ -1699,8 +1702,12 @@ impl Motif {
             }
         }
 
-        //bind_scores.sort_by(|f, g| g.partial_cmp(f).unwrap());
+        bind_scores.sort_by(|f, g| g.partial_cmp(f).unwrap());
 
+        if bind_scores.len() > CAPACITY_FOR_NULL {
+            _ = bind_scores.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+            
+        }
         bind_scores
 
     }
@@ -5828,9 +5835,12 @@ mod tester{
 
             }
 
-            binds.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            significant_binds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            binds.sort_by(|b, a| a.partial_cmp(b).unwrap());
+            significant_binds.sort_by(|b, a| a.partial_cmp(b).unwrap());
 
+            if significant_binds.len() > CAPACITY_FOR_NULL {
+                let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+            }
             assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
             for k in 0..binds.len() {
 
