@@ -51,21 +51,20 @@ pub fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 6 {
+    if args.len() < 5 {
         panic!("Not enough arguments!");
     }
-
+    
     let out_dir: String = args[1].to_string();
     let base_file: &str = &args[2];
-    let full_sequence: &str = &args[3];
-    let mut num_chains: usize = args[4].parse().expect("The number of chains you have should be numeric!");
-    let mut max_chain: usize = args[5].parse().expect("The number of strung together inferences you have per chain should be numeric!");
-    let burn_in: Option<usize> = args.get(6).map(|a| a.parse::<usize>().ok()).flatten();
-    let scale_thresh: Option<f64> = args.get(7).map(|a| a.parse::<f64>().ok()).flatten();
+    let mut num_chains: usize = args[3].parse().expect("The number of chains you have should be numeric!");
+    let mut max_chain: usize = args[4].parse().expect("The number of strung together inferences you have per chain should be numeric!");
+    let burn_in: Option<usize> = args.get(5).map(|a| a.parse::<usize>().ok()).flatten();
+    let scale_thresh: Option<f64> = args.get(6).map(|a| a.parse::<f64>().ok()).flatten();
 
     let mut min_chain: usize = burn_in.unwrap_or(0);
 
-    let potential_prior_change: Option<f64> = args.get(6).map(|a| a.parse::<f64>().ok()).flatten();
+    let potential_prior_change: Option<f64> = args.get(7).map(|a| a.parse::<f64>().ok()).flatten();
 
     match potential_prior_change {
         Some(credibility) => {
@@ -207,7 +206,7 @@ pub fn main() {
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
-    let _ = best_single_motif_set.generate_pr_curve(&data_ref,&full_sequence , &out_dir, &save_file);
+    //let _ = best_single_motif_set.generate_pr_curve(&data_ref,&full_sequence , &out_dir, &save_file);
 
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 

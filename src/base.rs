@@ -98,7 +98,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
-pub const CAPACITY_FOR_NULL: usize = 10;
+pub const CAPACITY_FOR_NULL: usize = 50;
 
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
 const ADD_MULT_TRAJ_COMP: fn([f64; BASE_L-1], [f64; BASE_L-1], f64) -> [f64; BASE_L-1] = add_mult_traj;
@@ -4225,9 +4225,11 @@ impl<'a> TemperSetTraces<'a> {
 
         let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
-        null_block_groups[0] = (0..num_null_blocks).collect();
+        //null_block_groups[0] = (0..num_null_blocks).collect();
 
-        for i in 0..num_null_blocks { null_block_groups[1+(i % (num_intermediate_traces+1))].push(i); }
+        //for i in 0..num_null_blocks { null_block_groups[1+(i % (num_intermediate_traces+1))].push(i); }
+
+        for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
 
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
@@ -4286,8 +4288,9 @@ impl<'a> TemperSetTraces<'a> {
         //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
         //Yes, we deliberately skip the first possible even swap: I want the beta = 1 chain to always pay attention to 
         //ALL of the negative sequence
-        if self.parallel_traces.len() >= 4  {
-            let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| { 
+        //if self.parallel_traces.len() >= 4  {
+            //let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| {//} 
+            let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
                 let mut rng = rng_maker();
@@ -4307,8 +4310,8 @@ impl<'a> TemperSetTraces<'a> {
                 ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
             }).collect();
 
-            println!("Even attention swaps: {:?}", even_attention_swaps);
-        }
+            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
+        //}
                 
 
         //This swaps the pairs of adjacent traces starting from index 1
@@ -4366,7 +4369,7 @@ impl<'a> TemperSetTraces<'a> {
                 ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
             }).collect();
 
-            println!("Odd attention swaps: {:?}", odd_attention_swaps);
+            println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
         }
     }
 
