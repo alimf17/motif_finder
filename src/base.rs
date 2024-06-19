@@ -1642,6 +1642,7 @@ impl Motif {
             }
         }
 
+
         bind_scores.sort_by(|f, g| g.partial_cmp(f).unwrap());
 
         if bind_scores.len() > CAPACITY_FOR_NULL {
@@ -4164,13 +4165,16 @@ impl<'a> TemperSetTraces<'a> {
 
         let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
 
-        let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
+        //let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
+
+        let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
 
         //null_block_groups[0] = (0..num_null_blocks).collect();
 
         //for i in 0..num_null_blocks { null_block_groups[1+(i % (num_intermediate_traces+1))].push(i); }
 
-        for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
+        //for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
+
 
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
@@ -4226,12 +4230,29 @@ impl<'a> TemperSetTraces<'a> {
             //println!("Did {i} advance out of {iters_before_swaps}");
         }
 
+        let data_seq = self.parallel_traces[0].0.data_ref;
+        let list_of_nulls = (0..data_seq.null_seq().num_sequence_blocks()).collect::<Vec<_>>();
+
+
+        
+        for j in 0..self.parallel_traces.len(){
+            for (i, motif) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
+            let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls);
+            if binds.len() >0{
+                let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
+            let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
+             println!("{j} {i} binds {} {}", binds[0], binds.last().unwrap());
+            println!("{:?} \n {:?}", binds_diffs, binds_ratio);
+            } else {println!("{j} {i} no extraneous");}
+        }
+        }
+
         //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
         //Yes, we deliberately skip the first possible even swap: I want the beta = 1 chain to always pay attention to 
         //ALL of the negative sequence
         //if self.parallel_traces.len() >= 4  {
             //let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| {//} 
-            let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
+            /*let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
                 let mut rng = rng_maker();
@@ -4251,7 +4272,7 @@ impl<'a> TemperSetTraces<'a> {
                 ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
             }).collect();
 
-            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
+            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );*/
         //}
                 
 
@@ -4289,7 +4310,7 @@ impl<'a> TemperSetTraces<'a> {
         
         println!("Even swaps: {:?}", even_swaps);
         
-        if self.parallel_traces.len() >= 3  {
+        /*if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
@@ -4311,7 +4332,7 @@ impl<'a> TemperSetTraces<'a> {
             }).collect();
 
             println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        }
+        }*/
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
