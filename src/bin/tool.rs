@@ -3,19 +3,19 @@
 use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL};
 use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use motif_finder::base::*;
-use motif_finder::waveform::*;
+
 use motif_finder::data_struct::*;
 use motif_finder::modified_t::SymmetricBaseDirichlet;
 
 use log::warn;
 
-use plotters::prelude::*;
-use plotters::coord::types::RangedSlice;
-use plotters::coord::Shift;
 
-use statrs::distribution::Normal;
-use once_cell::sync::Lazy;
-use std::time::{Duration, Instant};
+
+
+
+
+
+use std::time::{Instant};
 
 use std::env;
 
@@ -73,7 +73,7 @@ fn main() {
  
     let mut min_thermo_beta: f64 = args[9].parse().expect("The minimum thermodynamic beta must be a float!");
 
-    let mut num_intermediate_traces: usize = args[10].parse().expect("The number of intermediate traces must be a non-negative integer!");
+    let num_intermediate_traces: usize = args[10].parse().expect("The number of intermediate traces must be a non-negative integer!");
 
     min_thermo_beta = min_thermo_beta.abs();
 
@@ -102,16 +102,22 @@ fn main() {
 
     let mut peak_cutoff: Option<f64> = None;
 
-    let initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
+    let _initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
     let run_name;
     if init_check_index > base_check_index {
         peak_cutoff = args[base_check_index].parse().ok();
         run_name = match peak_cutoff{
-            None | Some(1.0) => {
+            None => {
                 peak_cutoff = None;
                 args[1].clone()
             },
-            Some(a) => format!("{}_custom_scale_{}", args[1].as_str(), args[9]),
+            Some(a) => 
+                if a == 1.0 { 
+                    peak_cutoff = None;
+                    args[1].clone()
+                } else{
+                    format!("{}_custom_scale_{}", args[1].as_str(), args[9])
+                },
         };
     } else {
         run_name = args[1].clone();
@@ -172,9 +178,9 @@ fn main() {
 
     let data_ref = AllDataUse::new(&total_data).unwrap();
 
-    let data = data_ref.data();
+    let _data = data_ref.data();
 
-    let background = data_ref.background_ref();
+    let _background = data_ref.background_ref();
 
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+2);
@@ -234,7 +240,7 @@ fn main() {
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
-    let mut track_hmc: usize = 0;
+    let _track_hmc: usize = 0;
 
     let start_inference_time = Instant::now();
 

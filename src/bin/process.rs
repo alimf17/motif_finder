@@ -10,7 +10,7 @@ use motif_finder::data_struct::{AllData, AllDataUse};
 
 use log::warn;
 
-use kmedoids;
+
 
 use ndarray::prelude::*;
 
@@ -124,15 +124,15 @@ pub fn main() {
         println!("file {:?} ", file_y);
 
 
-        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer);
+        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
 
         set_trace_collections.push(bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"));
 
 
         for file_name in iter_files {
             buffer.clear();
-            fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer);
-            let mut interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!");
+            fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+            let interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
@@ -152,7 +152,7 @@ pub fn main() {
             for file_name in iter_files {
                 println!("{file_name}");
                 buffer.clear();
-                fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer);
+                fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
                 let interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"); 
                 
                 /*if interim.len() >= 5 {
@@ -253,7 +253,7 @@ pub fn main() {
 
     for (chain, collection) in set_trace_collections.iter().enumerate() {
 
-        let chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
+        let _chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
         
     
         //TODO: This makes a vector V of length reference_motifs, of vectors of length equal 
@@ -372,7 +372,7 @@ pub fn main() {
 
     //plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
     
-    let mut rng = rand::thread_rng();
+    let _rng = rand::thread_rng();
     
     //let ref_per_chain: usize = 5;
 
@@ -390,9 +390,9 @@ pub fn main() {
     println!("Finish best motif sets");
 
     let total_sets = min_len*set_trace_collections.len();
-    let tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
+    let _tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
 
-    let num_sort_mots: usize = cluster_per_chain*set_trace_collections.len();
+    let _num_sort_mots: usize = cluster_per_chain*set_trace_collections.len();
     
 
     //If I don't document this as I'm writing it, it's going to blow a hole 
@@ -539,7 +539,7 @@ pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (
                                       if c {a.rev_complement()} else {a.pwm()}
                                   }).collect::<Vec<Vec<Base>>>();
 
-    let neutral: f64 = 0.0;
+    let _neutral: f64 = 0.0;
 
 
     let mut samples = Array3::<f64>::zeros([num_samples, MAX_BASE, BASE_L-1]);
@@ -552,7 +552,7 @@ pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (
                                                             //It will slow down calculations of credible intervals and means,
                                                             //But I do that once, not 10s of thousands of times. I did not
                                                             //benchmark this, though
-            let begin = if (MAX_BASE & 1 == 0) {(MAX_BASE-pwm.len())/2} else {(MAX_BASE+1-pwm.len())/2 }; //This should be optimized away
+            let _begin = if MAX_BASE & 1 == 0 {(MAX_BASE-pwm.len())/2} else {(MAX_BASE+1-pwm.len())/2 }; //This should be optimized away
 
             let probs = pwm[j].as_simplex();
             for i in 0..(BASE_L-1) {samples[[k,j+(MAX_BASE-pwm.len())/2,i]] = probs[i];}

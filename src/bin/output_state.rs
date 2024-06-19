@@ -3,7 +3,7 @@ use std::io::Read;
 
 use motif_finder::base::*;
 
-use motif_finder::data_struct::{AllData, AllDataUse};
+
 
 fn main() {
 
@@ -13,12 +13,12 @@ fn main() {
 
     
     let mut buffer: Vec<u8> = Vec::new();
-    fs::File::open(file_to_read).expect("Must be valid file").read_to_end(&mut buffer);
+    fs::File::open(file_to_read).expect("Must be valid file").read_to_end(&mut buffer).expect("something went wrong reading the file");
     
-    let mut interim: SingleSetOrTrace = {
+    let interim: SingleSetOrTrace = {
         
-        let tryTrace: Result<SetTraceDef, _> = bincode::deserialize(&buffer);
-        if let Ok(trace) = tryTrace {
+        let try_trace: Result<SetTraceDef, _> = bincode::deserialize(&buffer);
+        if let Ok(trace) = try_trace {
             SingleSetOrTrace::Trace(trace)
         } else{
             let set: StrippedMotifSet = bincode::deserialize(&buffer).expect("This did not give a bincode of a trace NOR a single set");

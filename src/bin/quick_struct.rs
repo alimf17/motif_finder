@@ -3,23 +3,23 @@ use std::fs;
 use std::io::Read;
 
 use motif_finder::base::*;
-use motif_finder::base::{SQRT_2, SQRT_3};
 
-use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT};
+
+
 
 use motif_finder::data_struct::{AllData, AllDataUse};
 
-use log::warn;
 
-use kmedoids;
 
-use ndarray::prelude::*;
 
-use rand::prelude::*;
 
-use regex::Regex;
 
-use poloto;
+
+//use rand::prelude::*;
+
+
+
+
 use plotters::prelude::*;
 use plotters::prelude::full_palette::ORANGE;
 
@@ -105,15 +105,15 @@ pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
             .y_desc("Signal Intensity")
             .disable_mesh().draw().unwrap();
 
-        const horiz_offset: i32 = -5;
+        const HORIZ_OFFSET: i32 = -5;
 
-        chart.draw_series(data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+        chart.draw_series(data_ref.data().read_wave().iter().zip(locs.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
         
         let signal = current_active.recalced_signal();
 
         let current_resid = data_ref.data()-&signal;
         
-        chart.draw_series(LineSeries::new(signal.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), BLUE.filled())).unwrap().label("Motif Set Occupancy").legend(|(x, y)| Rectangle::new([(x+4*horiz_offset, y-4), (x+4*horiz_offset + 20, y+3)], Into::<ShapeStyle>::into(&BLUE).filled()));
+        chart.draw_series(LineSeries::new(signal.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), BLUE.filled())).unwrap().label("Motif Set Occupancy").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(&BLUE).filled()));
 
         const THICKEN: usize = 20;
         for j in 1..=THICKEN{
@@ -122,7 +122,7 @@ pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
         }
         chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
 
-        let max_abs_resid = current_resid.read_wave().iter().map(|&a| a.abs()).max_by(|x,y| x.partial_cmp(y).unwrap()).unwrap();
+        let _max_abs_resid = current_resid.read_wave().iter().map(|&a| a.abs()).max_by(|x,y| x.partial_cmp(y).unwrap()).unwrap();
 
         let abs_resid: Vec<(f64, f64)> = current_resid.read_wave().iter().zip(signal.read_wave().iter()).map(|(&a, _)| {
 

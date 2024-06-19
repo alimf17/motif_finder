@@ -169,7 +169,7 @@ impl Sequence {
     fn initialize_kmer_dicts(&mut self) {
 
         
-        let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
+        let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|_a| {
             Vec::new()
         });
 
@@ -556,9 +556,7 @@ impl NullSequence {
 
         }
 
-        const F: Vec<u64> = Vec::new();
-
-        let mut seq = NullSequence {
+        let seq = NullSequence {
                     seq_blocks: seq_bls,
                     block_u8_starts: block_is,
                     block_lens: block_ls,
@@ -671,7 +669,7 @@ mod tests {
 
         let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0], vec![2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
 
-        let mut press = Sequence::new(blocked);
+        let press = Sequence::new(blocked);
 
         let bases = BP_ARRAY;
 
@@ -732,15 +730,15 @@ mod tests {
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
 
-        let start_gen = Instant::now();
+        let _start_gen = Instant::now();
         let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
-        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (0..block_n).map(|_| bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
-        let kmer_c = sequence.generate_kmers(20);
+        let _kmer_c = sequence.generate_kmers(20);
 
         let start = Instant::now();
 

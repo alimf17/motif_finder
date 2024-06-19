@@ -528,7 +528,7 @@ mod tests{
         }
 
         let f = match &dis {
-            BackgroundDist::Normal(norm) => 0.5,
+            BackgroundDist::Normal(_norm) => 0.5,
             BackgroundDist::FastT(fast) => fast.maclaurin_cdf(IMPL_CUT),
         };
 
@@ -567,6 +567,7 @@ mod tests{
         let (v, u) = dis.ln_cd_and_sf(nums[0]);
         println!("Time {:?}", t.elapsed());
 
+        println!("{} {} {} {}", n, o, v, u);
         
     }
 }

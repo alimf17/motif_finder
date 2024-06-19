@@ -1,9 +1,9 @@
 use motif_finder::data_struct::{AllData, AllDataUse};
 
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::{env, fs};
 
-use serde::{Serialize, Deserialize};
+
 
 fn main() {
 
@@ -17,7 +17,7 @@ fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
 
-    bincode_file_handle.read_to_end(&mut buffer);
+    bincode_file_handle.read_to_end(&mut buffer).expect("something went wrong reading the file");
 
     
     let prior_state: AllData = bincode::deserialize(&buffer).expect("Binarray file MUST be a valid motif set!");

@@ -20,9 +20,9 @@ pub static MOMENTUM_DIST: OnceCell<Normal> = OnceCell::new();//Lazy::new(|| Norm
 pub const NUM_CHECKPOINT_FILES: usize = 25;
 
 pub const NUM_RJ_STEPS: usize = 1;
-const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
-pub const NUM_BASE_LEAP_STEPS: usize = 1;
-const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
+//const MAX_IND_RJ: usize = NUM_RJ_STEPS-1;
+//pub const NUM_BASE_LEAP_STEPS: usize = 1;
+//const MAX_IND_LEAP: usize = NUM_RJ_STEPS+NUM_BASE_LEAP_STEPS-1;
 
 
 //This only matters when taking in a meme file

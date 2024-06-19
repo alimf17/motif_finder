@@ -17,15 +17,14 @@ use statrs::distribution::{StudentsT, Continuous, ContinuousCDF};
 
 
 use aberth;
-use num_complex::{Complex, ComplexFloat};
-const EPSILON: f64 = 1e-8;
+use num_complex::Complex;
 
 use num_traits::float::{Float, FloatConst};
 use num_traits::MulAdd;
 
 use plotters::prelude::*;
-use plotters::coord::types::RangedSlice;
-use plotters::coord::Shift;
+
+
 use plotters::prelude::full_palette::ORANGE;
 
 use rayon::prelude::*;
@@ -363,7 +362,7 @@ impl<'a> Waveform<'a> {
     pub fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
-        let caring_threshold = (4.0*background.noise_spread_par());
+        let caring_threshold = 4.0*background.noise_spread_par();
 
         let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
 
@@ -503,7 +502,7 @@ impl<'a> Waveform<'a> {
 
         let max_signal = self.wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
         let max_data_o = data_ref.data().wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-        let max_resids = current_resid.wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+        let _max_resids = current_resid.wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
 
         let max = max_signal.max(max_data_o.max(*min_resids))+1.0;
         
@@ -563,12 +562,12 @@ impl<'a> Waveform<'a> {
                 .y_desc("Signal Intensity")
                 .disable_mesh().draw().unwrap();
 
-            const horiz_offset: i32 = -5;
+            const HORIZ_OFFSET: i32 = -5;
 
-            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*horiz_offset,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
 
-            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*horiz_offset, y-4), (x+4*horiz_offset + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
 
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
 
@@ -1350,7 +1349,7 @@ mod tests{
 
         let sd = 5;
         let height = 2.0;
-        let spacer = 5;
+        let _spacer = 5;
         let k = Kernel::new(sd as f64, height);
 
         let kern = k.get_curve();
@@ -1444,7 +1443,7 @@ mod tests{
 
         let raw_resid = &signal-data_seq.data();
 
-        let w = raw_resid.raw_wave();
+        let _w = raw_resid.raw_wave();
 
         println!("Noi {:?}", noi);
 

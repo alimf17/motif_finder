@@ -11,17 +11,17 @@ use std::io::{Read, Write};
 use std::error::Error;
 use std::ptr;
 
-use std::mem::MaybeUninit;
+
 use std::process::*;
-use std::ptr::addr_of_mut;
+
 
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
-use crate::waveform::{Kernel, Waveform, WaveformDef, Noise};
+use crate::waveform::{Kernel, Waveform, Noise};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF};
-use crate::{MAX_IND_RJ, MAX_IND_LEAP};
+
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
 
@@ -37,7 +37,7 @@ use  rand_distr::weighted_alias::*;
 
 use statrs::{consts, StatsError};
 use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp};
-use statrs::statistics::{Min, Max, Distribution as StatrsDist};
+use statrs::statistics::{Min, Max};
 
 use ordered_float::*;
 
@@ -50,7 +50,7 @@ use pathfinding::*;
 use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
 use plotters::coord::Shift;
-use plotters::prelude::full_palette::ORANGE;
+
 
 use log::warn;
 
@@ -100,6 +100,7 @@ pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
 pub const CAPACITY_FOR_NULL: usize = 50;
 
+/*
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
 const ADD_MULT_TRAJ_COMP: fn([f64; BASE_L-1], [f64; BASE_L-1], f64) -> [f64; BASE_L-1] = add_mult_traj;
 
@@ -122,7 +123,7 @@ static SIMPLEX_CONFINING_NORMALS: Lazy<[[[f64; BASE_L-1]; BASE_L-1]; BASE_L]> = 
 
     scn
 });
-
+*/
 
 const CLOSE: f64 = 1e-5;
 
@@ -146,7 +147,7 @@ static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
 
 //static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(20.0).unwrap());
 
-const L_SD_VECTOR_SPACE: f64 = 1.0;
+/*const L_SD_VECTOR_SPACE: f64 = 1.0;
 
 const SD_LEAST_MOVE: f64 = 1.0;
 
@@ -154,10 +155,9 @@ const L_SD_VECTOR_SPACE_SINGLE: f64 = 1.0;
 
 const SD_LEAST_MOVE_SINGLE: f64 = 1.0;
 
-const HEIGHT_MOVE_SD: f64 = 1.0;
+const HEIGHT_MOVE_SD: f64 = 1.0; */
 
 const PROB_POS_PEAK: f64 = 1.0;
-
 
 
 const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
@@ -176,7 +176,7 @@ static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasInde
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
-static VARIANT_CUMULATIVE: Lazy<[usize; 6]> = Lazy::new(|| core::array::from_fn(|a| if (a == 0) {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+static VARIANT_CUMULATIVE: Lazy<[usize; 6]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
@@ -193,7 +193,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
 //4^SHUFFLE_BASES PWMs
 const SHUFFLE_BASES: usize = 4;
 
-const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
+//const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
 const REDUCE_MOTIF_SCALE_MOVE: [f64; MAX_BASE+1-MIN_BASE] = [0.024800, 0.021573, 0.019085, 0.017109, 0.015503, 0.014171, 0.013049, 0.012091, 0.011264, 0.010543, 0.0099079, 0.0093451, 0.0088427];
 
@@ -299,7 +299,7 @@ impl fmt::Display for Bp {
             Bp::G => "G", 
             Bp::T => "T",
         };
-        write!(f, "{}", chara);
+        write!(f, "{}", chara)?;
         Ok(())
     }
 }
@@ -322,7 +322,7 @@ impl fmt::Display for InvalidBase {
             InvalidBase::NegativeBase => "No negative bases allowed!",
             InvalidBase::NoNonZeroBase => "You don't have any non zero bases!",
         };
-        write!(f, "{}",message);
+        write!(f, "{}",message)?;
         Ok(())
     }
 }
@@ -688,33 +688,8 @@ impl Base {
         Self::vect_to_base(vect_coords).as_simplex()
     }
 
-    //This result is given in column major order
-    fn d_base_d_simplex(&self) -> [[f64; BASE_L-1]; BASE_L-1] {
 
-        let prob_base = self.as_probabilities();
-        let best_bp = self.best_base();
-        let mut bp_inds: Vec<Bp> = BP_ARRAY.to_vec();
-        bp_inds.retain(|&b| b != best_bp);
-        let pmax: f64 = prob_base[best_bp as usize];
-        let pmax_sq: f64 = pmax.powi(2);
-        let ps: [f64; BASE_L-1] = bp_inds.iter().map(|&a| prob_base[a as usize]).collect::<Vec<_>>().try_into().expect("bp inds is always the same size after its defining ommission.");
-
-        let mut jacobian = [[0_f64; (BASE_L-1)]; (BASE_L-1)];
-        for k in 0..(BASE_L-1) {
-            let mut pstar = [ps[k]; BASE_L-1];
-            pstar[k] += pmax;
-            
-            for ti in 0..(BASE_L-1) {
-                let m_inv_vec = (0..BASE_L-1).map(|m| COL_PRIMARY_INVERT_SIMPLEX[ti][bp_inds[m] as usize]);
-                jacobian[ti][k] = m_inv_vec.zip(pstar).map(|(a, b)| a*b).sum::<f64>()/pmax_sq;
-            }
-        }
-
-        jacobian
-
-    }
-
-    fn d_base_d_vect(&self) ->  [[f64; BASE_L-1]; BASE_L-1] {
+    /*fn d_base_d_vect(&self) ->  [[f64; BASE_L-1]; BASE_L-1] {
         
         let other_bases = self.all_non_best();
         let proto_column: [f64; BASE_L-1] = core::array::from_fn(|a| 0.5 * self[other_bases[a]]);
@@ -728,12 +703,6 @@ impl Base {
             Bp::T => ([0, 1, 2], Some([1_usize, 2])),
         };
 
-        /*let (zeros, neg_cols) = match self.best_base() {
-            Bp::A => ([2_usize, 1, 0], None),
-            Bp::C => ([2, 0, 1], Some([0_usize, 1])),
-            Bp::G => ([1, 2, 0], Some([0_usize, 2])),
-            Bp::T => ([0, 2, 1], Some([1_usize, 2])),
-        };*/
         for i in 0..(BASE_L-1) {
             grad[i][zeros[i]] = 0.0;
         }
@@ -748,7 +717,7 @@ impl Base {
         grad
 
 
-    }
+    }*/
  
 
     fn max( arr: &[f64]) -> f64 {
@@ -779,17 +748,6 @@ impl Base {
                Bp::G => [ -vec_res[0]+vec_res[1] ,   vec_res[1]-vec_res[2] , -(vec_res[2]+vec_res[0])],
                Bp::T => [  vec_res[0]-vec_res[1] , -(vec_res[1]+vec_res[2]),  -vec_res[2]+vec_res[0] ],
         }
-    }
-
-
-    fn keep_coord_in_finite(attempt: f64) -> f64 {
-
-        if attempt.abs() <= MAX_VECT_COORD { return attempt; }
-            
-        if attempt.is_infinite() { return (attempt.signum()*MAX_VECT_COORD); }
-            
-        let shift = ((attempt+MAX_VECT_COORD)/(2.0*MAX_VECT_COORD)).floor();
-        (attempt-2.0*MAX_VECT_COORD*shift)*(-1_f64).powi(shift as i32)
     }
 
 
@@ -885,6 +843,7 @@ impl Base {
            let mut conds: [bool; BASE_L-1] = core::array::from_fn(|a| conds_check[a] > 0.);
            let mut failed = conds.iter().any(|&a| a);
 
+           #[cfg(test)]
            let mut failures: usize = 0;
 
            while failed {
@@ -1036,7 +995,7 @@ fn reflect_abs_height(a: f64) -> f64 {
 }
                                  
 //Note that arrays of Copy are themselves Copy
-fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> [f64; BASE_L-1] {
+/*fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> [f64; BASE_L-1] {
     let mut end_start = start;
     let mut end_push = Some(push);
     //let mut count: usize = 0;
@@ -1170,7 +1129,7 @@ fn add_mult_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1], lambda: f64) -> [f64; B
     }
     out
 
-}
+}*/
 
 
 
@@ -1456,7 +1415,7 @@ impl Motif {
           
             for gray_code in 0..((BASE_L-1).pow(scramble.len() as u32)) {
                 
-                let inner_swap = scramble.iter().enumerate().map(|(i, &s)| (i, ((gray_code/((BASE_L-1).pow(i as u32))) % (BASE_L-1))));
+                let inner_swap = scramble.iter().enumerate().map(|(i, &_s)| (i, ((gray_code/((BASE_L-1).pow(i as u32))) % (BASE_L-1))));
 
                 let mut mot_to_be = self.clone();
 
@@ -1467,20 +1426,6 @@ impl Motif {
         }
 
         final_swaps
-
-    }
-
-    //SAFETY: Momentum MUST have a length equal to precisely (BASE_L-1)*self.len()
-    pub(crate) fn add_noise<R: Rng + ?Sized>(&self, noise_sds: [f64; BASE_L-1], rng: &mut R) -> Self {
-
-        let mut new_mot = self.clone();
-
-        for i in 0..self.len() {
-            let slice: [f64; BASE_L-1] = core::array::from_fn(|a| NORMAL_DIST.sample(rng)*noise_sds[a]);
-            new_mot.pwm[i] = self.pwm[i].add_in_vector_space(slice, true);
-        }
-
-        new_mot
 
     }
 
@@ -1658,8 +1603,6 @@ impl Motif {
 
         let num_blocks = block_lens.len();
 
-        let mut ind: usize;
-
         let mut store: [Bp; BP_PER_U8];
 
         let max_ignore_bind = (-self.peak_height).exp2();
@@ -1686,9 +1629,6 @@ impl Motif {
 
 
                 for j in 0..((block_lens[i])-self.len()) {
-
-                    ind = BP_PER_U8*block_starts[i]+(j as usize);
-
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
@@ -1727,7 +1667,7 @@ impl Motif {
 
         assert!(binds.len() == block_and_id.len(), "{} {}", binds.len(), block_and_id.len());
 
-        let mut binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (zero_locs[l]+j, r, n)).collect::<Vec<_>>();
+        let binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (zero_locs[l]+j, r, n)).collect::<Vec<_>>();
 
         binds_locs
     }
@@ -1886,7 +1826,7 @@ impl Motif {
 
     fn little_distance(&self, other_mot: &Vec<Base>) -> f64 {
 
-        let total_len = (self.len()).max(other_mot.len());
+        let _total_len = (self.len()).max(other_mot.len());
  
 
         let (pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self.pwm, other_mot)} else {(other_mot, &self.pwm)};
@@ -2160,7 +2100,7 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, json_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, json_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let json_string: String = fs::read_to_string(json_file)?;
 
@@ -2172,7 +2112,7 @@ impl<'a> MotifSet<'a> {
 
     }
  
-    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
 
         let mut bincode_file_handle = fs::File::open(bincode_file)?;
@@ -2214,7 +2154,7 @@ impl<'a> MotifSet<'a> {
         signal.save_waveform_to_directory(data_ref, &signal_directory, &BLUE);
 
         if self.set.len() > 1 {
-            for (i, mot) in self.set.iter().enumerate() {
+            for (i, _mot) in self.set.iter().enumerate() {
 
                 let sub_directory = format!("{}/Motif_{}", signal_directory, i);
                 let sub_signal = self.set[i].generate_waveform(data_ref);
@@ -2543,7 +2483,7 @@ impl<'a> MotifSet<'a> {
 
         self.null_seq_attentions = negative_blocks;
 
-        self.null_peak_scores = if {self.null_seq_attentions.len() == 0} {Vec::new()} else {
+        self.null_peak_scores = if self.null_seq_attentions.len() == 0 {Vec::new()} else {
             self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
                                      .iter().map(|&b| a.peak_height()+b.log2()).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
         };
@@ -2861,7 +2801,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    fn propose_ordered_base_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+    /*fn propose_ordered_base_move<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
 
@@ -2914,7 +2854,7 @@ impl<'a> MotifSet<'a> {
 
         Some((new_set, ln_post))
 
-    }
+    }*/
 
     fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
@@ -3101,10 +3041,10 @@ impl StrippedMotifSet {
             outfile_handle.write(&header_str.into_bytes())?;
 
             let body_str = mot.for_meme();
-            outfile_handle.write(&body_str.into_bytes());
+            outfile_handle.write(&body_str.into_bytes())?;
         }
 
-        Ok((savestate_file))
+        Ok(savestate_file)
     }
 
     pub fn generate_pr_curve(&self, data_ref: &AllDataUse, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
@@ -3252,6 +3192,7 @@ impl StrippedMotifSet {
 
 }
 
+/*
 enum AnyMotifSet<'a> {
     Active(MotifSet<'a>),
     Passive(StrippedMotifSet),
@@ -3288,7 +3229,7 @@ impl<'a> AnyMotifSet<'a> {
 
     }
 
-}
+}*/
 
 impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
     fn from(other: &'a MotifSet) -> StrippedMotifSet {
@@ -3449,21 +3390,21 @@ impl<'a> SetTrace<'a> {
         
             0 =>  {
                 let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
-                self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s).map(|(mut new_mot, modded_ln_like)| { 
+                self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
                 })
             }, 
             1 =>  {
                 let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
-                self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s).map(|(mut new_mot, modded_ln_like)| { 
+                self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
                 })
             }, 
             2 => {
                 let height_sd = HEIGHT_SDS[which_variant];
-                self.active_set.propose_height_move_custom(rng, height_sd).map(|(mut new_mot, modded_ln_like)| {
+                self.active_set.propose_height_move_custom(rng, height_sd).map(|(new_mot, modded_ln_like)| {
                         let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
                         (new_mot, accepted)
                 })
@@ -3491,7 +3432,7 @@ impl<'a> SetTrace<'a> {
         
         if let Some(tracker) = track {
             let total_id = VARIANT_CUMULATIVE[which_move]+which_variant;
-            tracker.document_motion(total_id, movement_tracker);
+            tracker.document_motion(total_id, movement_tracker).expect("We only track the proper moves");
         };
 
         self.sparse_count = (self.sparse_count+1) % self.sparse;
@@ -3519,7 +3460,7 @@ impl<'a> SetTrace<'a> {
         if let Some(tracker) = track {
             let tracked = self.active_set.measure_movement(&mut set);
             let total_id = if do_base_leap { VARIANT_CUMULATIVE[4] } else { VARIANT_CUMULATIVE[5] };
-            tracker.document_motion(total_id, Some((tracked, true)));
+            tracker.document_motion(total_id, Some((tracked, true))).expect("We only track the proper moves");
         }
 
         self.sparse_count = (self.sparse_count+1) % self.sparse;
@@ -3974,7 +3915,7 @@ impl MoveTracker {
 
     pub fn new(likely_steps: usize) -> Self {
 
-        let distances_per_attempted_move: [Vec::<([f64; 4], bool)>; NUM_MOVES] = core::array::from_fn(|a| Vec::<([f64; 4], bool)>::with_capacity(likely_steps));
+        let distances_per_attempted_move: [Vec::<([f64; 4], bool)>; NUM_MOVES] = core::array::from_fn(|_a| Vec::<([f64; 4], bool)>::with_capacity(likely_steps));
 
         MoveTracker {
             attempts_per_move: [0; NUM_MOVES],
@@ -4072,7 +4013,7 @@ impl MoveTracker {
         for (j, area) in left_subs.iter().enumerate() {
             let trial_data = data.iter().map(|(a, _)| a[j]).collect::<Vec<_>>();
             let trial_data_2 = data.iter().filter(|(_, b)| *b).map(|(a, _)| a[j]).collect::<Vec<_>>();
-            let hist = quick_hist(&trial_data, &trial_data_2, area, labs[j].clone().to_string(), num_bins);
+            let _hist = quick_hist(&trial_data, &trial_data_2, area, labs[j].to_string(), num_bins);
         }
         Ok(())
 
@@ -4087,7 +4028,7 @@ impl MoveTracker {
                                                     (i, self.sort_move_hists(i, &plotting, num_bins))
                                                 }).filter(|(_,x)| x.is_err()).map(|(i, a)| {
                                                     let mut m = a.unwrap_err();
-                                                    m.push_str(" {i}");
+                                                    m.push_str(&format!(" {}",i));
                                                     m
         }).collect();
         if v.len() != 0 { Err(v)} else { Ok(()) }
@@ -4154,8 +4095,8 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 
     hist.caption(label, ("Times New Roman", 80));
 
-    let mut data: Vec<f64> = raw_data.iter().map(|&a| a.into()).collect();
-    let mut data_2: Vec<f64> = raw_data_2.iter().map(|&a| a.into()).collect();
+    let data: Vec<f64> = raw_data.iter().map(|&a| a.into()).collect();
+    let data_2: Vec<f64> = raw_data_2.iter().map(|&a| a.into()).collect();
 
 
     let (xs, hist_form, hist_form_2) = build_hist_bins(data, data_2, num_bins);
@@ -4244,7 +4185,7 @@ impl<'a> TemperSetTraces<'a> {
 
         //pub fn new_trace(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a>
 
-        let mut past_initial: bool = false;
+        let past_initial: bool = false;
 
         for (i, thermo_beta) in thermos.into_iter().enumerate() {
             let potential_tracker = match how_to_track {
@@ -4271,9 +4212,9 @@ impl<'a> TemperSetTraces<'a> {
 
 
 
-        let mut rng = rng_maker();
+        let _rng = rng_maker();
          
-        for i in 0..iters_before_swaps {
+        for _i in 0..iters_before_swaps {
        
             //self.do_shuffles(1, &mut rng);
             //println!("Did {i} shuffle out of {iters_before_swaps}");
@@ -4383,7 +4324,7 @@ impl<'a> TemperSetTraces<'a> {
                 println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
                 println!("Motif heights: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
                 self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
-            TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| { 
+            TrackingOptions::TrackAllTraces => { _ = self.parallel_traces.iter().map(|b| { 
                 println!("Thermodynamic beta: {}", b.0.thermo_beta);
                 println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
                 println!("Motif heights: {:?}", b.0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
@@ -4577,7 +4518,7 @@ impl ContinuousLnCDF<f64, f64> for TruncatedLogNormal {
 #[cfg(test)]
 mod tester{
 
-    use std::time::{Duration, Instant};
+    use std::time::{Instant};
     /*use crate::base::bases::Base;
       use crate::base::bases::GBase;
       use crate::base::bases::TruncatedLogNormal;
@@ -4589,28 +4530,11 @@ mod tester{
     use statrs::function::gamma::{gamma, ln_gamma};
     use rand::Rng;
     use crate::waveform::*;
-    use rand::distributions::{Distribution, Uniform};
+    use rand::distributions::{Distribution};
     use crate::{DIRICHLET_PWM, PROPOSE_EXTEND, MOMENTUM_DIST};
     use crate::SymmetricBaseDirichlet;
 
 
-
-    fn produce_bps_and_pos(seq_motif: &Vec<Bp>) -> (Vec<Bp>, Vec<usize>) {
-
-        let mut bps: Vec<Bp> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
-        let mut pos: Vec<usize> = Vec::with_capacity(seq_motif.len()*(BASE_L-1));
-
-        for i in 0..seq_motif.len() {
-            let mut b = Bp::A;
-            let mut bp_vec = BP_ARRAY.to_vec();
-            bp_vec.retain(|&b| b != seq_motif[i]);
-            for b in bp_vec {
-                bps.push(b);
-                pos.push(i);
-            }
-        }
-        (bps, pos)
-    }
 
 
     #[test]
@@ -4704,10 +4628,8 @@ mod tester{
 
         println!("st {:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
-        let mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
+        let _mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
 
-
-        let jacob = b.d_base_d_vect();
 
         let b0 = b.add_in_vector_space([1e-6, 0.0, 0.0], false);
         let b1 =  b.add_in_vector_space([0.0, 1e-6, 0.0], false);
@@ -4718,7 +4640,6 @@ mod tester{
         println!("{:?} {:?} {} {} {}", b.base_to_vect(), b2.base_to_vect(), b2.base_to_vect()[0]-b.base_to_vect()[0],  b2.base_to_vect()[1]-b.base_to_vect()[1],  b2.base_to_vect()[2]-b.base_to_vect()[2]);
 
         
-        println!("{:?}", jacob);
         println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
                  b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
@@ -4771,7 +4692,7 @@ mod tester{
 
         //let random_base_dist = SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid");
 
-        let length_x_to_test: usize = 1000;
+        let _length_x_to_test: usize = 1000;
         //let xs_on_t_face = (0..length_x_to_test).map(|i| SQRT_2*(i as f64)/(length_x_to_test as f64)-(SQRT_2/3.0)).collect::<Vec<f64>>();
         //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
 
@@ -4792,7 +4713,7 @@ mod tester{
             let bitarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]).to_bits() & 0x7ff_0_0000_0000_0000}) ;
             let difarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]-b[a]).to_bits() & 0x7ff_0_0000_0000_0000} ) ;
 
-            let mag_diff = core::array::from_fn::<_,4,_>(|a| if (difarr[a] == 0) { None } else { Some(((bitarr[a]-difarr[a]) >> 52)) });
+            let mag_diff = core::array::from_fn::<_,4,_>(|a| if difarr[a] == 0 { None } else { Some((bitarr[a]-difarr[a]) >> 52) });
 
             println!("mag_diff {:?}", mag_diff);
 
@@ -4816,7 +4737,7 @@ mod tester{
             let bitarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]).to_bits() & 0x7ff_0_0000_0000_0000}) ;
             let difarr = core::array::from_fn::<_,4,_>(|m| { let a = BP_ARRAY[m]; (b2[a]-b[a]).to_bits() & 0x7ff_0_0000_0000_0000} ) ;
 
-            let mag_diff = core::array::from_fn::<_,4,_>(|a| if (difarr[a] == 0) { None } else { Some(((bitarr[a]-difarr[a]) >> 52)) });
+            let mag_diff = core::array::from_fn::<_,4,_>(|a| if difarr[a] == 0 { None } else { Some((bitarr[a]-difarr[a]) >> 52) });
 
             println!("mag_diff {:?}", mag_diff);
 
@@ -4902,15 +4823,14 @@ mod tester{
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
         let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
-        let null_blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let null_block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
@@ -4935,24 +4855,24 @@ mod tester{
         let mot1_kmer = mot1.best_motif();
         let id: usize = 4;
         let mot_scram = mot.scramble_by_id_to_valid(id, true, &sequence);
-        let scram_kmer = unsafe{ Sequence::u64_to_kmer(sequence.idth_unique_kmer(mot.len(),id), mot.len())};
-
+        let scram_kmer = Sequence::u64_to_kmer(sequence.idth_unique_kmer(mot.len(),id), mot.len());
+        
         println!("old {} \n new {}", mot, mot_scram);
 
         let mut all_base_correct = true;
         let mut all_scramble_correct = true;
         for base in 0..mot.len() {
-            all_base_correct &= (mot_scram.pwm[base][scram_kmer[base]] == 1.0);
+            all_base_correct &= mot_scram.pwm[base][scram_kmer[base]] == 1.0;
             let best_old = mot_kmer[base];
             let best_new = scram_kmer[base];
             for bp in BP_ARRAY {
 
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][best_new]};
+                    all_scramble_correct &= mot_scram.pwm[base][bp] == mot.pwm[base][best_new];
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][best_old]};
+                    all_scramble_correct &= mot_scram.pwm[base][bp] == mot.pwm[base][best_old];
                 } else {
-                    all_scramble_correct &= unsafe{mot_scram.pwm[base][bp] == mot.pwm[base][bp]};
+                    all_scramble_correct &= mot_scram.pwm[base][bp] == mot.pwm[base][bp];
                 }
 
             }
@@ -4984,11 +4904,11 @@ mod tester{
             let best_new = leap_kmer[base];
             for bp in BP_ARRAY {
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][best_new]};
+                    all_scramble_correct &= leap.pwm[base][bp] == mot.pwm[base][best_new];
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][best_old]};
+                    all_scramble_correct &= leap.pwm[base][bp] == mot.pwm[base][best_old];
                 } else {
-                    all_scramble_correct &= unsafe{leap.pwm[base][bp] == mot.pwm[base][bp]};
+                    all_scramble_correct &= leap.pwm[base][bp] == mot.pwm[base][bp];
                 }
 
             }
@@ -5003,11 +4923,11 @@ mod tester{
             let best_new = leap1_kmer[base];
             for bp in BP_ARRAY {
                 if bp == best_old {
-                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][best_new]};
+                    all_scramble_correct &= leap1.pwm[base][bp] == mot1.pwm[base][best_new];
                 } else if bp == best_new {
-                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][best_old]};
+                    all_scramble_correct &= leap1.pwm[base][bp] == mot1.pwm[base][best_old];
                 } else {
-                    all_scramble_correct &= unsafe{leap1.pwm[base][bp] == mot1.pwm[base][bp]};
+                    all_scramble_correct &= leap1.pwm[base][bp] == mot1.pwm[base][bp];
                 }
 
             }
@@ -5058,15 +4978,15 @@ mod tester{
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
-        let start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
-        let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        let _pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
         let null_blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let _block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let null_block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
@@ -5080,7 +5000,7 @@ mod tester{
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
         let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background)};
-        let block_n: usize = 5;
+        let _block_n: usize = 5;
 
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
@@ -5116,7 +5036,7 @@ mod tester{
         println!("add motif correct wave and like");
 
         //Testing fn remove_motif(&mut self, rem_id: usize) -> f64
-        let new_like = motif_set.remove_motif(1);
+        let _new_like = motif_set.remove_motif(1);
 
         assert!((motif_set.calc_ln_post()- check_set.calc_ln_post()).abs() < 1e-8, "{}", format!("{:?} {:?}", motif_set.ln_post, check_set.ln_post));
 
@@ -5201,7 +5121,7 @@ mod tester{
 
         let mut failures = 0_usize;
 
-        let (single_mot, ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move(&mut rng) { break r; } else {failures+=1;}};
+        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move_custom(&mut rng, 1.0, 1.0) { break r; } else {failures+=1;}};
 
         println!("failed in single base move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());
@@ -5239,7 +5159,7 @@ mod tester{
 
 
         let mut failures = 0_usize;
-        let (single_mot, ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move(&mut rng) { break r; } else {failures+=1;}};
+        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move_custom(&mut rng, 1.0, 1.0) { break r; } else {failures+=1;}};
 
         println!("failed in single motif move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());
@@ -5277,11 +5197,11 @@ mod tester{
         }
         
 
-        let single_height = motif_set.propose_height_move(&mut rng);
+        let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
         assert!(single_height.is_some()); //scaling a single base should always make possible motifs
 
-        let (single_mot, ln_prop) = single_height.unwrap();
+        let (single_mot, _ln_prop) = single_height.unwrap();
 
 
         assert!(single_mot.set.len() == motif_set.set.len());
@@ -5319,7 +5239,7 @@ mod tester{
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&motif_set.signal;
-        let propensities = remaining.kmer_propensities(birth_mot.set[l].len());
+        let _propensities = remaining.kmer_propensities(birth_mot.set[l].len());
         let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
@@ -5465,7 +5385,7 @@ mod tester{
             let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, data_seq.data().seq(), &mut rng);
             _ = motif_set.add_motif(add_mot);
         }
-        for i in 0..100 {
+        for _i in 0..100 {
             let (step_set, selected_move, accepted) = motif_set.run_rj_move(1.0, &mut rng);
             
             //For when run_rj_move gives a clone of the old set when rejecting, rather than telling us what could have been
@@ -5534,7 +5454,7 @@ mod tester{
         assert!(!(tc == try_base));
         assert!(b == b.clone());
 
-        let b_mag: f64 = b.show().iter().sum();
+        let _b_mag: f64 = b.show().iter().sum();
         let supposed_default_dist = (b.base_to_vect()).iter().map(|a| a.powi(2)).sum::<f64>();
 
         println!("{supposed_default_dist}, {}", b.dist_sq(None));
@@ -5567,8 +5487,8 @@ mod tester{
 
         let mut rng = rand::thread_rng();
 
-        let mut h: f64 = 0.;
-        for i in 0..30000 { h = dist.sample(&mut rng); assert!((h >= dist.min()) && (h <= dist.max()))}
+        let mut h: f64;
+        for _i in 0..30000 { h = dist.sample(&mut rng); assert!((h >= dist.min()) && (h <= dist.max()))}
 
         let val1: f64 = 3.0;
         let val2: f64 = 15.0;
@@ -5604,15 +5524,14 @@ mod tester{
         
         let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
         let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
-        let null_blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
-        let block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let _block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let null_block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
@@ -5650,7 +5569,7 @@ mod tester{
 
         let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background) }; 
 
-        let noise: Noise = waveform.produce_noise(&data_seq_2);
+        let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
 
 
@@ -5661,7 +5580,7 @@ mod tester{
         let null_blocks: Vec<usize> = (0..null_block_lens.len()).collect();
 
         let start_null = Instant::now();
-        let null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
+        let _null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
         let duration_null = start_null.elapsed();
 
         println!("null dur {:?}", duration_null);
@@ -5694,7 +5613,7 @@ mod tester{
         assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
 
         let matrix = motif.pwm();
-        let nbases = matrix.len();
+        let _nbases = matrix.len();
 
         for base in matrix {
             println!("{:?}", base.show());
@@ -5757,8 +5676,7 @@ mod tester{
                 let mut rev_mot = rev_best.clone();
                 rev_mot[motif.len()-1-i] = j.complement();
 
-                let defect: f64 = unsafe{ pwm[i][j]} ;
-
+                let defect: f64 = pwm[i][j] ;
 
                 let bindy = unsafe{ motif.prop_binding(&for_mot)};
                 let rbind = unsafe{ motif.prop_binding(&rev_mot) };
@@ -5783,7 +5701,7 @@ mod tester{
                             let rbind = unsafe{ motif.prop_binding(&rev_mot_2) };
 
                             //println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
-                            if (bindy.1) {
+                            if bindy.1 {
                                 assert!(defect_2 < bindy.0);
                                 assert!(defect_2 < rbind.0);
                                 assert!((bindy.0-rbind.0).abs() < 1e-6);
@@ -5855,8 +5773,8 @@ mod tester{
 
 
         let wave_block: Vec<u8> = vec![2,0,0,0, 170, 170, 170, 170, 170, 170, 170, 170,170, 170, 170, 170, 170, 170, 170]; 
-        let wave_inds: Vec<usize> = vec![0, 9]; 
-        let wave_starts: Vec<usize> = vec![0, 36];
+        let _wave_inds: Vec<usize> = vec![0, 9]; 
+        let _wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
         let wave_start_bases: Vec<usize> = vec![0, 9324];
         let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
@@ -5888,10 +5806,10 @@ mod tester{
         println!("{:?}",little_motif.generate_waveform(&wave_data_seq).raw_wave());
 
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
-        let small_inds: Vec<usize> = vec![0, 6]; 
+        let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
-        let small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
+        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0); //small
@@ -5903,7 +5821,7 @@ mod tester{
 
         let reverse: Vec<bool> = vec![true, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false];
 
-        let correct: Vec<bool> = rev_comp.iter().enumerate().map(|(a, &b)| if b {reverse[a]} else {forward[a]}).collect();
+        let _correct: Vec<bool> = rev_comp.iter().enumerate().map(|(a, &b)| if b {reverse[a]} else {forward[a]}).collect();
 
        // println!("correct: {:?}", correct);
 
@@ -5918,8 +5836,8 @@ mod tester{
                 let ind = if rev_comp[24*i+j] { j+wave_motif.len()-1-4 } else {j+4}; 
                 if ind < 24 {
                     let bp = small.return_bases(i, ind, 1)[0];
-                    let bp2 = small.return_bases(i, ind, 1)[0];
-                    let matcher = if rev_comp[24*i+j] { bp == Bp::T } else { bp == Bp::A};
+                    let _bp2 = small.return_bases(i, ind, 1)[0];
+                    let _matcher = if rev_comp[24*i+j] { bp == Bp::T } else { bp == Bp::A};
                     //println!("start loc: {}, bp: {:?}, bp2: {:?}, ind: {}, rev: {}, matcher: {},  correct: {}", 24*i+j, bp, bp2, ind, rev_comp[24*i+j], matcher, correct[24*i+j]);
                 }
             }
@@ -5960,10 +5878,10 @@ mod tester{
 
         let pwm_bp: Bp = Bp::T;
         let pwm_pos: usize = 6;
-        let prop_bp = motif.pwm[pwm_pos][pwm_bp];
+        let _prop_bp = motif.pwm[pwm_pos][pwm_bp];
         let wave_main = motif.generate_waveform(&data_seq);
-        let start0 = Instant::now();
-        let duration0 = start.elapsed();
+        let _start0 = Instant::now();
+        let _duration0 = start.elapsed();
         let wave_gen: Vec<f64> = wave_main.raw_wave();
         let mut scores: Vec<f64> = vec![0.0;wave_gen.len()];
 
