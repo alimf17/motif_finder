@@ -98,7 +98,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
-pub const CAPACITY_FOR_NULL: usize = 50;
+pub const CAPACITY_FOR_NULL: usize = 10;
 
 /*
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;

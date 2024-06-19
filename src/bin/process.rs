@@ -206,7 +206,7 @@ pub fn main() {
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
-    //let _ = best_single_motif_set.generate_pr_curve(&data_ref,&full_sequence , &out_dir, &save_file);
+    let _ = best_single_motif_set.generate_pr_curve(&data_ref,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_file);
 
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 
