@@ -4059,6 +4059,18 @@ impl MoveTracker {
             println!("Base leap move (always accepts). Times {}.", self.attempts_per_move[ind]);
             ind += 1;
             println!("Secondary shuffle move (always accepts). Times {}.", self.attempts_per_move[ind]);
+            for i in 0..SCALE_SDS.len() {
+                println!("Base scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                         SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                         (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+                ind += 1;
+            }
+            for i in 0..SCALE_SDS.len() {
+                println!("Motif scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                         SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                         (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+                ind += 1;
+            }
     }
    
 
@@ -4343,12 +4355,14 @@ impl<'a> TemperSetTraces<'a> {
         //}
                 
 
+        println!("Ln posteriors of each trace before swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
+
         //This swaps the pairs of adjacent traces starting from index 1
         let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            let accept_swap = MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
@@ -4365,7 +4379,7 @@ impl<'a> TemperSetTraces<'a> {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            let accept_swap = MotifSet::accept_test(b.0.active_set.ln_posterior(), a.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng); 
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
@@ -4376,6 +4390,8 @@ impl<'a> TemperSetTraces<'a> {
         }).collect();
         
         println!("Even swaps: {:?}", even_swaps);
+        
+        println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
         
         /*if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
