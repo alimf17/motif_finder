@@ -164,19 +164,21 @@ const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
 const BASE_LINEAR_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
  
 const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
-                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
+                            Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
+
+const SCALE_SDS: [f64; 3] = [0.1, 0.5, 1.0];
 
 const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+6;
-const VARIANT_NUMS: [usize; 6] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1]; 
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+6;
+const VARIANT_NUMS: [usize; 8] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, HEIGHT_SDS.len(), HEIGHT_SDS.len()]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
-static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 6]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
+static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 8]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
-static VARIANT_CUMULATIVE: Lazy<[usize; 6]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+static VARIANT_CUMULATIVE: Lazy<[usize; 8]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
@@ -185,6 +187,8 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
                                                    let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
                                                    "_motif_contract.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
+                                                   let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_base_sd_{a}.png")));
+                                                   let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_mot_sd_{a}.png")));
                                                    m.collect::<Vec<_>>().try_into().unwrap()
 });
 
@@ -637,11 +641,17 @@ impl Base {
 
     }
 
-    /*pub fn scaled_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Option<Base> {
+    pub fn scaled_base<R: Rng + ?Sized>(&self, scale_sd: f64, rng: &mut R) -> Option<Base> {
 
-        
+        let mut new_base_vect = self.base_to_vect();
 
-    }*/
+        let scale_exponent = (NORMAL_DIST.sample(rng)*scale_sd).exp();
+
+        new_base_vect = core::array::from_fn(|a| new_base_vect[a]*scale_exponent);
+
+        Some(Base::vect_to_base(&Base::reflect_triple_to_finite(&new_base_vect)))
+
+    }
 
     //Panic: if given a point outside of the base terahedron, this function will panic 
     pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
@@ -2915,6 +2925,48 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    fn propose_scale_base_custom<R: Rng+?Sized>(&self, rng: &mut R, scale_exponent_sd: f64 ) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        let base_change = rng.gen_range(0..replacement.pwm.len());
+
+        let Some(attempt_new) = replacement.pwm[base_change].scaled_base(scale_exponent_sd, rng) else { return None;};
+
+        replacement.pwm[base_change] = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+
+
+    }
+
+    fn propose_ordered_scale_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, scale_exponent_sd: f64) -> Option<(Self, f64)> {
+
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.set[c_id].clone();
+
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE]*0.25;
+
+        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.scaled_base(scale_exponent_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
+
+        replacement.pwm = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+    }
+
+
 
     fn measure_movement(&mut self, proposal: &mut Self) -> [f64; 4] {
 
@@ -3413,6 +3465,21 @@ impl<'a> SetTrace<'a> {
             3 => self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng),
             4 => Some((self.active_set.base_leap(rng), true)),
             5 => Some((self.active_set.secondary_shuffle(rng), true)),
+            6 => {
+                let scale_s = SCALE_SDS[which_variant];
+                self.active_set.propose_scale_base_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| { 
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
+                    (new_mot, accepted)
+                })
+            }, 
+
+            7 => {
+                let scale_s = SCALE_SDS[which_variant];
+                self.active_set.propose_ordered_scale_move_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| {
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
+                    (new_mot, accepted)
+                })
+            },
             _ => unreachable!(),
 
         };
