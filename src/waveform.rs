@@ -965,11 +965,15 @@ impl<'a> Noise<'a> {
     }*/
 
 
+    //This does not work on calculating the AD based on the cdf of the background directly.
+    //It works on the CDF of the |residuals|
     pub fn ad_calc(&self, spacer: usize) -> f64 {
 
         //let time = Instant::now();
-        let mut forward: Vec<f64> = self.resids();
+        let mut forward: Vec<f64> = self.resids().map(|a| a.abs()).collect();
 
+        //I don't need to take the absolute value here because I always generate the positive
+        //values
         let mut extras = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
 
         //let mut extras: Vec<f64> = self.extraneous_resids();
@@ -979,11 +983,16 @@ impl<'a> Noise<'a> {
 
         let n = forward.len();
         let mut a_d = -(n as f64);
-        for i in 0..n {
+        for (i, &f) in forward.iter().enumerate() {
 
-            let cdf = self.background.ln_cdf(forward[i]);
-            let rev_sf = self.background.ln_sf(forward[n-1-i]);
-            a_d -= (cdf+rev_sf) * ((2*i+1) as f64)/(n as f64)
+            //We rely on the fact that x >= 0 => cdf(x) >= sf(x)
+            //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
+            let pre_sf = self.background.sf(f);
+            let ln_cdf = (-2.0*pre_sf).ln_1p(); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
+            let ln_sf = pre_sf+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
+            let coeff = ((2*i+1) as f64)/(n as f64);
+
+            a_d -= (ln_cdf * coeff)+(ln_sf * (2.0-coeff));
         }
         a_d
     }
