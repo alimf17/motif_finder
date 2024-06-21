@@ -970,7 +970,9 @@ impl<'a> Noise<'a> {
     pub fn ad_calc(&self, spacer: usize) -> f64 {
 
         //let time = Instant::now();
-        let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()).collect();
+        //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
+        //breaking if we have an EXACT zero coincidentally. 
+        let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect();
 
         //I don't need to take the absolute value here because I always generate the positive
         //values
@@ -989,7 +991,7 @@ impl<'a> Noise<'a> {
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
             let pre_sf = self.background.dist.sf(f);
             let ln_cdf = (-2.0*pre_sf).ln_1p(); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
-            let ln_sf = pre_sf+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
+            let ln_sf = pre_sf.ln()+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
             let coeff = ((2*i+1) as f64)/(n as f64);
 
             a_d -= (ln_cdf * coeff)+(ln_sf * (2.0-coeff));
@@ -1490,19 +1492,27 @@ mod tests{
         println!("{:?}", n1.resids());
         println!("ad_calc {}", n1.ad_calc(1));
 
-        let mut noise_arr = n1.resids();
+        //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
+        //breaking if we have an EXACT zero coincidentally. 
+        let mut noise_arr = n1.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
         noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let noise_length = noise_arr.len();
         let mut ad_try = -(noise_length as f64);
 
         for i in 0..noise_length {
 
-            let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
-            let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
+            //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
+            //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
             let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
 
+            let cdf = n1.dist().cdf(noise_arr[i]);
+            let sf = 1.0-cdf;
+
+            let real_ln_cdf = (cdf-sf).ln();
+            let real_ln_sf = (sf-cdf).ln_1p();
             
-            ad_try -= mult*(ln_cdf+ln_sf);
+
+            ad_try -= mult*real_ln_cdf+(2.0-mult)*real_ln_sf;
         }
 
         println!("ad_try {}", ad_try);
@@ -1518,7 +1528,7 @@ mod tests{
 
         let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
 
-        let mut extraneous_noises = n1_with_extraneous.resids();
+        let mut extraneous_noises = n1_with_extraneous.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
 
         extraneous_noises.append(&mut extra_resids);
 
@@ -1528,13 +1538,17 @@ mod tests{
         let mut ad_try = -(noise_length as f64);
         
         for i in 0..noise_length {
-        
-            let ln_cdf = n1.dist().ln_cdf(extraneous_noises[i]);
-            let ln_sf = n1.dist().ln_sf(extraneous_noises[noise_length-1-i]);
             let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
-        
+
+            let cdf = n1.dist().cdf(extraneous_noises[i]);
+            let sf = 1.0-cdf;
+
+            let real_ln_cdf = (cdf-sf).ln();
+            let real_ln_sf = (sf-cdf).ln_1p();
             
-            ad_try -= mult*(ln_cdf+ln_sf);
+
+            ad_try -= mult*real_ln_cdf+(2.0-mult)*real_ln_sf;
+        
         }
 
         println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(1), ad_try);
