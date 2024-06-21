@@ -4238,6 +4238,7 @@ impl<'a> TemperSetTraces<'a> {
         if min_thermo_beta < 0.0 { return Err(InitializationError::NegativeTemperature); }
         if min_thermo_beta > 1.0 { return Err(InitializationError::UselessBeta); }
 
+        println!("begin");
         //I always want my intermediate states to be even, because I want to be able to try to swap everybody at once
         //So I always want to randomly 
         let mut thermos = vec![1_f64; num_intermediate_traces+2];
@@ -4255,6 +4256,7 @@ impl<'a> TemperSetTraces<'a> {
         //for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
 
 
+        println!("nullblock");
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
         *thermos.last_mut().expect("thermos always has elements") = min_thermo_beta;
@@ -4264,6 +4266,7 @@ impl<'a> TemperSetTraces<'a> {
             thermos[i] = 1_f64-(i as f64)*thermo_step
         }
 
+
         let mut parallel_traces: Vec<(SetTrace, Option<MoveTracker>)> = Vec::with_capacity(thermos.len());
 
         //pub fn new_trace(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a>
@@ -4271,6 +4274,7 @@ impl<'a> TemperSetTraces<'a> {
         let past_initial: bool = false;
 
         for (i, thermo_beta) in thermos.into_iter().enumerate() {
+            println!("thermo check {i}");
             let potential_tracker = match how_to_track {
                 TrackingOptions::NoTracking => None, 
                 TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),

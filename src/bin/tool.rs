@@ -175,8 +175,11 @@ fn main() {
 
     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
 
+    println!("have all data");
 
     let data_ref = AllDataUse::new(&total_data).unwrap();
+
+    println!("alldata use");
 
     let _data = data_ref.data();
 
@@ -233,10 +236,13 @@ fn main() {
 
     //    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
 
+    println!("pre initial");
+
     let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, data_string, &data_ref, maybe_init, None, &mut rng).unwrap();
 
 
 
+    println!("initialized");
     //run MCMC and make sure that I'm saving and clearing periodically
     
 
