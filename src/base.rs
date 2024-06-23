@@ -4396,7 +4396,9 @@ impl<'a> TemperSetTraces<'a> {
         println!("Even swaps: {:?}", even_swaps);
         
         println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
-        
+       
+        println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
+
         /*if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
