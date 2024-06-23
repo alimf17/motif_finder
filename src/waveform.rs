@@ -686,7 +686,7 @@ impl<'a, 'b> Sub<&'b Waveform<'b>> for &'a Waveform<'a> {
         let other_wave = wave2.raw_wave();
         
         Waveform {
-            wave: self.wave.iter().zip(other_wave).map(|(a, b)| (a-b).abs()+f64::MIN_POSITIVE).collect(),
+            wave: self.wave.iter().zip(other_wave).map(|(a, b)| a-b).collect(),
             spacer: self.spacer,
             point_lens: self.point_lens.clone(),
             start_dats: self.start_dats.clone(),
@@ -714,7 +714,6 @@ impl<'a, 'b> SubAssign<&'b Waveform<'b>> for Waveform<'a> {
         
         for i in 0..n {
             self.wave[i] -= other_wave[i];
-            self.wave[i] = self.wave[i].abs()+f64::MIN_POSITIVE;
         }
 
 
@@ -973,7 +972,7 @@ impl<'a> Noise<'a> {
         //let time = Instant::now();
         //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
         //breaking if we have an EXACT zero coincidentally. 
-        let mut forward: Vec<f64> = self.resids();//.into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect();
+        let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect();
 
         //I don't need to take the absolute value here because I always generate the positive
         //values
