@@ -494,17 +494,6 @@ impl<'a> Waveform<'a> {
 
         let current_resid = data_ref.data()-&self;
 
-        let min_signal = self.wave.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-        let min_data_o = data_ref.data().wave.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-        let min_resids = current_resid.wave.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-        let min = min_signal.min(min_data_o.min(*min_resids))-1.0;
-
-        let max_signal = self.wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-        let max_data_o = data_ref.data().wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-        let _max_resids = current_resid.wave.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-        let max = max_signal.max(max_data_o.max(*min_resids))+1.0;
         
         let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
 
@@ -523,6 +512,17 @@ impl<'a> Waveform<'a> {
             let sig_block = &blocked_locs_and_signal[i].1;
             let dat_block = &blocked_locs_and_data[i].1;
             let res_block = &blocked_locs_and_resid[i].1;
+
+            let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+            let min = min_signal.min(*min_data_o)-1.0;
+
+            let max_signal = sig_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let max_data_o = dat_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+            let max = max_signal.max(*max_data_o)+1.0;
+
 
             let signal_file = format!("{}/{i}.png", signal_directory);
 

@@ -602,14 +602,16 @@ impl AllData {
             peak_scale = peak_scale.abs();
         }
 
-        let peak_thresh = 1.25*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = 1.41421356237*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
-        let data_zone: usize = 100.max(fragment_length/spacing)*3;
+        //The maximum spacing where things can start interfering with one another is 3 kernel sds
+        //away, because we decided that fragment lengths should be about 6 kernel sds long
+        let data_zone: usize = 100.max(fragment_length/(2*spacing));
         
         for block in lerped_blocks {
 
