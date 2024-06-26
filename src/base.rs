@@ -160,8 +160,8 @@ const HEIGHT_MOVE_SD: f64 = 1.0; */
 const PROB_POS_PEAK: f64 = 1.0;
 
 
-const BASE_RATIO_SDS: [f64; 4] = [0.1_f64, 0.5, 1.0, 2.0];
-const BASE_LINEAR_SDS: [f64; 4] = [0.1_f64, 0.5, 1.0, 2.0];
+const BASE_RATIO_SDS: [f64; 5] = [0.1_f64, 0.5, 1.0, 2.0, 10.0];
+const BASE_LINEAR_SDS: [f64; 5] = [0.1_f64, 0.5, 1.0, 2.0, 10.0];
  
 const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
@@ -586,8 +586,10 @@ impl Base {
     pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
 
 
+
         //This clamp exists to make sure that we don't over or underflow exp and break things
         let sanitized_base: [f64; BASE_L-1] = Self::reflect_triple_to_finite(base_as_vec); 
+
 
         //TODO: fix this so that it starts with best base at 1.0
         let pre_exp_base: [f64; BASE_L] = 
@@ -595,6 +597,7 @@ impl Base {
               (sanitized_base[0]+sanitized_base[1]-sanitized_base[2])*0.25,
               (sanitized_base[0]-sanitized_base[1]+sanitized_base[2])*0.25,
              (-sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25];
+
 
         let max_val = pre_exp_base.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).expect("We obviously know this has items in it");
 
@@ -617,9 +620,20 @@ impl Base {
 
         largest_abs_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
 
-        let mut large_abs_ratio = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
 
-        let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0;
+        //let mut large_abs_ratio = if largest_abs_to_smallest[1].0 == 0.0 { 1.0} else {largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0};
+
+        //let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0};
+
+        let (mut large_abs_ratio, mut small_abs_ratio) = 
+            if largest_abs_to_smallest[1].0 == 0.0 {
+                (1.0, 1.0) 
+            } else {
+                let la = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
+                let sm = if largest_abs_to_smallest[2].0 == 0.0 { 1.0 } else {largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0};
+                (la, sm)
+            };
+
 
         large_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
 
@@ -635,8 +649,11 @@ impl Base {
 
         new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1].abs()*signs_base_vect[largest_abs_to_smallest[0].1];
 
+
+        let refl = Base::reflect_triple_to_finite(&new_base_vect);
+
        
-        Some(Base::vect_to_base(&Base::reflect_triple_to_finite(&new_base_vect)))
+        Some(Base::vect_to_base(&refl))
 
 
     }
@@ -769,11 +786,8 @@ impl Base {
 
         let mut is_some = maybe_id.is_some();
 
-        let mut i: usize = 0;
-
         while is_some {
 
-            i += 1;
             return_triple = Self::reflect_outer_barrier(return_triple, maybe_id.expect("only here if we're some"));
             maybe_id = Self::terminate_refect(&return_triple);
             is_some = maybe_id.is_some();
@@ -4821,7 +4835,7 @@ mod tester{
         //let most_ys_on_t_face = (0..(2*length_x_to_test)).map(|i| (SQRT_2/SQRT_3)*(1.0-(i as f64)/(length_x_to_test as f64))).collect::<Vec<f64>>();
 
 
-        let random_base_dist = SymmetricBaseDirichlet::new(0.06).expect("obviously valid");
+        let random_base_dist = SymmetricBaseDirichlet::new(0.0518590998043053).expect("obviously valid");
 
         let t = Instant::now();
         for i in 0..10000 {
