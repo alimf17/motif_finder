@@ -160,16 +160,16 @@ const HEIGHT_MOVE_SD: f64 = 1.0; */
 const PROB_POS_PEAK: f64 = 1.0;
 
 
-const BASE_RATIO_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
-const BASE_LINEAR_SDS: [f64; 3] = [0.05_f64, 0.1_f64, 0.5];
+const BASE_RATIO_SDS: [f64; 4] = [0.1_f64, 0.5, 1.0, 2.0];
+const BASE_LINEAR_SDS: [f64; 4] = [0.1_f64, 0.5, 1.0, 2.0];
  
 const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const SCALE_SDS: [f64; 3] = [0.1, 0.5, 1.0];
+const SCALE_SDS: [f64; 3] = [0.5, 1.0, 10.0];
 
-const HEIGHT_SDS: [f64; 3] = [0.1, 1_f64, 2.0];
+const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+6;
 const VARIANT_NUMS: [usize; 8] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, HEIGHT_SDS.len(), HEIGHT_SDS.len()]; 
@@ -769,14 +769,17 @@ impl Base {
 
         let mut is_some = maybe_id.is_some();
 
+        let mut i: usize = 0;
+
         while is_some {
 
+            i += 1;
             return_triple = Self::reflect_outer_barrier(return_triple, maybe_id.expect("only here if we're some"));
             maybe_id = Self::terminate_refect(&return_triple);
             is_some = maybe_id.is_some();
         }
 
-        
+       
 
         return_triple
 
@@ -813,6 +816,17 @@ impl Base {
         //let j = (id+((BASE_L-1-i)*(BASE_L-2-i))/2)-((BASE_L-1)*BASE_L-2)/2;
         //let j = (id+((3-i)*(2-i))/2)-3;
 
+        //Implementation based on this math stack exchange answer: https://math.stackexchange.com/questions/4908539/reflective-dodecadron
+        //
+        let triple_in_basis = [(-triple[0]+triple[1]+triple[2])/(4.0* *BARRIER),
+                               ( triple[0]-triple[1]+triple[2])/(4.0* *BARRIER),
+                               ( triple[0]+triple[1]-triple[2])/(4.0* *BARRIER)];
+
+        let reduce_reflection: [f64;BASE_L-1] = core::array::from_fn(|a| triple_in_basis[a].fract());
+
+        let triple = [(reduce_reflection[1]+reduce_reflection[2])*2.0* *BARRIER,
+                      (reduce_reflection[0]+reduce_reflection[2])*2.0* *BARRIER,
+                      (reduce_reflection[0]+reduce_reflection[1])*2.0* *BARRIER];
 
         let (i, j): (usize, usize) = [(0, 1), (0, 2), (1, 2)][id];
 
@@ -3114,7 +3128,7 @@ impl StrippedMotifSet {
         let _ = fs::create_dir(&fimo_output);
 
         println!("created dir");
-        Command::new("fimo").arg("--oc").arg(&fimo_output).arg(&meme_file).arg(fasta_file).output()?;
+        Command::new("fimo").arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file).output()?;
 
         let fimo_tsv = format!("{}/fimo.tsv", fimo_output);
 
