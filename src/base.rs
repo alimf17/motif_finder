@@ -160,8 +160,8 @@ const HEIGHT_MOVE_SD: f64 = 1.0; */
 const PROB_POS_PEAK: f64 = 1.0;
 
 
-const BASE_RATIO_SDS: [f64; 5] = [0.1_f64, 0.5, 1.0, 2.0, 10.0];
-const BASE_LINEAR_SDS: [f64; 5] = [0.1_f64, 0.5, 1.0, 2.0, 10.0];
+const BASE_RATIO_SDS: [f64; 3] = [0.1_f64, 0.5, 1.0];
+const BASE_LINEAR_SDS: [f64; 3] = [0.1_f64, 0.5, 1.0];
  
 const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
@@ -4267,30 +4267,43 @@ impl<'a> TemperSetTraces<'a> {
         if min_thermo_beta > 1.0 { return Err(InitializationError::UselessBeta); }
 
         println!("begin");
-        //I always want my intermediate states to be even, because I want to be able to try to swap everybody at once
-        //So I always want to randomly 
-        let mut thermos = vec![1_f64; num_intermediate_traces+2];
+
+        let mut num_intermediate_traces = num_intermediate_traces;
 
         let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
 
+        let null_block_groups: Vec<Vec<usize>> = if (num_null_blocks >= (num_intermediate_traces+2)){
+            let mut null_b_g = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
+            for i in 0..num_null_blocks { null_b_g[i % (num_intermediate_traces+2)].push(i); } 
+            null_b_g
+        } else {
+            let number_splits = num_null_blocks*((num_intermediate_traces+2)/num_null_blocks);
+            (0..number_splits).map(|i| vec![i % num_null_blocks]).collect()
+        };
+
+        //I always want my intermediate states to be even, because I want to be able to try to swap everybody at once
+        //So I always want to randomly 
+        let mut thermos = vec![1_f64; null_block_groups.len()];
+
+
         //let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
-        let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
+        //let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
 
         //null_block_groups[0] = (0..num_null_blocks).collect();
 
         //for i in 0..num_null_blocks { null_block_groups[1+(i % (num_intermediate_traces+1))].push(i); }
 
-        //for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
+       // for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
 
 
-        println!("nullblock");
+        println!("nullblock {:?}", null_block_groups);
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
         *thermos.last_mut().expect("thermos always has elements") = min_thermo_beta;
 
         //TODO: check that this DOES produce a linear decrease in thermodynamic beta
-        for i in 1..(num_intermediate_traces+1) {
+        for i in 1..(null_block_groups.len()-1) {
             thermos[i] = 1_f64-(i as f64)*thermo_step
         }
 
@@ -4302,13 +4315,15 @@ impl<'a> TemperSetTraces<'a> {
         let past_initial: bool = false;
 
         for (i, thermo_beta) in thermos.into_iter().enumerate() {
-            println!("thermo check {i}");
+            println!("thermo check {i} {:?}", null_block_groups[i]);
             let potential_tracker = match how_to_track {
                 TrackingOptions::NoTracking => None, 
                 TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),
                 TrackingOptions::TrackTrueTrace => if past_initial { None } else { Some(MoveTracker::new(step_num_estimate)) },
             };
-            parallel_traces.push((SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, null_block_groups[i].clone(), sparse, rng), potential_tracker));
+            let set_trace = SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, null_block_groups[i].clone(), sparse, rng); 
+            println!("thermo {} attention {:?}", set_trace.thermo_beta, set_trace.active_set.current_attention());
+            parallel_traces.push((set_trace, potential_tracker));
         }
 
         Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
@@ -4350,10 +4365,10 @@ impl<'a> TemperSetTraces<'a> {
             for (i, motif) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls);
             if binds.len() >0{
-                let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
-            let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
-             println!("{j} {i} binds {} {}", binds[0], binds.last().unwrap());
-            println!("{:?} \n {:?}", binds_diffs, binds_ratio);
+                //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
+            //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
+             println!("{j} {i} binds {} {} len {}", binds[0], binds.last().unwrap(), binds.len());
+            //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
             } else {println!("{j} {i} no extraneous");}
         }
         }
@@ -4363,27 +4378,28 @@ impl<'a> TemperSetTraces<'a> {
         //ALL of the negative sequence
         //if self.parallel_traces.len() >= 4  {
             //let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| {//} 
-            /*let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
+            let even_attention_swaps: Vec<(_, bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
                 let mut rng = rng_maker();
                 let attention_0 = a.0.active_set.current_attention().clone();
                 let attention_1 = b.0.active_set.current_attention().clone();
-                let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1);
-                let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0);
+                let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1.clone());
+                let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0.clone());
 
-                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(),
-                                                        a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b, 1.0, &mut rng);
+                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b,
+                                                        a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(), 1.0, &mut rng);
 
                 if accept_swap {
                     std::mem::swap(&mut a.0.active_set, &mut swap_attention_a);
                     std::mem::swap(&mut b.0.active_set, &mut swap_attention_b);
                 }
 
-                ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+                //([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+                ([attention_0, attention_1], accept_swap)
             }).collect();
 
-            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );*/
+            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
         //}
                 
 
@@ -4427,8 +4443,8 @@ impl<'a> TemperSetTraces<'a> {
        
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 
-        /*if self.parallel_traces.len() >= 3  {
-            let odd_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
+        if self.parallel_traces.len() >= 3  {
+            let odd_attention_swaps: Vec<(_, bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
                 let mut rng = rng_maker();
@@ -4437,19 +4453,20 @@ impl<'a> TemperSetTraces<'a> {
                 let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1);
                 let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0);
 
-                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(),
-                                                        a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b, 1.0, &mut rng);
+                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b,
+                                                        a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(), 1.0, &mut rng);
 
                 if accept_swap {
                     std::mem::swap(&mut a.0.active_set, &mut swap_attention_a);
                     std::mem::swap(&mut b.0.active_set, &mut swap_attention_b);
                 }
 
-                ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+                //([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+                ([a.0.active_set.current_attention().clone(), b.0.active_set.current_attention().clone()], accept_swap)
             }).collect();
 
             println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        }*/
+        }
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
