@@ -1286,7 +1286,7 @@ impl Motif {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
-        let mot = seq.random_valid_motif(num_bases);
+        let mot = seq.random_valid_motif(num_bases, rng);
 
 
         Self::from_motif(mot,  rng)
@@ -1299,7 +1299,7 @@ impl Motif {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
-        let mot = seq.random_valid_motif(num_bases);
+        let mot = seq.random_valid_motif(num_bases, rng);
 
         Self::from_motif_dirichlet(mot, rng)
 
@@ -1340,7 +1340,7 @@ impl Motif {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
-        let mot = seq.random_valid_motif(num_bases);
+        let mot = seq.random_valid_motif(num_bases, rng);
 
         let mut pwm: Vec<Base> =  mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-pwm.len());
@@ -1360,7 +1360,7 @@ impl Motif {
         assert!((num_bases >= MIN_BASE) && (num_bases <= MAX_BASE), 
                 "Only motif lengths with a length between {MIN_BASE} and {MAX_BASE}, inclusive, are allowed. You tried to make a {num_bases} Base long motif.");
 
-        let mot = seq.random_valid_motif(num_bases);
+        let mot = seq.random_valid_motif(num_bases, rng);
 
         let mut pwm: Vec<Base> = mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-pwm.len());
@@ -5877,7 +5877,7 @@ mod tester{
         let rand_pwm = random_motif.pwm();
         for _ in 0..100 {
         
-            let altermot = data_seq.data().seq().random_valid_motif(random_motif.pwm().len());
+            let altermot = data_seq.data().seq().random_valid_motif(random_motif.pwm().len(), &mut rng);
 
             let forward_defect = altermot.iter().enumerate().map(|(i, &b)| rand_pwm[i][b]).product::<f64>();
             let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| rand_pwm[i][b.complement()]).product::<f64>();

@@ -468,12 +468,10 @@ impl Sequence {
     }
 
 
-    pub fn random_valid_motif(&self, len: usize) -> Vec<Bp>{
+    pub fn random_valid_motif<R: Rng + ?Sized>(&self, len: usize, rng: &mut R) -> Vec<Bp>{
 
-        let mut rng = rand::thread_rng();
 
         let mot_id: usize = rng.gen_range(0..(self.kmer_nums[len-MIN_BASE]));
-
         Self::u64_to_kmer(self.kmer_dict[len-MIN_BASE][mot_id], len)
     }
 
@@ -611,9 +609,10 @@ impl NullSequence {
         //SAFETY: We KNOW that all elements of ordered_lens must be Some right now.
         //Other note: we want this ordered largest to smallest, hence b and a reversed
         unsafe{
-            ordered_lens.sort_unstable_by(|a, b| b.unwrap_unchecked().cmp(&a.unwrap_unchecked()));
+            ordered_lens.sort_unstable_by(|a, b| b.unwrap_unchecked().1.cmp(&a.unwrap_unchecked().1));
         }                                              
 
+        //println!("start ordered {:?}", ordered_lens);
         let account_blocks = ordered_lens.len();
 
         let mut block_sets: Vec<Vec<usize>> = Vec::new();
@@ -631,6 +630,7 @@ impl NullSequence {
         loop{
         //while /*some condition I will define*/ {//}
 
+        //println!("ordered {:?}", ordered_lens);
         
             //If we hit the end of the list, break our loop and prepare for final cleanup
             let Some(valid_take) = ordered_lens.get_mut(largest_counted) else{
@@ -711,9 +711,10 @@ impl NullSequence {
 
         let len_total = len_final+len_penultimate;
 
+        //Note: it still needs to be block_sets_len-2, not -1, because we didn't update that number
         if len_total <= target_len {
             let mut last_elem = unsafe{ block_sets.pop().unwrap_unchecked()};
-            unsafe{block_sets.get_unchecked_mut(block_sets_len-1).append(&mut last_elem)};
+            unsafe{block_sets.get_unchecked_mut(block_sets_len-2).append(&mut last_elem)};
             return block_sets;
         }
 
@@ -724,7 +725,7 @@ impl NullSequence {
 
         if diff_total <= (diff_pen+diff_fin) {
             let mut last_elem = unsafe{block_sets.pop().unwrap_unchecked()};
-            unsafe{block_sets.get_unchecked_mut(block_sets_len-1).append(&mut last_elem);}
+            unsafe{block_sets.get_unchecked_mut(block_sets_len-2).append(&mut last_elem);}
         }
 
         block_sets
@@ -944,6 +945,17 @@ mod tests {
             assert!(legal_mot_ids.len() == count_close, "Missing possible mots");
 
         }
+
+
+    }
+
+    #[test]
+    fn assign_block_sets_test() {
+
+        let theoretical_blocks: Vec<usize> = vec![4000, 700, 1000, 700, 2000];
+
+        println!("{:?}", NullSequence::assign_block_sets(&theoretical_blocks));
+
 
 
     }
