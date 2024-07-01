@@ -597,6 +597,139 @@ impl NullSequence {
 
     }
 
+    fn assign_block_sets(block_lens: &[usize]) -> Vec<Vec<usize>> {
+
+        //This is included for potential safety guarantees
+        //Do NOT do this. Like, it's technically correct, but don't be dumb
+        if block_lens.len() == 0 { return Vec::new();}
+
+        if block_lens.len() == 1 { return vec![vec![0]];}
+
+        let mut ordered_lens: Vec<Option<(usize, usize)>> = 
+            block_lens.iter().enumerate().map(|(a, &b)| Some((a,b))).collect();
+
+        //SAFETY: We KNOW that all elements of ordered_lens must be Some right now.
+        //Other note: we want this ordered largest to smallest, hence b and a reversed
+        unsafe{
+            ordered_lens.sort_unstable_by(|a, b| b.unwrap_unchecked().cmp(&a.unwrap_unchecked()));
+        }                                              
+
+        let account_blocks = ordered_lens.len();
+
+        let mut block_sets: Vec<Vec<usize>> = Vec::new();
+
+        //SAFETY: We already returned if ordered_lens.get_unchecked_mut(0) would be UB 
+        //        AND we did not change the all Some-ness of ordered_lens yet
+        let (first_block, target_len): (usize, usize) = unsafe{ ordered_lens.get_unchecked_mut(0).take().unwrap_unchecked() };
+
+        block_sets.push(vec![first_block]);
+
+        let mut largest_counted: usize = 1;
+
+        let mut prior_block_set_len = target_len;
+
+        loop{
+        //while /*some condition I will define*/ {//}
+
+        
+            //If we hit the end of the list, break our loop and prepare for final cleanup
+            let Some(valid_take) = ordered_lens.get_mut(largest_counted) else{
+                break;                                    
+                //return block_sets;
+            };
+
+            //If the next possible element is None, skip it: it's already been accounted for. 
+            let Some((begin_block, mut block_set_len)) = valid_take.take() else {
+                largest_counted += 1;
+                continue;
+            };
+
+            let mut current_block_set: Vec<usize> = vec![begin_block];
+
+            let mut next_block = largest_counted + 1;
+
+            loop {
+
+                //I want to be sure that the compiler doesn't yell:
+                //  "But ordered_lens() could change size!" Hence, account_blocks
+                if next_block >= account_blocks {
+
+                    block_sets.push(current_block_set);
+                    largest_counted += 1;
+                    break;
+
+                }
+                
+                //SAFETY: We literally just returned if we exceeded the length of ordered_lens
+                //If we hit upon a block that has already been accounted for, ignore it and move on
+                let potential_next_block_and_len: &mut Option<(usize, usize)> = unsafe{ ordered_lens.get_unchecked_mut(next_block)};
+
+                /*else {
+                    next_block += 1;
+                    continue;
+                };*/
+
+                if potential_next_block_and_len.is_none(){
+                        next_block += 1;
+                        continue;
+                }
+
+
+                //SAFETY: if potential_next_block_and_len is None, we already continued
+                let potential_len = block_set_len + unsafe{ potential_next_block_and_len.unwrap_unchecked().1};
+
+                if potential_len <= target_len {
+                    //SAFETY: if potential_next_block_and_len is None, we already continued
+                    let (next_block, next_len) = unsafe{ potential_next_block_and_len.take().unwrap_unchecked()} ;
+                    current_block_set.push(next_block);
+                    block_set_len += next_len;
+                    if block_set_len == target_len {
+                        largest_counted += 1;
+                        break;
+                    }
+                } else {
+                    prior_block_set_len = block_set_len;
+                }
+                next_block += 1;
+               
+
+
+            }
+
+
+        }
+
+        //We know ordered_lens and block_sets must have a length of at least 2: 
+        //we would not have gotten here, otherwise. 
+        if block_sets.len() == 2 { return block_sets;}
+
+        let block_sets_len = block_sets.len();
+
+        //SAFETY: We guarenteed that block_sets has at least three elements by this point
+        let len_penultimate = unsafe{ block_sets.get_unchecked(block_sets_len-2).iter().map(|&a| block_lens[a]).sum()};
+        let len_final = unsafe{ block_sets.get_unchecked(block_sets_len-1).iter().map(|&a| block_lens[a]).sum()};
+
+        let len_total = len_final+len_penultimate;
+
+        if len_total <= target_len {
+            let mut last_elem = unsafe{ block_sets.pop().unwrap_unchecked()};
+            unsafe{block_sets.get_unchecked_mut(block_sets_len-1).append(&mut last_elem)};
+            return block_sets;
+        }
+
+        let diff_pen = if target_len < len_penultimate { len_penultimate-target_len} else {target_len-len_penultimate};
+        let diff_fin = if target_len < len_final { len_final-target_len} else {target_len-len_final};
+
+        let diff_total = len_total-target_len;
+
+        if diff_total <= (diff_pen+diff_fin) {
+            let mut last_elem = unsafe{block_sets.pop().unwrap_unchecked()};
+            unsafe{block_sets.get_unchecked_mut(block_sets_len-1).append(&mut last_elem);}
+        }
+
+        block_sets
+
+    }
 
     //Regular reader functions
 
