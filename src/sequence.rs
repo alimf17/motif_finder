@@ -4,6 +4,7 @@ use serde::{Serialize,Deserialize};
 use std::collections::HashMap;
 use itertools::{Itertools};
 use rand::Rng;
+use rand::prelude::SliceRandom;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
@@ -470,9 +471,9 @@ impl Sequence {
 
     pub fn random_valid_motif<R: Rng + ?Sized>(&self, len: usize, rng: &mut R) -> Vec<Bp>{
 
-
         let mot_id: usize = rng.gen_range(0..(self.kmer_nums[len-MIN_BASE]));
         Self::u64_to_kmer(self.kmer_dict[len-MIN_BASE][mot_id], len)
+    
     }
 
 }
@@ -483,6 +484,7 @@ pub struct NullSequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
+    block_sets: Vec<Vec<usize>>,
 }
 
 
@@ -554,11 +556,14 @@ impl NullSequence {
 
         }
 
+        let block_sets = Self::assign_block_sets(&block_ls);
+
         let seq = NullSequence {
                     seq_blocks: seq_bls,
                     block_u8_starts: block_is,
                     block_lens: block_ls,
                     max_len: max_len,
+                    block_sets: block_sets,
                     };
 
         seq
@@ -586,11 +591,15 @@ impl NullSequence {
 
         let max_len: usize = *block_lens.iter().max().unwrap();
     
+        let block_sets = Self::assign_block_sets(&block_lens);
+
+
         NullSequence{
                     seq_blocks: seq_blocks,
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
                     max_len: max_len,
+                    block_sets: block_sets,
         }
 
     }
@@ -684,6 +693,7 @@ impl NullSequence {
                     current_block_set.push(next_block);
                     block_set_len += next_len;
                     if block_set_len == target_len {
+                        block_sets.push(current_block_set);
                         largest_counted += 1;
                         break;
                     }
@@ -706,24 +716,15 @@ impl NullSequence {
         let block_sets_len = block_sets.len();
 
         //SAFETY: We guarenteed that block_sets has at least three elements by this point
-        let len_penultimate = unsafe{ block_sets.get_unchecked(block_sets_len-2).iter().map(|&a| block_lens[a]).sum()};
-        let len_final = unsafe{ block_sets.get_unchecked(block_sets_len-1).iter().map(|&a| block_lens[a]).sum()};
+        let len_penultimate: usize = unsafe{ block_sets.get_unchecked(block_sets_len-2).iter().map(|&a| block_lens[a]).sum()};
+        let len_final: usize = unsafe{ block_sets.get_unchecked(block_sets_len-1).iter().map(|&a| block_lens[a]).sum()};
 
         let len_total = len_final+len_penultimate;
 
-        //Note: it still needs to be block_sets_len-2, not -1, because we didn't update that number
-        if len_total <= target_len {
-            let mut last_elem = unsafe{ block_sets.pop().unwrap_unchecked()};
-            unsafe{block_sets.get_unchecked_mut(block_sets_len-2).append(&mut last_elem)};
-            return block_sets;
-        }
 
-        let diff_pen = if target_len < len_penultimate { len_penultimate-target_len} else {target_len-len_penultimate};
-        let diff_fin = if target_len < len_final { len_final-target_len} else {target_len-len_final};
 
-        let diff_total = len_total-target_len;
-
-        if diff_total <= (diff_pen+diff_fin) {
+        //This inequality is equivalent to "len_final+len_penultimate is closer to the target len than the individual lens are"
+        if len_total <= (3*target_len)/2 {
             let mut last_elem = unsafe{block_sets.pop().unwrap_unchecked()};
             unsafe{block_sets.get_unchecked_mut(block_sets_len-2).append(&mut last_elem);}
         }
@@ -732,6 +733,10 @@ impl NullSequence {
 
     }
 
+    //Panics: If there are no sequence blocks, and thus self.block_sets is empty
+    pub fn yield_random_block_set<R: Rng + ?Sized>(&self, rng: &mut R) -> &Vec<usize> {
+        self.block_sets.choose(rng).unwrap()
+    }
     //Regular reader functions
 
     //This can TECHNICALLY panic in debug mode and produce incorrect answers 
@@ -884,6 +889,8 @@ mod tests {
 
         let thresh: usize = 3;
 
+        let mut rng = rand::thread_rng();
+
         for b_l in MIN_BASE..=MAX_BASE {
 
             let mot = sequence.return_bases(0, 0, b_l);
@@ -915,7 +922,7 @@ mod tests {
 
             for _ in 0..100 {
 
-                let mot2 = sequence.random_valid_motif(b_l);
+                let mot2 = sequence.random_valid_motif(b_l, &mut rng);
                 
                 let neighbors = sequence.number_kmer_reextends(&mot2);
 
@@ -956,6 +963,66 @@ mod tests {
 
         println!("{:?}", NullSequence::assign_block_sets(&theoretical_blocks));
 
+        let mut rng = rand::thread_rng();
+
+        for j in 0..100 {
+
+
+            let random_block_size = rng.gen_range(5..70);
+
+            let random_blocks: Vec<usize> = (0..random_block_size).map(|_| rng.gen_range(7000..200000)).collect();
+
+            let max_size = *random_blocks.iter().max().unwrap();
+
+            let block_sets = NullSequence::assign_block_sets(&random_blocks);
+
+            let mut spotted: Vec<u8> = vec![0;random_block_size];
+
+            assert!(block_sets[0].len() == 1);
+            assert!(random_blocks[block_sets[0][0]] == max_size, "block size {} max size {}", random_blocks[block_sets[0][0]], max_size);
+
+            spotted[block_sets[0][0]] +=1;
+
+            if block_sets.len() > 2 {
+                for i in 1..(block_sets.len()-1) {
+                    assert!(block_sets[i].iter().map(|&a| {
+                        let id = random_blocks[a];
+                        spotted[a] += 1;
+                        id}).sum::<usize>() <= max_size);
+                }
+            }
+            let final_size = block_sets.last().unwrap().iter().map(|&a|{
+                let id = random_blocks[a];
+                spotted[a] +=1;
+                id}).sum::<usize>();
+
+            if block_sets.len() > 2 {
+                assert!(final_size <= (3*max_size)/2);
+
+                if final_size < max_size {
+
+                    let penultimate_size = block_sets[block_sets.len()-2].iter().map(|&a|{
+                        let id = random_blocks[a];
+                        id}).sum::<usize>();
+
+                    assert!((final_size+penultimate_size) > (3*max_size)/2);
+                    println!("asserted no merger");
+                } else {
+                    println!("asserted merger");
+                }
+
+            }
+
+            let mut ordered_lens: Vec<(usize, usize)> =
+                random_blocks.iter().enumerate().map(|(a, &b)| (a,b)).collect();
+
+            ordered_lens.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+
+
+            assert!(spotted.iter().all(|&a| a == 1), "Some failures {:?}.\nOriginal blocks {:?}\nBlock sets {:?}, ordered_lens {:?}", spotted.iter().enumerate().filter(|(_,&b)| b !=1).map(|a| a.0).collect::<Vec<_>>(), random_blocks, block_sets, ordered_lens);
+
+            println!("Passed {j}: {:?}", block_sets);
+        }
 
 
     }

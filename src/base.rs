@@ -3517,7 +3517,7 @@ impl<'a> SetTrace<'a> {
         //                            distances_per_attempted_move
 
 
-        let (set_to_add, movement_tracker) = match potential_set_and_accept {
+        let (mut set_to_add, movement_tracker) = match potential_set_and_accept {
             None => (self.active_set.clone(), None),
             Some((mut actual_set, accept)) => {
                 let tracked = self.active_set.measure_movement(&mut actual_set);
@@ -3531,15 +3531,24 @@ impl<'a> SetTrace<'a> {
             tracker.document_motion(total_id, movement_tracker).expect("We only track the proper moves");
         };
 
+
         self.sparse_count = (self.sparse_count+1) % self.sparse;
 
         if self.sparse_count == 0 {
 
             //This order INCLUDES the last possible motif set
             //and specifically EXCLUDES the initial state
-            self.trace.push(StrippedMotifSet::from(&set_to_add));
+
+            //We include this pre processing step because we want the ln posteriors to avoid any selection pitfalls
+            //Remember: we post process based on the maximum posterior estimate
+            let (full_set, _) = set_to_add.set_with_new_attention((0..self.data_ref.null_seq().num_sequence_blocks()).collect::<Vec<usize>>());
+            self.trace.push(StrippedMotifSet::from(&full_set));
         }
 
+
+        //NOTE: we do NOT include this in the actual acceptance steps on purpose.
+        //      The motif finder must randomly choose which null sequence it's going to pay attention to for sampling
+        set_to_add.change_set_attention(self.data_ref.null_seq().yield_random_block_set(rng).clone());
 
         self.active_set = set_to_add;
 
@@ -3565,9 +3574,11 @@ impl<'a> SetTrace<'a> {
 
             //This order INCLUDES the last possible motif set
             //and specifically EXCLUDES the initial state
-            self.trace.push(StrippedMotifSet::from(&set));
+            let (full_set, _) = set.set_with_new_attention((0..self.data_ref.null_seq().num_sequence_blocks()).collect::<Vec<usize>>());
+            self.trace.push(StrippedMotifSet::from(&full_set));
         }
 
+        set.change_set_attention(self.data_ref.null_seq().yield_random_block_set(rng).clone());
         self.active_set = set;
 
     }
@@ -4268,23 +4279,25 @@ impl<'a> TemperSetTraces<'a> {
 
         println!("begin");
 
-        let mut num_intermediate_traces = num_intermediate_traces;
 
         let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
 
-        let null_block_groups: Vec<Vec<usize>> = if (num_null_blocks >= (num_intermediate_traces+2)){
+        let num_traces = num_intermediate_traces+2;
+
+        /*let null_block_groups: Vec<Vec<usize>> = if (num_null_blocks >= (num_intermediate_traces+2)){
             let mut null_b_g = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
             for i in 0..num_null_blocks { null_b_g[i % (num_intermediate_traces+2)].push(i); } 
             null_b_g
         } else {
             let number_splits = num_null_blocks*((num_intermediate_traces+2)/num_null_blocks);
             (0..number_splits).map(|i| vec![i % num_null_blocks]).collect()
-        };
+        };*/
 
         //I always want my intermediate states to be even, because I want to be able to try to swap everybody at once
         //So I always want to randomly 
-        let mut thermos = vec![1_f64; null_block_groups.len()];
+        let mut thermos = vec![1_f64; num_traces];
 
+        let null_block_groups: Vec<Vec<usize>> = (0..(num_intermediate_traces+2)).map(|_| data_ref.null_seq().yield_random_block_set(rng).clone()).collect();
 
         //let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
@@ -4297,13 +4310,12 @@ impl<'a> TemperSetTraces<'a> {
        // for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
 
 
-        println!("nullblock {:?}", null_block_groups);
         let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
 
         *thermos.last_mut().expect("thermos always has elements") = min_thermo_beta;
 
         //TODO: check that this DOES produce a linear decrease in thermodynamic beta
-        for i in 1..(null_block_groups.len()-1) {
+        for i in 1..(num_traces-1) {
             thermos[i] = 1_f64-(i as f64)*thermo_step
         }
 
@@ -4342,8 +4354,6 @@ impl<'a> TemperSetTraces<'a> {
 
 
 
-        let _rng = rng_maker();
-         
         for _i in 0..iters_before_swaps {
        
             //self.do_shuffles(1, &mut rng);
@@ -4378,7 +4388,7 @@ impl<'a> TemperSetTraces<'a> {
         //ALL of the negative sequence
         //if self.parallel_traces.len() >= 4  {
             //let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| {//} 
-            let even_attention_swaps: Vec<(_, bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
+            /*let even_attention_swaps: Vec<(_, bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
                 let mut rng = rng_maker();
@@ -4400,7 +4410,7 @@ impl<'a> TemperSetTraces<'a> {
             }).collect();
 
             println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        //}
+        //}*/
                 
 
         println!("Ln posteriors of each trace before swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
@@ -4443,7 +4453,9 @@ impl<'a> TemperSetTraces<'a> {
        
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 
-        if self.parallel_traces.len() >= 3  {
+        println!("Current attentions {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.current_attention()).collect::<Vec<_>>());
+
+        /*if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<(_, bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
@@ -4466,7 +4478,7 @@ impl<'a> TemperSetTraces<'a> {
             }).collect();
 
             println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        }
+        }*/
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
