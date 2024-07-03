@@ -98,7 +98,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
-pub const CAPACITY_FOR_NULL: usize = 100;
+pub const CAPACITY_FOR_NULL: usize = 10;
 
 /*
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
@@ -1686,7 +1686,10 @@ impl Motif {
         if bind_scores.len() > CAPACITY_FOR_NULL {
             _ = bind_scores.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             
+
         }
+
+
         bind_scores
 
     }
@@ -3541,14 +3544,15 @@ impl<'a> SetTrace<'a> {
 
             //We include this pre processing step because we want the ln posteriors to avoid any selection pitfalls
             //Remember: we post process based on the maximum posterior estimate
-            let (full_set, _) = set_to_add.set_with_new_attention((0..self.data_ref.null_seq().num_sequence_blocks()).collect::<Vec<usize>>());
-            self.trace.push(StrippedMotifSet::from(&full_set));
+            //let (full_set, _) = set_to_add.set_with_new_attention((0..self.data_ref.null_seq().num_sequence_blocks()).collect::<Vec<usize>>());
+            //self.trace.push(StrippedMotifSet::from(&full_set));
+            self.trace.push(StrippedMotifSet::from(&set_to_add));
         }
 
 
         //NOTE: we do NOT include this in the actual acceptance steps on purpose.
         //      The motif finder must randomly choose which null sequence it's going to pay attention to for sampling
-        set_to_add.change_set_attention(self.data_ref.null_seq().yield_random_block_set(rng).clone());
+        //set_to_add.change_set_attention(self.data_ref.null_seq().yield_random_block_set(rng).clone());
 
         self.active_set = set_to_add;
 
@@ -4297,11 +4301,11 @@ impl<'a> TemperSetTraces<'a> {
         //So I always want to randomly 
         let mut thermos = vec![1_f64; num_traces];
 
-        let null_block_groups: Vec<Vec<usize>> = (0..(num_intermediate_traces+2)).map(|_| data_ref.null_seq().yield_random_block_set(rng).clone()).collect();
+        //let null_block_groups: Vec<Vec<usize>> = (0..(num_intermediate_traces+2)).map(|_| data_ref.null_seq().yield_random_block_set(rng).clone()).collect();
 
         //let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
-        //let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
+        let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
 
         //null_block_groups[0] = (0..num_null_blocks).collect();
 
@@ -4373,7 +4377,7 @@ impl<'a> TemperSetTraces<'a> {
         
         for j in 0..self.parallel_traces.len(){
             for (i, motif) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
-            let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls);
+            let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height()).exp2()).collect::<Vec<f64>>();
             if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
             //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
