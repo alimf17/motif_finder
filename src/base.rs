@@ -98,7 +98,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
-pub const CAPACITY_FOR_NULL: usize = 10;
+pub const CAPACITY_FOR_NULL: usize = 200;
 
 /*
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
@@ -134,7 +134,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 1.0;
+pub const MIN_HEIGHT: f64 = 2.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -167,7 +167,7 @@ const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const SCALE_SDS: [f64; 3] = [0.5, 1.0, 10.0];
+const SCALE_SDS: [f64; 3] = [1.0, 10.0, 50.0];
 
 const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 
@@ -195,7 +195,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
 //This controls how much shuffling we do for the secondary base shuffling move
 //Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
 //4^SHUFFLE_BASES PWMs
-const SHUFFLE_BASES: usize = 4;
+const SHUFFLE_BASES: usize = 5;
 
 //const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
@@ -2741,7 +2741,7 @@ impl<'a> MotifSet<'a> {
             //If YOU have a way to invert (n choose k)*4^(k-n), be my guest. 
             let threshold = if current_mot.len() < 10 {2} else { current_mot.len()/2-2}; 
 
-            let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold);
+            let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&current_mot.best_motif(), threshold+1);
 
             let ids_cartesian_bools = if PROB_POS_PEAK == 1.0 {
                 kmer_ids.into_iter().map(|k| (k, false)).collect::<Vec<_>>()
