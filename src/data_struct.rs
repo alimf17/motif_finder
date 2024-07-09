@@ -492,13 +492,13 @@ impl AllData {
         }
 
        
-        let mut dat = Data::new(refined_locs_data.iter().map(|&(_, a)| a).collect::<Vec<f64>>());
+        let mut dat_off = Data::new(refined_locs_data.iter().map(|&(_, a)| a).collect::<Vec<f64>>());
 
-        let median = dat.median();
+        let median = dat_off.median();
 
-        dat = Data::new(refined_locs_data.iter().map(|&(_, a)| (a-median).abs()).collect::<Vec<f64>>());
+        dat_off = Data::new(refined_locs_data.iter().map(|&(_, a)| (a-median).abs()).collect::<Vec<f64>>());
 
-        let mad_adjust = dat.median()*MAD_ADJUSTER;
+        let mad_adjust = dat_off.median()*MAD_ADJUSTER;
         println!("rough sd is {}", mad_adjust);
 
         for (_, dat) in refined_locs_data.iter_mut() {
@@ -602,7 +602,7 @@ impl AllData {
             peak_scale = peak_scale.abs();
         }
 
-        let peak_thresh = 1.41421356237*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = std::f64::consts::SQRT_2*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
 
@@ -618,7 +618,7 @@ impl AllData {
             //Even though I only match positive peaks, I match on b.abs() because it lets me
             //make stronger assumptions about any data NOT included in the actual inference
             let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
-   
+  
 
             let mut next_ar_ind = 0_usize;
             let mut curr_data_start: usize;

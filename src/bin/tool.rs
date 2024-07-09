@@ -55,7 +55,7 @@ fn main() {
     //   If they're not identical, the program will panic on the spot
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 11 {
+    if args.len() < 12 {
         panic!("Not enough arguments!");
     }
 
@@ -84,9 +84,16 @@ fn main() {
     }
     println!("post min {min_thermo_beta}");
 
+    let credibility: f64 = args[11].parse().expect("We need to know how much to punish additional motifs!");
+
+    println!("c {credibility}");
+    if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
+    //SAFETY: This modification is made before any inference is done, preventing data races
+    unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
+
     let default_burn: usize = 10;
 
-    let (burn_in_after_swap,value): (usize, bool) = match args.get(11) {
+    let (burn_in_after_swap,value): (usize, bool) = match args.get(12) {
         None => (default_burn, false),
         Some(burn) => match burn.parse::<usize>(){
             Err(_) => (default_burn, false), 
@@ -95,7 +102,7 @@ fn main() {
     };
 
 
-    let base_check_index: usize = if value {12} else {11};
+    let base_check_index: usize = if value {13} else {12};
     let mut init_check_index: usize = base_check_index+1;
 
 
@@ -122,6 +129,8 @@ fn main() {
             },
     };
 
+    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+    DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args parsed");
 

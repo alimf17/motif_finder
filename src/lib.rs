@@ -13,9 +13,9 @@ use statrs::distribution::Normal;
 
 pub const NULL_CHAR: Option<char> = None;
 
-pub static MOMENTUM_SD: RwLock<f64> = RwLock::new(11.0);
+//pub static MOMENTUM_SD: RwLock<f64> = RwLock::new(11.0);
 //static MOMENTUM_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
-pub static MOMENTUM_DIST: OnceCell<Normal> = OnceCell::new();//Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
+//pub static MOMENTUM_DIST: OnceCell<Normal> = OnceCell::new();//Lazy::new(|| Normal::new(0.0, MOMENTUM_SD).unwrap() );
 
 pub const NUM_CHECKPOINT_FILES: usize = 25;
 
