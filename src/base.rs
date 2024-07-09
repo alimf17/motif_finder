@@ -2718,7 +2718,7 @@ impl<'a> MotifSet<'a> {
 
 
     //MOVE TO CALL
-    pub fn base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Self {
+    pub fn base_leap<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
@@ -2753,7 +2753,8 @@ impl<'a> MotifSet<'a> {
                 //let likes_and_mots: Vec<(f64, Self)> = ids_cartesian_bools.clone().into_iter().map(|a| {//}
                 let mut to_add = base_set.clone();
                 let add_mot = current_mot.scramble_by_id_to_valid(a.0, a.1, self.data_ref.data().seq());
-                let lnlike = to_add.insert_motif(add_mot, id);
+                //The REAL ln_posterior is different from the ln_posterior we use to select a motif, because that needs a thermodynamic beta to alter it
+                let lnlike = to_add.insert_motif(add_mot, id)*thermo_beta;
                 (lnlike, to_add)
             }).collect();
 
@@ -2787,7 +2788,7 @@ impl<'a> MotifSet<'a> {
 
     }
     
-    pub fn secondary_shuffle<R: Rng + ?Sized>(&self, rng: &mut R) -> Self {
+    pub fn secondary_shuffle<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
@@ -2809,7 +2810,7 @@ impl<'a> MotifSet<'a> {
 
             let likes_and_mots: Vec<(f64, Self)> = mots.into_par_iter().map(|a| {
                 let mut to_add = base_set.clone();
-                let lnlike = to_add.insert_motif(a, id);
+                let lnlike = to_add.insert_motif(a, id)*thermo_beta;
                 (lnlike, to_add)
             }).collect();
 
@@ -3494,8 +3495,8 @@ impl<'a> SetTrace<'a> {
                 })
             },
             3 => self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng),
-            4 => Some((self.active_set.base_leap(rng), true)),
-            5 => Some((self.active_set.secondary_shuffle(rng), true)),
+            4 => Some((self.active_set.base_leap(self.thermo_beta, rng), true)),
+            5 => Some((self.active_set.secondary_shuffle(self.thermo_beta, rng), true)),
             6 => {
                 let scale_s = SCALE_SDS[which_variant];
                 self.active_set.propose_scale_base_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| { 
@@ -3562,8 +3563,8 @@ impl<'a> SetTrace<'a> {
     pub fn advance_only_shuffles<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, do_base_leap: bool, rng: &mut R) {
 
         let mut set = match do_base_leap {
-            true => self.active_set.base_leap(rng),
-            false => self.active_set.secondary_shuffle(rng),
+            true => self.active_set.base_leap(self.thermo_beta, rng),
+            false => self.active_set.secondary_shuffle(self.thermo_beta, rng),
         };
 
         if let Some(tracker) = track {
@@ -5057,7 +5058,7 @@ mod tester{
         let mot_scram = mot.scramble_by_id_to_valid(id, false, &sequence);
         assert!(mot_scram.peak_height() == mot.peak_height(), "peak height isn't preserved when it should be");
 
-        let leaped = motif_set.base_leap(&mut rng);
+        let leaped = motif_set.base_leap(1.0, &mut rng);
 
         let leap = leaped.get_nth_motif(0);
         let leap1 = leaped.get_nth_motif(1);
@@ -5125,6 +5126,80 @@ mod tester{
         println!("any diff {:?}", any_diffs);
 
         assert!(any_diffs.len() == 0, "waves not lining up"); 
+        
+
+        let shuffed = motif_set.secondary_shuffle(1.0, &mut rng);
+
+        let shuff = shuffed.get_nth_motif(0);
+        let shuff1 = shuffed.get_nth_motif(1);
+
+        assert!(mot.peak_height() == shuff.peak_height(), "zeroth motif height is wrong");
+        assert!(mot1.peak_height() == shuff1.peak_height(), "first motif height is wrong");
+
+        let shuff_kmer = shuff.best_motif();
+        let shuff1_kmer = shuff1.best_motif();
+
+
+        let mut all_scramble_correct = true;
+        for base in 0..mot.len() {
+            let best_old = mot_kmer[base];
+            for bp in BP_ARRAY {
+                if bp == best_old {
+                    all_scramble_correct &= shuff.pwm[base][bp] == mot.pwm[base][bp];
+                } 
+            }
+
+        }
+
+        assert!(all_scramble_correct, "zeroth motif not correctly shuffed");
+
+        let mut all_scramble_correct = true;
+        for base in 0..mot1.len() {
+            let best_old = mot1_kmer[base];
+            for bp in BP_ARRAY {
+                if bp == best_old {
+                    all_scramble_correct &= shuff1.pwm[base][bp] == mot1.pwm[base][bp];
+                } 
+            }
+
+        }
+
+        assert!(all_scramble_correct, "first motif not correctly shuffed");
+
+        let mut alt_shuffed = shuffed.clone();
+        alt_shuffed.ln_post = None;
+        let ln_post = alt_shuffed.ln_posterior();
+
+        println!("{ln_post}, {}", shuffed.ln_post.unwrap());
+        println!("diff ln_post {}", ln_post-shuffed.ln_post.unwrap());
+
+        assert!((ln_post-shuffed.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
+
+        let recalced_signal = shuffed.recalced_signal();
+
+        let sig_diff = &shuffed.signal-&recalced_signal;
+
+        let pre_diffs: Vec<(usize, f64)> = sig_diff.raw_wave().iter().enumerate().filter(|(_, a)| a.abs() > 64.0*std::f64::EPSILON).map(|(i,a)| (i, *a)).collect();
+
+        let any_diffs: Vec<f64> = pre_diffs.iter().map(|(_,a)| *a).collect();
+
+        let any_diff_inds: Vec<usize> = pre_diffs.iter().map(|(i,_)| *i).collect();
+
+        println!("any diff {:?}", any_diffs);
+
+        println!("Any diff inds {:?}", any_diff_inds);
+
+        let signal_remaining = any_diff_inds.iter().map(|&a| shuffed.signal.raw_wave()[a]).collect::<Vec<_>>();
+
+        println!("sig {:?}", signal_remaining);
+
+        let no_forgive_diffs = any_diffs.into_iter().zip(signal_remaining.into_iter()).filter(|(a, b)| (a/b).abs() > std::f64::EPSILON).collect::<Vec<_>>();
+
+        println!("mot set a {:?}\n mot set b {:?}", motif_set, shuffed);
+
+        println!("unforgiven {:?}", no_forgive_diffs);
+
+        assert!(no_forgive_diffs.len() == 0, "waves not lining up"); 
     }
 
     #[test]
