@@ -83,17 +83,21 @@ fn main() {
         min_thermo_beta = 1.0/min_thermo_beta;
     }
     println!("post min {min_thermo_beta}");
-    
-    let mut check_for_init: bool = true;
-    let base_check_index: usize = 11;
+
+    let default_burn: usize = 10;
+
+    let (burn_in_after_swap,value): (usize, bool) = match args.get(11) {
+        None => (default_burn, false),
+        Some(burn) => match burn.parse::<usize>(){
+            Err(_) => (default_burn, false), 
+            Ok(burning) => (burning, true),
+        },
+    };
+
+
+    let base_check_index: usize = if value {12} else {11};
     let mut init_check_index: usize = base_check_index+1;
 
-    while check_for_init {
-        match args.get(init_check_index) {
-            None => check_for_init = false,
-            Some(x) => if x.parse::<f64>().is_ok() { init_check_index += 1;} else {check_for_init = false;},
-        };
-    }
 
     //By the end of this block, init_check_index holds the index where we check what type of
     //initial condition we have, if any. If this is larger than base_check_index, then we have arguments to parse
@@ -102,73 +106,22 @@ fn main() {
 
     let mut peak_cutoff: Option<f64> = None;
 
-    let _initialize_func = |a: &f64| { SymmetricBaseDirichlet::new(*a).unwrap() };
     let run_name;
-    if init_check_index > base_check_index {
-        peak_cutoff = args[base_check_index].parse().ok();
-        run_name = match peak_cutoff{
-            None => {
+    peak_cutoff = args[base_check_index].parse().ok();
+    run_name = match peak_cutoff{
+        None => {
+            peak_cutoff = None;
+            args[1].clone()
+        },
+        Some(a) => 
+            if a == 1.0 { 
                 peak_cutoff = None;
                 args[1].clone()
+            } else{
+                format!("{}_custom_scale_{}", args[1].as_str(), args[9])
             },
-            Some(a) => 
-                if a == 1.0 { 
-                    peak_cutoff = None;
-                    args[1].clone()
-                } else{
-                    format!("{}_custom_scale_{}", args[1].as_str(), args[9])
-                },
-        };
-    } else {
-        run_name = args[1].clone();
-    }
-    if init_check_index > base_check_index+1 { 
-        let extend_alpha: f64 = args[base_check_index+1].parse().expect("We already checked that this parsed to f64");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        println!("e {extend_alpha}");
-        if !(extend_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
-        //let mut w = PROPOSE_EXTEND.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        //*w = Lazy::new(|&extend_alpha| SymmetricBaseDirichlet::new(extend_alpha.clone()).unwrap());
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(extend_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
-    } else {
+    };
 
-        //Changed this from 10.0 because extensions not working well
-        PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
-    }
-    if init_check_index > base_check_index+2 { 
-        let pwm_alpha: f64 = args[base_check_index+2].parse().expect("We already checked that this parsed to f64");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        println!("p {pwm_alpha}");
-        if !(pwm_alpha > 0.0) {panic!("Dirichlet alpha must be a valid strictly positive float");} 
-        //SAFETY: This modification is made before any inference is done, preventing data races
-        //let mut w = DIRICHLET_PWM.write().expect("This is the only thread accessing this to write, and the mutable reference goes out of scope immediately");
-        //*w = Lazy::new(|| SymmetricBaseDirichlet::new(pwm_alpha).unwrap());
-
-        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(pwm_alpha).expect("checked parameter validity already")).expect("Nothing should have written to this before now");
-    } else {
-
-        //Changed this from 10.0 because I'm worried that new PWMs are too promiscuous
-        DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
-    }
-
-
-   
-    if init_check_index > base_check_index+3 { 
-        let threshold: f64 = args[base_check_index+3].parse().expect("We already checked that this parsed to f64");
-        println!("t {threshold}");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        if !(threshold > 0.0) || (threshold >= 1.0) {panic!("Peak drawing threshold must be a valid strictly positive float strictly less than 1.0");} 
-        //SAFETY: This modification is made before any inference is done, preventing data races
-        unsafe { THRESH = threshold; }
-    }
-    if init_check_index > base_check_index+4 { 
-        let credibility: f64 = args[base_check_index+4].parse().expect("We already checked that this parsed to f64");
-        //I wrote the condition as follows in case an argument is passed in that makes this a NaN
-        println!("c {credibility}");
-        if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");} 
-        //SAFETY: This modification is made before any inference is done, preventing data races
-        unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
-    }
 
     println!("Args parsed");
 
@@ -193,7 +146,7 @@ fn main() {
 
 
     let mut rng = rand::thread_rng();
-    
+
     let check: Option<(&str, &str)> = match args.get(init_check_index) { 
         Some(x) => { 
             match args.get(init_check_index+1) {
@@ -245,7 +198,7 @@ fn main() {
 
     println!("initialized");
     //run MCMC and make sure that I'm saving and clearing periodically
-    
+
 
     let _track_hmc: usize = 0;
 
@@ -254,34 +207,34 @@ fn main() {
     //for step in 0..10000 {
 
     let pushes = num_advances/steps_per_exchange_attempt + ((num_advances % steps_per_exchange_attempt) > 0) as usize;
- 
+
     for step in 0..pushes {
 
         println!("push {step}");
-        initialization_chains.iter_and_swap(10, steps_per_exchange_attempt, rand::thread_rng);
+        initialization_chains.iter_and_swap(50, steps_per_exchange_attempt, burn_in_after_swap, rand::thread_rng);
 
         if step % 5 == 0 {
 
             initialization_chains.print_acceptances(TrackingOptions::TrackAllTraces);
 
-      //  }
-      //  if ((step+1) % 5 == 0) || (step+1 == pushes) {
-        
-            let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
+            //  }
+            //  if ((step+1) % 5 == 0) || (step+1 == pushes) {
 
-            let num_bins: usize = 100;
+        let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
 
-            initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
-            
-            initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
+        let num_bins: usize = 100;
 
-        }
+        initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
+
+        initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
+
+            }
 
     }
 
     println!("Finished run in {:?}", start_inference_time.elapsed());
 
-  
+
 
 
 }
