@@ -195,7 +195,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
 //This controls how much shuffling we do for the secondary base shuffling move
 //Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
 //4^SHUFFLE_BASES PWMs
-const SHUFFLE_BASES: usize = 5;
+const SHUFFLE_BASES: usize = 4;
 
 //const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
@@ -4416,9 +4416,51 @@ impl<'a> TemperSetTraces<'a> {
             println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
         //}*/
                 
-
         println!("Ln posteriors of each trace before swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
 
+        /*
+
+                let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
+            let (c, d) = x.split_at_mut(1);
+            let (a, b) = (&mut c[0], &mut d[0]);
+            let mut rng = rng_maker();
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            if accept_swap {
+                //let tmp = a[0].0.active_set;
+                //a[0].0.active_set = a[1].0.active_set;
+                //a[1].0.active_set = tmp;
+                std::mem::swap(&mut a.0.active_set, &mut b.0.active_set);
+            }
+            ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+        }).collect();
+
+        println!("Odd swaps: {:?}", odd_swaps);
+
+
+        let even_swaps: Vec<([f64;2], bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| {
+            let (c, d) = x.split_at_mut(1);
+            let (a, b) = (&mut c[0], &mut d[0]);
+            let mut rng = rng_maker();
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            if accept_swap {
+                //let tmp = a[0].0.active_set;
+                //a[0].0.active_set = a[1].0.active_set;
+                //a[1].0.active_set = tmp;
+                std::mem::swap(&mut a.0.active_set, &mut b.0.active_set);
+            }
+            ([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
+        }).collect();
+
+        println!("Even swaps: {:?}", even_swaps);
+
+        println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
+
+        println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
+
+        println!("Current attentions {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.current_attention()).collect::<Vec<_>>());
+
+        */
+        
         let mut rng = rng_maker();
 
         let swap_odd: bool = rng.gen();
@@ -4464,8 +4506,8 @@ impl<'a> TemperSetTraces<'a> {
             }
         }
 
-    
 
+        println!("Ln posteriors of each trace after swaps and cool down: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
         
         /*if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<(_, bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
