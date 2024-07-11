@@ -201,6 +201,52 @@ fn main() {
 
     println!("pre initial");
 
+
+
+    //pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, null_attention: Vec<usize>, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
+
+
+    let pushes = num_advances/steps_per_exchange_attempt + ((num_advances % steps_per_exchange_attempt) > 0) as usize;
+
+    let mut track: [MoveTracker; 3] = core::array::from_fn(|_| MoveTracker::new(num_advances/12));
+
+    let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
+    
+    let hist_names: [String; 3] = ["beta_1_samples", "beta_alternative", "beta_1_equilibrating"].into_iter().map(|a| format!("{}_{}", &root_signal, a)).collect::<Vec<_>>().try_into().unwrap();
+
+    let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
+
+    let mut trace = SetTrace::new_trace(capacity, maybe_init, data_string, &data_ref, 1.0, (0..num_null_blocks).collect(), None, &mut rng);
+
+    let num_bins: usize = 100;
+
+    let start_inference_time = Instant::now();
+
+    for step in 0..pushes {
+    
+        trace.serially_temper(min_thermo_beta, &mut track, steps_per_exchange_attempt, burn_in_after_swap, &mut rng);
+
+        //tracking_arg stops being valid here
+
+        println!("Step {step} motif lengths: {:?}", trace.active_set_motif_lens());
+        println!("Step {step} motif heights: {:?}", trace.active_set_peak_heights());
+
+        if step % 5 == 0 {
+            println!("Acceptances for thermo_beta = 1.0 when sampling");
+            track[0].give_status();
+            track[0].all_move_hists(&hist_names[0], num_bins);
+            println!("Acceptances for thermo_beta = {min_thermo_beta}");
+            track[1].give_status();
+            track[1].all_move_hists(&hist_names[1], num_bins);
+            println!("Acceptances for thermo_beta = 1.0 when relaxing");
+            track[2].give_status();
+            track[2].all_move_hists(&hist_names[2], num_bins);
+        }
+
+    }
+
+
+/*
     let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, data_string, &data_ref, maybe_init, None, &mut rng).unwrap();
 
 
@@ -239,7 +285,7 @@ fn main() {
 
             }
 
-    }
+    } */
 
     println!("Finished run in {:?}", start_inference_time.elapsed());
 

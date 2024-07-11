@@ -3562,6 +3562,43 @@ impl<'a> SetTrace<'a> {
 
     }
 
+    pub fn serially_temper<R: Rng+?Sized>(&mut self, alter_beta: f64, track: &mut [MoveTracker; 3], steps_to_track: usize, steps_to_equilibrate: usize, rng: &mut R) {
+
+        self.thermo_beta = 1.0;
+
+        //This guarentees that our alter_beta is nonnegative and less than 1.0
+        //Note that, at least on x86, this compiles to basically two pieces of bitmath, as it should
+        let alter_beta_b = (-alter_beta.abs().ln().abs()).exp();
+
+        for _ in 0..steps_to_track {
+            self.advance(Some(&mut track[0]), false, rng);
+        }
+
+        println!("Beta = 1.0 when we're sampling: final Ln posterior {}", self.active_set.ln_posterior());
+
+
+        self.thermo_beta = alter_beta_b;
+
+        for _ in 0..(2*steps_to_equilibrate) {
+
+            self.advance(Some(&mut track[1]), true, rng)
+        }
+
+        println!("Beta = {alter_beta} when we're tempering. Final Ln posterior {}", self.active_set.ln_posterior());
+
+
+        self.thermo_beta = 1.0;
+
+        for _ in 0..steps_to_equilibrate {
+            self.advance(Some(&mut track[2]), true, rng)
+        }
+
+        println!("Beta = 1.0 when we're equilibrating. Final Ln posterior {}", self.active_set.ln_posterior());
+
+
+
+    }
+
     pub fn advance_only_shuffles<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, do_base_leap: bool, burning_in: bool, rng: &mut R) {
 
         let mut set = match do_base_leap {
@@ -3766,6 +3803,14 @@ impl<'a> SetTrace<'a> {
 
         current_active.save_set_trace_and_sub_traces(self.data_ref, output_dir, &file_name);
 
+    }
+
+    pub fn active_set_motif_lens(&self) -> Vec<usize> {
+        self.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>()
+    }
+
+    pub fn active_set_peak_heights(&self) -> Vec<f64> {
+        self.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>()
     }
 
 
@@ -4146,7 +4191,7 @@ impl MoveTracker {
 
     }
 
-    fn all_move_hists(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
+    pub fn all_move_hists(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
         
         let v: Vec<String> = (0..NUM_MOVES).map(|i|
                                                 {
