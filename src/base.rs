@@ -174,7 +174,7 @@ const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+6;
 const VARIANT_NUMS: [usize; 8] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, HEIGHT_SDS.len(), HEIGHT_SDS.len()]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 1, 5, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 8]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -3574,26 +3574,42 @@ impl<'a> SetTrace<'a> {
             self.advance(Some(&mut track[0]), false, rng);
         }
 
-        println!("Beta = 1.0 when we're sampling: final Ln posterior {}", self.active_set.ln_posterior());
+        let cooldown_target = self.active_set.ln_posterior();
+
+        println!("Beta = 1.0 when we're sampling: final Ln posterior {}", cooldown_target);
 
 
         self.thermo_beta = alter_beta_b;
 
         for _ in 0..(2*steps_to_equilibrate) {
-
-            self.advance(Some(&mut track[1]), true, rng)
+            self.advance(Some(&mut track[1]), true, rng);
         }
 
         println!("Beta = {alter_beta} when we're tempering. Final Ln posterior {}", self.active_set.ln_posterior());
 
+        self.thermo_beta = 10000.0;
+
+        for _ in 0..steps_to_equilibrate{
+            self.advance(Some(&mut track[1]), true, rng);
+        }
+
+        println!("Beta = 10000.0. Final Ln posterior {}", self.active_set.ln_posterior());
 
         self.thermo_beta = 1.0;
 
+        let mut check_like = -f64::INFINITY;
+
+        let mut number_iter: usize = 0;
+
         for _ in 0..steps_to_equilibrate {
-            self.advance(Some(&mut track[2]), true, rng)
+        //while check_like < cooldown_target {
+            self.advance(Some(&mut track[2]), true, rng);
+            number_iter += 1;
+            check_like = self.active_set.ln_posterior();
+        //}
         }
 
-        println!("Beta = 1.0 when we're equilibrating. Final Ln posterior {}", self.active_set.ln_posterior());
+        println!("Beta = 1.0 when we're equilibrating. Iters to cool {number_iter}.  Final Ln posterior {}", self.active_set.ln_posterior());
 
 
 
