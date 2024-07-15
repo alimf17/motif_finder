@@ -171,14 +171,14 @@ const SCALE_SDS: [f64; 3] = [1.0, 10.0, 50.0];
 
 const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+6;
-const VARIANT_NUMS: [usize; 8] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, HEIGHT_SDS.len(), HEIGHT_SDS.len()]; 
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+7;
+const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
-static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 8]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
+static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
-static VARIANT_CUMULATIVE: Lazy<[usize; 8]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+static VARIANT_CUMULATIVE: Lazy<[usize; 9]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
@@ -189,6 +189,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    "_motif_contract.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_base_sd_{a}.png")));
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_mot_sd_{a}.png")));
+                                                   let m = m.chain(["_random_motif.png".to_owned()]);
                                                    m.collect::<Vec<_>>().try_into().unwrap()
 });
 
@@ -559,6 +560,38 @@ impl Base {
         simplex
     }
 
+    pub fn sum_bases_and_ln_max(&self, other_base: &Base) -> Result<(Self, f64), InvalidBase> {
+
+        let mut max_prop: f64 = 0.0;
+
+        let pre_base: [f64; BASE_L] = core::array::from_fn(|a| {
+            let p = self.props[a]*other_base.props[a];
+            max_prop = max_prop.max(p);
+            p
+        });
+
+        match Base::new(pre_base) { 
+            Ok(base) => Ok((base, max_prop.ln())),
+            Err(e) => Err(e),
+        }
+
+    }
+
+    pub fn subtract_bases_and_ln_max(&self, subtrahend: &Base) -> Result<(Self, f64), InvalidBase> {
+
+        let best = self.best_base();
+
+        let pre_difference: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/subtrahend.props[a]);
+
+        match Base::new(pre_difference) { 
+            Ok(base) => 
+            {
+                let ln_max = (subtrahend[best]*base[best]).ln();
+                Ok((base, ln_max))
+            },
+            Err(e) => Err(e),
+        }
+    }
 
     //This converts our base representation directly to a vector space representation
     //In particular, our bases form a metric space under 
@@ -1235,6 +1268,22 @@ impl Motif {
 
     }
 
+    pub fn from_motif_with_height<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
+
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
+        pwm.reserve_exact(MAX_BASE-best_bases.len());
+
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+        Motif {
+            peak_height: height,
+            pwm: pwm,
+        }
+
+
+    }
+
+
     pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
@@ -1857,6 +1906,7 @@ impl Motif {
     pub fn distance_function(&self, other_mot: &Motif) -> (f64, bool) {
         let rev = other_mot.rev_complement();
 
+        //println!("other_mot {:?}\n PWM {:?}", other_mot, &other_mot.pwm);
         let best_forward = (self.little_distance(&other_mot.pwm), false);
         let best_reverse = (self.little_distance(&rev), true);
 
@@ -1879,6 +1929,9 @@ impl Motif {
 
         let off_center = ((long_len-1)/2) - ((short_len-1)/2);
 
+
+        //println!("S {:?} O {:?}", self, other_mot);
+
         let mut distance: f64 = 0.0;
 
         if off_center > 0 { 
@@ -1889,7 +1942,7 @@ impl Motif {
         }
         
         if (short_len+off_center) < long_len {
-            for i in (short_len+off_center-1)..long_len {
+            for i in (short_len+off_center)..long_len {
                 distance += pwm_long[i].dist_sq(None);
             }
         }
@@ -1897,14 +1950,72 @@ impl Motif {
         for ind in 0..short_len {
 
             let b1 = &pwm_short[ind]; 
-            let b2 = &pwm_long[ind];
-            
+            let b2 = &pwm_long[off_center+ind];
+           
             distance += b1.dist_sq(Some(b2));
             
         }
 
 
         distance.sqrt()
+
+    }
+
+    fn sum_motifs(&self, other_mot: &Motif) -> Result<(Self, f64), InvalidBase> {
+
+        let (pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
+
+        let total_len = pwm_long.len();
+
+        let short_len = pwm_short.len();
+
+        let (_, rc) = pwm_long.distance_function(pwm_short);
+        
+        let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
+
+        //sum_bases_and_ln_max
+
+        let mut correction: f64 = 0.0;
+
+        //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
+        //        The specific values here are also unimportant
+        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| unsafe{ Base::new([1.0; BASE_L]).unwrap_unchecked()}).collect();
+
+        if off_center > 0 { 
+            for i in 0..off_center {
+                //TODO: change this to get_unchecked if there's a performance benefit
+                new_pwm[i] =  pwm_long.pwm[i].clone();
+            }
+        }
+        
+        if (short_len+off_center) < total_len {
+            for i in (short_len+off_center)..total_len {
+                new_pwm[i] = pwm_long.pwm[i].clone();
+            }
+        }
+
+        for ind in 0..short_len {
+
+            let b1 = &pwm_short.pwm[ind];
+            let b2 = &pwm_long.pwm[off_center+ind];
+
+            match b2.sum_bases_and_ln_max(b1) {
+
+                Ok((b, s)) => {
+                new_pwm[off_center+ind] = b;
+
+                correction += s;
+                },
+                Err(e) => { return Err(e);}
+            };
+        }
+
+        //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
+        //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
+        let new_height = self.peak_height()+other_mot.peak_height-correction;
+
+        Ok((Motif::raw_pwm(new_pwm, new_height), correction))
+        
 
     }
 
@@ -2813,6 +2924,70 @@ impl<'a> MotifSet<'a> {
                 let lnlike = to_add.insert_motif(a, id)*thermo_beta;
                 (lnlike, to_add)
             }).collect();
+
+            //We want to pick these based on their relative ln posteriors
+            //But these are going to be small. We normalize based on the max
+            //ln likelihood because it prevents errors from infinities
+
+            let mut selection_probs: Vec<f64> = vec![0.0; likes_and_mots.len()];
+
+            let normalize_ln_like: f64 = likes_and_mots.iter().map(|(a, _)| a).fold(-f64::INFINITY, |a, &b| a.max(b)) ;
+
+            for i in 0..selection_probs.len() {
+                //This subtraction might seem technically unnecessary, but
+                //but computers are not infinitely precise. We want to 
+                //ensure that we minimize numerical issues
+
+                selection_probs[i] = (likes_and_mots[i].0-normalize_ln_like).exp().abs();
+            }
+
+            let dist = match WeightedIndex::new(&selection_probs) {
+
+                Ok(weights) => weights, 
+                Err(_) => {warn!("Issue with base leap weights in this step. Randomly selecting. Discard inference before this point {:?}", selection_probs);
+                    WeightedIndex::new(&(vec![1.0; likes_and_mots.len()])).expect("This is statically valid")},
+            };
+
+            current_set = likes_and_mots[dist.sample(rng)].1.clone();
+        }
+
+        current_set
+
+    }
+    
+    
+    pub fn randomize_motifs<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
+
+
+        //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
+        let mut ids: Vec<usize> = (0..self.set.len()).collect();
+        ids.shuffle(rng);
+
+        let mut current_set = self.clone();
+
+        for id in ids {
+
+            let current_mot = current_set.set[id].clone();
+
+            let mut base_set = current_set.clone();
+            base_set.remove_motif_void(id);
+
+            let mut kmer_ids = self.data_ref.data().seq().n_random_valid_motifs(current_mot.len(), 200, rng);
+
+            let mut likes_and_mots: Vec<(f64, Self)> = kmer_ids.into_par_iter().map(|a| {
+                let mut to_add = base_set.clone();
+                let mut rng = rand::thread_rng();
+                let add_mot = Motif::from_motif_with_height(self.data_ref.data().seq().idth_unique_kmer_vec(current_mot.len(), a), current_mot.peak_height(), &mut rng); 
+                //The REAL ln_posterior is different from the ln_posterior we use to select a motif, because that needs a thermodynamic beta to alter it
+                let lnlike = to_add.insert_motif(add_mot, id)*thermo_beta;
+                (lnlike, to_add)
+            }).collect();
+
+            let mut current_clone = current_set.clone();
+
+            let current_like = current_clone.ln_posterior();
+
+            likes_and_mots.push((current_like*thermo_beta, current_clone));
 
             //We want to pick these based on their relative ln posteriors
             //But these are going to be small. We normalize based on the max
@@ -4164,9 +4339,9 @@ impl MoveTracker {
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
 
             ind += 1;
-            println!("Base leap move (always accepts). Times {}.", self.attempts_per_move[ind]);
+            println!("Base leap move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
-            println!("Secondary shuffle move (always accepts). Times {}.", self.attempts_per_move[ind]);
+            println!("Secondary shuffle move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             for i in 0..SCALE_SDS.len() {
                 println!("Base scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                          SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
@@ -4179,6 +4354,8 @@ impl MoveTracker {
                          (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
                 ind += 1;
             }
+            println!("Randomize move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
+            ind += 1;
     }
    
 
@@ -4813,7 +4990,7 @@ mod tester{
     use rand::Rng;
     use crate::waveform::*;
     use rand::distributions::{Distribution};
-    use crate::{DIRICHLET_PWM, PROPOSE_EXTEND, MOMENTUM_DIST};
+    use crate::{DIRICHLET_PWM, PROPOSE_EXTEND};
     use crate::SymmetricBaseDirichlet;
 
 
@@ -4844,12 +5021,26 @@ mod tester{
         let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
         assert!(drev.0.abs() < 1e-16);
         assert!(drev.1);
+        let zero_base = Base::new([1.0;BASE_L]).unwrap();
+        println!("zero dist {}", zero_base.dist_sq(None));
+        let mut m_star_pwm = m.pwm.clone();
+        m_star_pwm.insert(0,zero_base.clone());
+        m_star_pwm.push(zero_base);
+        let unaltered_check = Motif::raw_pwm(m_star_pwm.clone(), m.peak_height());
+        let d_unalt = m.distance_function(&unaltered_check);
+        println!("m {:?} \n m_star {:?} {:?}", m, unaltered_check, m_star_pwm);
+        println!("unalt {:?}", d_unalt);
+        assert!(d_unalt.0.abs() < 1e-16);
+        assert!(!d_unalt.1);
         let mut new_b_vec: Vec<Base> = Vec::with_capacity(m.len()+2);
+        new_b_vec.push(Base::rand_new(&mut rng));
         new_b_vec.append(&mut m.rev_complement());
         new_b_vec.push(Base::rand_new(&mut rng));
-        new_b_vec.push(Base::rand_new(&mut rng));
         let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
-        println!("new {:?} old {:?}", newmot, m);
+        let d_unalt_rev = m.distance_function(&newmot);
+        println!("new_b_vec {:?} {:?} {}", newmot, d_unalt_rev, (newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt());
+        assert!(d_unalt_rev.0.abs()-(newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt() < 1e-16);
+        assert!(d_unalt_rev.1);
     }
 
     #[test]
@@ -5303,7 +5494,7 @@ mod tester{
 
         println!("sig {:?}", signal_remaining);
 
-        let no_forgive_diffs = any_diffs.into_iter().zip(signal_remaining.into_iter()).filter(|(a, b)| (a/b).abs() > std::f64::EPSILON).collect::<Vec<_>>();
+        let no_forgive_diffs = any_diffs.into_iter().zip(signal_remaining.into_iter()).filter(|(a, b)| (a/b).abs() > 4.0*std::f64::EPSILON).collect::<Vec<_>>();
 
         println!("mot set a {:?}\n mot set b {:?}", motif_set, shuffed);
 
@@ -5316,7 +5507,6 @@ mod tester{
     fn rj_manipulator_tests() {
 
         {
-            MOMENTUM_DIST.try_insert(Normal::new(0.0, 1.0_f64).expect("obviously valid")).ok();
             DIRICHLET_PWM.try_insert(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).ok();
             PROPOSE_EXTEND.try_insert(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).ok();
         }

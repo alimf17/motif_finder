@@ -1,10 +1,11 @@
 
 use serde::{Serialize,Deserialize};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use itertools::{Itertools};
 use rand::Rng;
 use rand::prelude::SliceRandom;
+use rand::distributions::{Distribution, Uniform};
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
@@ -277,6 +278,10 @@ impl Sequence {
         self.kmer_dict[k-MIN_BASE][id]
     }
 
+    pub fn idth_unique_kmer_vec(&self, k: usize, id: usize) -> Vec<Bp> {
+        Self::u64_to_kmer(self.idth_unique_kmer(k, id), k)
+    }
+
     pub fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
         self.kmer_id_dict[k-MIN_BASE].get(&kmer).copied()
     }
@@ -476,6 +481,21 @@ impl Sequence {
     
     }
 
+    pub fn n_random_valid_motifs<R: Rng + ?Sized>(&self, len: usize, n: usize, rng: &mut R) -> Vec<usize>{
+
+        let sample_range = Uniform::from(0_usize..(self.kmer_nums[len-MIN_BASE]));
+
+        let mut id_set: HashSet<usize> = HashSet::with_capacity(n);
+
+        let mut tries = n;
+
+        while tries > 0 {
+            rng.sample_iter(&sample_range).take(tries).for_each(|a| {id_set.insert(a);} );
+            tries = n - id_set.len();
+        }
+
+        id_set.into_iter().collect()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
