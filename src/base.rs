@@ -1392,15 +1392,7 @@ impl Motif {
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
-        let mut pwm: Vec<Base> =  mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-pwm.len());
-
-        Motif {
-            peak_height: peak_height,
-            pwm: pwm,
-        }
-
-
+        Self::from_motif(mot, rng)
 
     }
 
@@ -1425,6 +1417,21 @@ impl Motif {
 
     }
 
+    pub fn rand_mot_with_max_len<R: Rng + ?Sized>(max_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
+
+        let mut weights = vec![2_usize; max_bases-MIN_BASE];
+        weights.push(1);
+
+        let len_dist = WeightedIndex::new(&weights).unwrap();
+
+        let num_bases = len_dist.sample(rng)+MIN_BASE;
+
+        let mot = seq.random_valid_motif(num_bases, rng);
+
+
+        Self::from_motif(mot, rng)
+
+    }
 
     pub fn make_opposite(&self) -> Motif {
 
@@ -2753,18 +2760,61 @@ impl<'a> MotifSet<'a> {
     
     fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
-        let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng);
-
         let split_id = rng.gen_range(0..self.set.len());
 
-        todo!()
+        let new_mot = Motif::rand_mot_with_max_len(self.set[split_id].len(), self.data_ref.data().seq(), rng);
 
+        let ln_jacobian_a = new_mot.pwm.iter().map(|a| a.props.iter().map(|&b| b.ln()).sum::<f64>()).sum::<f64>();
+
+        let Ok((split_mot, ln_jacobian_b)) = self.set[split_id].diff_motifs(&new_mot) else { return None;} ;
+
+        let gen_prior = split_mot.pwm_prior(self.data_ref.data().seq())+split_mot.height_prior();
+        if gen_prior.is_infinite() { return None;} 
+
+        let ln_merge_jacobian = ln_jacobian_a-(BASE_L as f64)*ln_jacobian_b;
+
+        let mut new_set = self.derive_set();
+
+        let pick_prob = gen_prior;
+
+        _ = new_set.replace_motif(split_mot, split_id);
+
+        let ln_post = new_set.add_motif(new_mot);
+
+        Some((new_set, ln_post-(pick_prob+ln_merge_jacobian)))
 
     }
 
     fn propose_merge_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
-        todo!()
+        if self.set.len() <= 1 { return None;}
+
+        let merge_1 = rng.gen_range(0..self.set.len());
+
+        let merge_2 = *(0..self.set.len()).filter(|&a| a != merge_1).collect::<Vec<_>>()
+            .choose(rng).expect("We guaranteed that the length of the set is at least two, so this has at least one element");
+            
+
+        let (which_longer, which_added) = if self.set[merge_1].len() <= self.set[merge_2].len() { (merge_2, merge_1) } else {(merge_1, merge_2)};
+
+        let ln_jacobian_a =  self.set[which_added].pwm.iter().map(|a| a.props.iter().map(|&b| b.ln()).sum::<f64>()).sum::<f64>();
+
+        let Ok((merge_mot, ln_jacobian_b)) = self.set[merge_1].sum_motifs(&self.set[merge_2]) else { return None;} ;
+
+        let gen_prior = merge_mot.pwm_prior(self.data_ref.data().seq())+merge_mot.height_prior();
+        if gen_prior.is_infinite() { return None;} 
+
+        let ln_merge_jacobian = ln_jacobian_a-(BASE_L as f64)*ln_jacobian_b;
+
+        let mut new_set = self.derive_set();
+
+        let pick_prob = self.set[which_added].pwm_prior(self.data_ref.data().seq())+self.set[which_added].height_prior();
+
+        _ = new_set.replace_motif(merge_mot, which_longer);
+
+        let ln_post = new_set.remove_motif(which_added);
+
+        Some((new_set, ln_post+(pick_prob+ln_merge_jacobian)))
     }
 
 
@@ -2797,7 +2847,7 @@ impl<'a> MotifSet<'a> {
             new_mot.pwm.push(new_base);
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             let ln_post = new_set.replace_motif(new_mot, extend_id);
-            Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the probability of their generation
+            Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the ln probability of their generation
         }
     }
 
