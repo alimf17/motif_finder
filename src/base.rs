@@ -536,9 +536,10 @@ impl Base {
 
             None => 4.0*self.props.iter().map(|a| a.ln().powi(2)).sum::<f64>()-self.props.iter().map(|a| a.ln()).sum::<f64>().powi(2),
             Some(other) => {
-                4.0*self.props.iter().zip(other.props.iter()).map(|(a,b)| (a.ln()-b.ln()).powi(2)).sum::<f64>()-(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
+                4.0*self.props.iter().zip(other.props.iter()).map(|(a,b)| ((a/b).ln()).powi(2)).sum::<f64>()-(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
             },
         }
+
 
     }
 
@@ -1957,13 +1958,14 @@ impl Motif {
         }
 
 
-        distance.sqrt()
-
+        //This isn't a CODE problem, it's an f64 precision one
+        println!("distance {distance}");
+        if distance > 0.0 { distance.sqrt() } else {0.0}
     }
 
     fn sum_motifs(&self, other_mot: &Motif) -> Result<(Self, f64), InvalidBase> {
 
-        let (pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
+        let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
 
         let total_len = pwm_long.len();
 
@@ -1996,10 +1998,10 @@ impl Motif {
 
         for ind in 0..short_len {
 
-            let b1 = &pwm_short.pwm[ind];
+            let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
             let b2 = &pwm_long.pwm[off_center+ind];
 
-            match b2.sum_bases_and_ln_max(b1) {
+            match b2.sum_bases_and_ln_max(&b1) {
 
                 Ok((b, s)) => {
                 new_pwm[off_center+ind] = b;
@@ -2013,6 +2015,64 @@ impl Motif {
         //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
         //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
         let new_height = self.peak_height()+other_mot.peak_height-correction;
+
+        Ok((Motif::raw_pwm(new_pwm, new_height), correction))
+        
+
+    }
+    
+    fn diff_motifs(&self, other_mot: &Motif) -> Result<(Self, f64), InvalidBase> {
+
+        let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
+
+        let total_len = pwm_long.len();
+
+        let short_len = pwm_short.len();
+
+        let (_, rc) = pwm_long.distance_function(pwm_short);
+        
+        let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
+
+        //sum_bases_and_ln_max
+
+        let mut correction: f64 = 0.0;
+
+        //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
+        //        The specific values here are also unimportant
+        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| unsafe{ Base::new([1.0; BASE_L]).unwrap_unchecked()}).collect();
+
+        if off_center > 0 { 
+            for i in 0..off_center {
+                //TODO: change this to get_unchecked if there's a performance benefit
+                new_pwm[i] =  pwm_long.pwm[i].clone();
+            }
+        }
+        
+        if (short_len+off_center) < total_len {
+            for i in (short_len+off_center)..total_len {
+                new_pwm[i] = pwm_long.pwm[i].clone();
+            }
+        }
+
+        for ind in 0..short_len {
+
+            let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
+            let b2 = &pwm_long.pwm[off_center+ind];
+
+            match b2.subtract_bases_and_ln_max(&b1) {
+
+                Ok((b, s)) => {
+                new_pwm[off_center+ind] = b;
+
+                correction += s;
+                },
+                Err(e) => { return Err(e);}
+            };
+        }
+
+        //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
+        //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
+        let new_height = pwm_long.peak_height()-pwm_short.peak_height+correction;
 
         Ok((Motif::raw_pwm(new_pwm, new_height), correction))
         
@@ -2690,17 +2750,23 @@ impl<'a> MotifSet<'a> {
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
-    /*
-       fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+    
+    fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
-       let heights: Vec<Option<f64>> = self.set.iter().map(|a| a.
+        let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng);
 
-       }
+        let split_id = rng.gen_range(0..self.set.len());
 
-       fn propose_merge_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+        todo!()
 
-       }
-     */
+
+    }
+
+    fn propose_merge_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+        todo!()
+    }
+
 
     //I'm only extending motifs on one end
     //This saves a bit of time from not having to reshuffle motif vectors
@@ -5039,8 +5105,24 @@ mod tester{
         let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
         let d_unalt_rev = m.distance_function(&newmot);
         println!("new_b_vec {:?} {:?} {}", newmot, d_unalt_rev, (newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt());
-        assert!(d_unalt_rev.0.abs()-(newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt() < 1e-16);
+        assert!(d_unalt_rev.0.abs()-(newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt() < 1e-9);
         assert!(d_unalt_rev.1);
+
+        let r = Motif::from_motif(vec![Bp::A, Bp::G, Bp::G, Bp::T, Bp::A, Bp::G, Bp::G, Bp::T], &mut rng);
+
+        let (a, c) = m.sum_motifs(&r).unwrap();
+
+        let (b, c_star) = a.diff_motifs(&r).unwrap();
+
+        println!("c {c} c_star {c_star}");
+
+        println!("m {:?} b {:?}", m, b);
+
+        println!("{:?}", b.distance_function(&m));
+        assert!((c-c_star).abs() < 1e-9);
+        assert!(b.distance_function(&m).0 < 1e-9);
+        assert!(!b.distance_function(&m).1);
+
     }
 
     #[test]
