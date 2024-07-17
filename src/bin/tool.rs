@@ -208,6 +208,7 @@ fn main() {
 
     let pushes = num_advances/steps_per_exchange_attempt + ((num_advances % steps_per_exchange_attempt) > 0) as usize;
 
+    /*
     let mut track: [MoveTracker; 3] = core::array::from_fn(|_| MoveTracker::new(num_advances/12));
 
     let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
@@ -244,9 +245,9 @@ fn main() {
         }
 
     }
+*/
 
 
-/*
     let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, data_string, &data_ref, maybe_init, None, &mut rng).unwrap();
 
 
@@ -285,7 +286,7 @@ fn main() {
 
             }
 
-    } */
+    }
 
     println!("Finished run in {:?}", start_inference_time.elapsed());
 

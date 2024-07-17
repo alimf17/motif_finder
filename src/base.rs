@@ -62,7 +62,8 @@ use serde::{Serialize, Deserialize};
 pub const SQRT_2: f64 = 1.41421356237;
 pub const SQRT_3: f64 = 1.73205080757;
 
-pub const LN_2: f64 = 0.69314718055994531;
+pub const LN_2: f64 = 0.6931471805599453;
+pub const LB_E: f64 = 1.4426950408889634;
 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 pub const BASE_L: usize = BPS.len();
@@ -171,8 +172,8 @@ const SCALE_SDS: [f64; 3] = [1.0, 10.0, 50.0];
 
 const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*HEIGHT_SDS.len()+7;
-const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+9;
+const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
 static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
@@ -186,7 +187,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let m = m.chain(b.iter().map(|&[a,b]| format!("_motif_scale_ratio_sd_{a}_linear_sd_{b}.png"))); 
                                                    let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
                                                    let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
-                                                   "_motif_contract.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
+                                                   "_motif_contract.png".to_owned(), "_motif_split.png".to_owned(), "_motif_merge.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_base_sd_{a}.png")));
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_mot_sd_{a}.png")));
                                                    let m = m.chain(["_random_motif.png".to_owned()]);
@@ -214,7 +215,7 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 */
 
-pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];
+pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "Split Motif", "Merge Motif"];
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
@@ -238,7 +239,10 @@ pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c2000000
 static BARRIER: Lazy<f64> = Lazy::new(|| unsafe {
                                       println!("THRESH is {THRESH}");
                                       -2.0* THRESH.ln() } );
-
+const SPLIT_SD: f64 = 0.4;
+static SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, SPLIT_SD).unwrap());
+const HEIGHT_SPLIT_SD: f64 = 0.01;
+static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SPLIT_SD).unwrap());
 //BEGIN BASE
 
 #[repr(usize)]
@@ -357,6 +361,11 @@ impl IndexMut<Bp> for Base {
 
 }
 
+
+//Note: in our paper, we talk about the parameterization of these by 
+//      the dimensionless free energies. This is actually slightly different 
+//      than what we actually do in the code: we use exp(-dimensionless free energies).
+//      The parameterizations are equivalent
 impl Base {
 
     //Note: This will break if all the bindings are zeros, or any are negative
@@ -561,7 +570,7 @@ impl Base {
         simplex
     }
 
-    pub fn sum_bases_and_ln_max(&self, other_base: &Base) -> Result<(Self, f64), InvalidBase> {
+    pub fn sum_bases_and_lb_max(&self, other_base: &Base) -> Result<(Self, f64), InvalidBase> {
 
         let mut max_prop: f64 = 0.0;
 
@@ -572,13 +581,13 @@ impl Base {
         });
 
         match Base::new(pre_base) { 
-            Ok(base) => Ok((base, max_prop.ln())),
+            Ok(base) => Ok((base, max_prop.log2())),
             Err(e) => Err(e),
         }
 
     }
 
-    pub fn subtract_bases_and_ln_max(&self, subtrahend: &Base) -> Result<(Self, f64), InvalidBase> {
+    pub fn subtract_bases_and_lb_max(&self, subtrahend: &Base) -> Result<(Self, f64), InvalidBase> {
 
         let best = self.best_base();
 
@@ -587,7 +596,7 @@ impl Base {
         match Base::new(pre_difference) { 
             Ok(base) => 
             {
-                let ln_max = (subtrahend[best]*base[best]).ln();
+                let ln_max = (subtrahend[best]*base[best]).log2();
                 Ok((base, ln_max))
             },
             Err(e) => Err(e),
@@ -1433,6 +1442,44 @@ impl Motif {
 
     }
 
+    pub fn splitter_motif<R: Rng+?Sized>(&self, height_sd: f64, scaling_sd: f64, rng: &mut R) -> (Motif, f64) {
+
+        let mut weights = vec![2_usize; self.len()-MIN_BASE];
+        weights.push(1);
+
+        let len_dist = WeightedIndex::new(&weights).unwrap();
+
+        let num_bases = len_dist.sample(rng)+MIN_BASE;
+
+        let start_ind = ((self.len()-1)/2)-((num_bases-1)/2);
+ 
+        let mut splitter_pwm: Vec<Base> = (0..num_bases).map(|i| self.pwm[i+start_ind].clone()).collect();
+    
+        splitter_pwm = splitter_pwm.into_iter().map(|a| Base::new(core::array::from_fn(|j| a.props[j].sqrt())).unwrap()).collect();
+
+        let pre_height_split = NORMAL_DIST.sample(rng);
+
+        let splitter_height = self.peak_height()/2.0 + pre_height_split*height_sd;
+
+
+        let mut ln_dens_gen: f64 = HEIGHT_SPLIT_DIST.ln_pdf(pre_height_split*height_sd);
+
+        splitter_pwm = splitter_pwm.into_iter().map(|a| {
+            let splitting_vec: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_DIST.sample(rng));
+            ln_dens_gen += splitting_vec.iter().map(|&a| SPLIT_DIST.ln_pdf(a)).sum::<f64>();
+            let splitting_base: Base = Base::vect_to_base(&splitting_vec);
+            a.sum_bases_and_lb_max(&splitting_base).unwrap().0
+        }).collect();
+
+        let splitter = Motif {
+            peak_height: splitter_height,
+            pwm: splitter_pwm,
+        };
+
+        (splitter, ln_dens_gen)
+
+    }
+
     pub fn make_opposite(&self) -> Motif {
 
         let mut opposite = self.clone();
@@ -1966,7 +2013,6 @@ impl Motif {
 
 
         //This isn't a CODE problem, it's an f64 precision one
-        println!("distance {distance}");
         if distance > 0.0 { distance.sqrt() } else {0.0}
     }
 
@@ -1982,7 +2028,7 @@ impl Motif {
         
         let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
 
-        //sum_bases_and_ln_max
+        //sum_bases_and_lb_max
 
         let mut correction: f64 = 0.0;
 
@@ -2008,7 +2054,7 @@ impl Motif {
             let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
             let b2 = &pwm_long.pwm[off_center+ind];
 
-            match b2.sum_bases_and_ln_max(&b1) {
+            match b2.sum_bases_and_lb_max(&b1) {
 
                 Ok((b, s)) => {
                 new_pwm[off_center+ind] = b;
@@ -2040,7 +2086,7 @@ impl Motif {
         
         let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
 
-        //sum_bases_and_ln_max
+        //sum_bases_and_lb_max
 
         let mut correction: f64 = 0.0;
 
@@ -2066,7 +2112,7 @@ impl Motif {
             let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
             let b2 = &pwm_long.pwm[off_center+ind];
 
-            match b2.subtract_bases_and_ln_max(&b1) {
+            match b2.subtract_bases_and_lb_max(&b1) {
 
                 Ok((b, s)) => {
                 new_pwm[off_center+ind] = b;
@@ -2762,20 +2808,19 @@ impl<'a> MotifSet<'a> {
 
         let split_id = rng.gen_range(0..self.set.len());
 
-        let new_mot = Motif::rand_mot_with_max_len(self.set[split_id].len(), self.data_ref.data().seq(), rng);
+        let (new_mot, pick_prob) = self.set[split_id].splitter_motif(HEIGHT_SPLIT_SD, SPLIT_SD, rng);
+        
+        let gen_prior = new_mot.pwm_prior(self.data_ref.data().seq())+new_mot.height_prior();
+        if gen_prior.is_infinite() { return None;} 
 
-        let ln_jacobian_a = new_mot.pwm.iter().map(|a| a.props.iter().map(|&b| b.ln()).sum::<f64>()).sum::<f64>();
-
-        let Ok((split_mot, ln_jacobian_b)) = self.set[split_id].diff_motifs(&new_mot) else { return None;} ;
+        let Ok((split_mot, _)) = self.set[split_id].diff_motifs(&new_mot) else { return None;} ;
 
         let gen_prior = split_mot.pwm_prior(self.data_ref.data().seq())+split_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
 
-        let ln_merge_jacobian = ln_jacobian_a-(BASE_L as f64)*ln_jacobian_b;
+        let ln_merge_jacobian = (BASE_L as f64).log2()*(new_mot.len() as f64);
 
         let mut new_set = self.derive_set();
-
-        let pick_prob = gen_prior;
 
         _ = new_set.replace_motif(split_mot, split_id);
 
@@ -2797,18 +2842,29 @@ impl<'a> MotifSet<'a> {
 
         let (which_longer, which_added) = if self.set[merge_1].len() <= self.set[merge_2].len() { (merge_2, merge_1) } else {(merge_1, merge_2)};
 
-        let ln_jacobian_a =  self.set[which_added].pwm.iter().map(|a| a.props.iter().map(|&b| b.ln()).sum::<f64>()).sum::<f64>();
+        let Ok((merge_mot, cost_merge)) = self.set[which_longer].sum_motifs(&self.set[which_added]) else { return None;} ;
 
-        let Ok((merge_mot, ln_jacobian_b)) = self.set[merge_1].sum_motifs(&self.set[merge_2]) else { return None;} ;
+        let height_split_var = ((self.set[which_added].peak_height()-self.set[which_longer].peak_height())-cost_merge)*0.5;
 
-        let gen_prior = merge_mot.pwm_prior(self.data_ref.data().seq())+merge_mot.height_prior();
-        if gen_prior.is_infinite() { return None;} 
 
-        let ln_merge_jacobian = ln_jacobian_a-(BASE_L as f64)*ln_jacobian_b;
+        let off = (self.set[which_longer].len()-1)/2-(self.set[which_added].len()-1)/2;
+
+        let mut epsilon_vars: Vec<f64> = Vec::with_capacity((BASE_L-1)*self.set[which_added].len());
+
+        for i in 0..self.set[which_added].len() {
+            let vect_0 = self.set[which_added].pwm[i].base_to_vect();
+            let vect_1 = self.set[which_longer].pwm[off+i].base_to_vect();
+            for j in 0..(BASE_L-1) {
+                epsilon_vars.push((vect_0[j]-vect_1[j])/2.0);
+            }
+        }
+
+
+        let pick_prob = HEIGHT_SPLIT_DIST.ln_pdf(height_split_var)+epsilon_vars.into_iter().map(|b| SPLIT_DIST.ln_pdf(b)).sum::<f64>();
+
+        let ln_merge_jacobian = (BASE_L as f64).log2()*(self.set[which_added].len() as f64);
 
         let mut new_set = self.derive_set();
-
-        let pick_prob = self.set[which_added].pwm_prior(self.data_ref.data().seq())+self.set[which_added].height_prior();
 
         _ = new_set.replace_motif(merge_mot, which_longer);
 
@@ -2879,7 +2935,7 @@ impl<'a> MotifSet<'a> {
     // (rmse, likelihood_diff, pwm_dists_and_height_diffs)
     pub fn run_rj_move<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> (Self, usize, bool) {
 
-        let which_rj = rng.gen_range(0..4);
+        let which_rj = rng.gen_range(0..RJ_MOVE_NAMES.len());
 
         let proposal: Option<(Self, f64)> = match which_rj {
 
@@ -2887,6 +2943,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
+            4 => self.propose_split_motif(rng),
+            5 => self.propose_merge_motif(rng),
             _ => unreachable!("How you managed to get here, I do not know. You're somehow trying to make a move run when it doesn't exist.
                               \n There's a REASON that I coded my number of moves as a magic number that I use only once. 
                               \n Namely, there's just no good way to change that number and expect everything to work correctly.
@@ -2925,6 +2983,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
+            4 => self.propose_split_motif(rng),
+            5 => self.propose_merge_motif(rng),
             _ => panic!("You're trying to make a move run when it doesn't exist.")
         };
 
@@ -4455,6 +4515,14 @@ impl MoveTracker {
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
 
             ind += 1;
+            println!("Split motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
+            println!("Merge motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
             println!("Base leap move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
             println!("Secondary shuffle move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
@@ -5874,6 +5942,26 @@ mod tester{
             }
         }
         
+        let mut failures = 0_usize;
+        let (mut split_mot, ln_prop_split) = loop { if let Some(r) = check_set.propose_split_motif(&mut rng) { break r; } else {failures+=1; println!("failed {failures} time(s)")}};
+
+        println!("failed in split move {} times before succeeding", failures);
+        assert!(split_mot.set.len()-1 == check_set.set.len());
+
+        let (mut merge_mot, ln_prop_merge) = split_mot.propose_merge_motif(&mut rng).expect("Merge motif proposing an impossibility despite split motif working");
+
+        let balance_split = ln_prop_split-split_mot.ln_posterior();
+        let balance_merge = ln_prop_merge-merge_mot.ln_posterior();
+
+        println!("{} {} {} {}", ln_prop_split, split_mot.ln_posterior(), ln_prop_merge, merge_mot.ln_posterior());
+        println!("detailed balance split and merge {} {} {}", balance_split, balance_merge, balance_split+balance_merge);
+        println!("ln acceptance probs split {} merge {}", ln_prop_split-merge_mot.ln_posterior(), ln_prop_merge-split_mot.ln_posterior());
+        assert!((balance_split+balance_merge).abs() < 1e-6);
+
+        println!("pre merge split {:?}", check_set);
+        println!("post merge split {:?}", merge_mot);
+
+        println!("distance {:?}", check_set.set[0].distance_function(&merge_mot.set[0]));
 
         let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
