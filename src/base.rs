@@ -219,26 +219,9 @@ pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
-//This is 2^(-61), or 0x3c20000000000000 converted to f64.
-//We have to use unsafe transmute instead of from_bits because from_bits
-//is not stably const yet. Yes, this is obnoxious. 
-//I picked this so that it has NO impact on values greater than about 0.01
-//So our Base to vector and back sequence isn't technically COMPLETELY inversible
-//But this is needed to prevent issues with "perfect" bases like [1.0, 0.0, 0.0, 0.0]
-//Which have vector values that are all infinite.
-//SAFETY: u64 bit patterns are laid out identically to f64 on all platforms
-//        and technically, all valid u64s are valid f64s. Edge cases exist for NaN and Inf
-//        But 2^(-61) is neither of those, and it's not subnormal, either. 
-pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c20000000000000) }; 
-        
-//This was NOT chosen randomly. I picked it so that proportions are
-//all normal numbers
-//const BARRIER: f64 = 2044_f64*LN_2;
+pub const SCORE_THRESH: f64 = -4.0;
+const BARRIER: f64 = -SCORE_THRESH*2.0;
 
-//SAFETY: THRESH should be established at this point
-static BARRIER: Lazy<f64> = Lazy::new(|| unsafe {
-                                      println!("THRESH is {THRESH}");
-                                      -2.0* THRESH.ln() } );
 const SPLIT_SD: f64 = 0.05;
 static SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, SPLIT_SD).unwrap());
 const HEIGHT_SPLIT_SD: f64 = 0.001;
@@ -316,7 +299,7 @@ impl fmt::Display for Bp {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Base {
-   props: [ f64; BASE_L],
+   scores: [ f64; BASE_L],
 }
 
 #[derive(Debug)]
@@ -348,7 +331,7 @@ impl Index<Bp> for Base {
 type Output = f64;
 
     fn index(&self, bp: Bp) -> &f64 {
-        &self.props[bp as usize]
+        &self.scores[bp as usize]
     }
 
 }
@@ -356,7 +339,7 @@ type Output = f64;
 impl IndexMut<Bp> for Base {
 
     fn index_mut(&mut self, bp: Bp) -> &mut f64 {
-        &mut self.props[bp as usize]
+        &mut self.scores[bp as usize]
     }
 
 }
@@ -369,37 +352,39 @@ impl IndexMut<Bp> for Base {
 impl Base {
 
     //Note: This will break if all the bindings are zeros, or any are negative
-    pub fn new(props: [ f64; BASE_L]) -> Result<Base, InvalidBase> {
+    pub fn new(scores: [ f64; BASE_L]) -> Base {
 
-        let mut props = props;
+        let mut scores = scores;
 
-        //#[cfg(test)]
-        //println!("Base props {:?}", props);
+        let max = Self::max(&scores);
 
-        let mut any_neg: bool = false;
-
-        for i in 0..props.len() {
-            any_neg |= props[i] < 0.0 ;
-        }
-        
-        if any_neg{
-            return Err(InvalidBase::NegativeBase);
+        for i in 0..scores.len() {
+                scores[i] = scores[i]-max;
+                if scores[i] < SCORE_THRESH { scores[i] = SCORE_THRESH;}
         }
 
-        let max = Self::max(&props);
+        Base { scores }
+    }
 
-        if max == 0.0 {
-            return Err(InvalidBase::NoNonZeroBase);
+    pub fn new_by_reflections(scores: [f64; BASE_L]) -> Base {
+
+        let mut scores = scores;
+
+        let max = Self::max(&scores);
+
+        for i in 0..scores.len() {
+                scores[i] = scores[i]-max;
         }
-        
-        for i in 0..props.len() {
-                props[i] = props[i]/max;
-        }
 
+        scores.iter_mut().for_each(|pos| {
+            if *pos < SCORE_THRESH { 
+                *pos = *pos + 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
+                if *pos > 0.0 { *pos = -*pos;}
+            }
+        });
 
+        Base { scores }
 
-
-        Ok(Base { props })
     }
 
     pub fn new_with_pseudo(props: [f64; BASE_L], counts: f64, pseudo: f64) -> Result<Base, InvalidBase> {
@@ -424,7 +409,9 @@ impl Base {
             for p in props.iter_mut() {*p = (*p/sum)*counts+pseudo;}
         }
 
-        Base::new(props)
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| props[a].log2());
+
+        Ok(Base::new(scores))
     }
 
 
@@ -451,7 +438,7 @@ impl Base {
             att[i] /=max_p;
         }
 
-        Base { props: att}
+        Base { scores: att}
     }
 
     pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
@@ -472,17 +459,17 @@ impl Base {
 
     pub fn from_bp_with_uniforms<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
-        let mut props: [f64; BASE_L] = [0.; BASE_L];
+        let mut scores: [f64; BASE_L] = [0.; BASE_L];
         
         for i in 0..BASE_L{
             if i == (best as usize) {
-                props[i] = 1.0;
+                scores[i] = 1.0;
             } else {
-                props[i] = rng.gen();
+                scores[i] = rng.gen();
             }
         }
         
-        Base{ props: props }
+        Base{ scores: scores }
 
     }
 
@@ -515,8 +502,8 @@ impl Base {
     }
 
     pub fn best_base(&self) -> Bp {
-        //Safety: self.props has a size of BASE_L, so this always produces a valid result
-        unsafe{ std::mem::transmute::<usize, Bp>(Self::argmax(&self.props))}
+        //Safety: self.scores has a size of BASE_L, so this always produces a valid result
+        unsafe{ std::mem::transmute::<usize, Bp>(Self::argmax(&self.scores))}
  
         //Genuine surprise: this is worse when I profile it on godbolt
         /*let mut best = if (self[Bp::A] < self[Bp::C]) { Bp::C } else {Bp::A};
@@ -543,9 +530,9 @@ impl Base {
         
         match base {
 
-            None => 4.0*self.props.iter().map(|a| a.ln().powi(2)).sum::<f64>()-self.props.iter().map(|a| a.ln()).sum::<f64>().powi(2),
+            None => 4.0*self.scores.iter().map(|a| a.powi(2)).sum::<f64>()-self.scores.iter().map(|a| a).sum::<f64>().powi(2),
             Some(other) => {
-                4.0*self.props.iter().zip(other.props.iter()).map(|(a,b)| ((a/b).ln()).powi(2)).sum::<f64>()-(self.props.iter().map(|a| a.ln()).sum::<f64>()-other.props.iter().map(|a| a.ln()).sum::<f64>()).powi(2)
+                4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().map(|a| a).sum::<f64>()-other.scores.iter().map(|a| a).sum::<f64>()).powi(2)
             },
         }
 
@@ -553,9 +540,15 @@ impl Base {
     }
 
     pub fn as_probabilities(&self) -> [f64; BASE_L] {
-        let summed = self.props.iter().sum::<f64>();
-        let ret: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/summed); // self.props.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut props: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a].exp2());
+        let summed = props.iter().sum::<f64>();
+        let ret: [f64; BASE_L] = core::array::from_fn(|a| props[a]/summed); // self.scores.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
         ret
+    }
+
+    pub fn scores(&self) -> [f64; BASE_L] {
+        self.scores
     }
 
     pub fn as_simplex(&self) -> [f64; BASE_L-1] {
@@ -570,37 +563,31 @@ impl Base {
         simplex
     }
 
-    pub fn sum_bases_and_lb_max(&self, other_base: &Base) -> Result<(Self, f64), InvalidBase> {
+    pub fn sum_bases_and_lb_max(&self, other_base: &Base) -> (Self, f64) {
 
         let mut max_prop: f64 = 0.0;
 
         let pre_base: [f64; BASE_L] = core::array::from_fn(|a| {
-            let p = self.props[a]*other_base.props[a];
+            let p = self.scores[a]+other_base.scores[a];
             max_prop = max_prop.max(p);
             p
         });
 
-        match Base::new(pre_base) { 
-            Ok(base) => Ok((base, max_prop.log2())),
-            Err(e) => Err(e),
-        }
+        (Base::new(pre_base), max_prop) 
 
     }
 
-    pub fn subtract_bases_and_lb_max(&self, subtrahend: &Base) -> Result<(Self, f64), InvalidBase> {
+    pub fn subtract_bases_and_lb_max(&self, subtrahend: &Base) -> (Self, f64) {
 
         let best = self.best_base();
 
-        let pre_difference: [f64; BASE_L] = core::array::from_fn(|a| self.props[a]/subtrahend.props[a]);
+        let pre_difference: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a]-subtrahend.scores[a]);
 
-        match Base::new(pre_difference) { 
-            Ok(base) => 
-            {
-                let ln_max = (subtrahend[best]*base[best]).log2();
-                Ok((base, ln_max))
-            },
-            Err(e) => Err(e),
-        }
+        let base = Base::new(pre_difference);
+
+        let bested = base[best];
+
+        (base, subtrahend[best]+bested) 
     }
 
     //This converts our base representation directly to a vector space representation
@@ -613,17 +600,17 @@ impl Base {
     //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
     pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
-        //let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.props[a]+VEC_PAD_EPS).ln());
+        //let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.scores[a]+VEC_PAD_EPS).ln());
         /*let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| {
-            let b = (self.props[a]).ln();
+            let b = (self.scores[a]).ln();
             if b.is_infinite() { b.signum()*(MAX_VECT_COORD)} else {b}
         });*/
 
 
         Base::reflect_triple_to_finite(
-            &[nicer_ln_ratio([self[Bp::C], self[Bp::G]],[self[Bp::A], self[Bp::T]]),
-              nicer_ln_ratio([self[Bp::C], self[Bp::T]],[self[Bp::A], self[Bp::G]]), 
-              nicer_ln_ratio([self[Bp::T], self[Bp::G]],[self[Bp::A], self[Bp::C]])] )
+            &[self[Bp::C]+self[Bp::G]-(self[Bp::A]+self[Bp::T]),
+              self[Bp::C]+self[Bp::T]-(self[Bp::A]+self[Bp::G]),
+              self[Bp::T]+self[Bp::G]-(self[Bp::A]+self[Bp::C])])
     }
 
     pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
@@ -635,19 +622,14 @@ impl Base {
 
 
         //TODO: fix this so that it starts with best base at 1.0
-        let pre_exp_base: [f64; BASE_L] = 
+        let unnormalized_base: [f64; BASE_L] = 
             [-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25, 
               (sanitized_base[0]+sanitized_base[1]-sanitized_base[2])*0.25,
               (sanitized_base[0]-sanitized_base[1]+sanitized_base[2])*0.25,
              (-sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25];
 
 
-        let max_val = pre_exp_base.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).expect("We obviously know this has items in it");
-
-        let unnormalized_base: [f64; BASE_L] = core::array::from_fn(|a| (pre_exp_base[a]-max_val).exp());
-
-        //SAFETY: reflect_triple_to_finite is written so that no operation on exp returns all zeros here
-        unsafe { Base::new(unnormalized_base).unwrap_unchecked()}
+        Base::new(unnormalized_base)
     }
 
     //If ratio_sd and small_sd are negative, the move generated is just the opposite
@@ -655,61 +637,39 @@ impl Base {
     //because that's out of convention for no reason, but it won't break.
     pub fn moved_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Option<Base> {
 
-        let mut new_base_vect = self.base_to_vect();
+        let mut new_base = self.scores;
 
-        let signs_base_vect: [f64; BASE_L-1] = core::array::from_fn(|a| new_base_vect[a].signum());
+        let mut largest_to_smallest: [(f64, usize); BASE_L] = core::array::from_fn(|a| (new_base[a], a));
 
-        let mut largest_abs_to_smallest: [(f64, usize); BASE_L-1] = core::array::from_fn(|a| (new_base_vect[a].abs(), a));
+        largest_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
 
-        largest_abs_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
+        let penalty_diffs: [f64; BASE_L-1] = core::array::from_fn(|i| largest_to_smallest[i+1].0-largest_to_smallest[i].0);
 
+        let ratios = [ratio_sd, ratio_sd, small_sd];
 
-        //let mut large_abs_ratio = if largest_abs_to_smallest[1].0 == 0.0 { 1.0} else {largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0};
+        let new_penalties: [f64; BASE_L-1] = core::array::from_fn(|i| penalty_diffs[i]*(NORMAL_DIST.sample(rng)*ratios[i]).exp());
 
-        //let mut small_abs_ratio = largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0};
+        let mut accumulate: f64 = 0.0;
 
-        let (mut large_abs_ratio, mut small_abs_ratio) = 
-            if largest_abs_to_smallest[1].0 == 0.0 {
-                (1.0, 1.0) 
-            } else {
-                let la = largest_abs_to_smallest[0].0/largest_abs_to_smallest[1].0;
-                let sm = if largest_abs_to_smallest[2].0 == 0.0 { 1.0 } else {largest_abs_to_smallest[1].0/largest_abs_to_smallest[2].0};
-                (la, sm)
-            };
+        for (i, (s, pos)) in largest_to_smallest.into_iter().enumerate() {
+            new_base[pos] = accumulate;
+            accumulate += (s+new_penalties[i]);
+        }
 
-
-        large_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
-
-        if large_abs_ratio < 1.0 { large_abs_ratio = 1.0/large_abs_ratio; }
-
-        small_abs_ratio *= (NORMAL_DIST.sample(rng)*ratio_sd).exp();
-        
-        if small_abs_ratio < 1.0 { small_abs_ratio = 1.0/small_abs_ratio; }
-
-        new_base_vect[largest_abs_to_smallest[2].1] += NORMAL_DIST.sample(rng)*small_sd;
-
-        new_base_vect[largest_abs_to_smallest[1].1] = small_abs_ratio*new_base_vect[largest_abs_to_smallest[2].1].abs()*signs_base_vect[largest_abs_to_smallest[1].1];
-
-        new_base_vect[largest_abs_to_smallest[0].1] = large_abs_ratio*new_base_vect[largest_abs_to_smallest[1].1].abs()*signs_base_vect[largest_abs_to_smallest[0].1];
-
-
-        let refl = Base::reflect_triple_to_finite(&new_base_vect);
-
-       
-        Some(Base::vect_to_base(&refl))
-
+        Some(Base::new_by_reflections(new_base))
 
     }
 
     pub fn scaled_base<R: Rng + ?Sized>(&self, scale_sd: f64, rng: &mut R) -> Option<Base> {
 
-        let mut new_base_vect = self.base_to_vect();
+        let mut new_base = self.scores;
 
         let scale_exponent = (NORMAL_DIST.sample(rng)*scale_sd).exp();
 
-        new_base_vect = core::array::from_fn(|a| new_base_vect[a]*scale_exponent);
+        new_base = core::array::from_fn(|a| new_base[a]*scale_exponent);
+        
 
-        Some(Base::vect_to_base(&Base::reflect_triple_to_finite(&new_base_vect)))
+        Some(Base::new_by_reflections(new_base))
 
     }
 
@@ -735,7 +695,7 @@ impl Base {
 
         let b_form: [f64; BASE_L]  = core::array::from_fn(|a| probs[a]/max); //probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
 
-        Base{props : b_form}
+        Base{scores : b_form}
 
     }
 
@@ -758,37 +718,6 @@ impl Base {
         Self::vect_to_base(vect_coords).as_simplex()
     }
 
-
-    /*fn d_base_d_vect(&self) ->  [[f64; BASE_L-1]; BASE_L-1] {
-        
-        let other_bases = self.all_non_best();
-        let proto_column: [f64; BASE_L-1] = core::array::from_fn(|a| 0.5 * self[other_bases[a]]);
-
-        let mut grad = [proto_column.clone(), proto_column.clone(), proto_column.clone()];
-
-        let (zeros, neg_cols) = match self.best_base() {
-            Bp::A => ([2_usize, 1, 0], None),
-            Bp::C => ([1, 2, 0], Some([0_usize, 1])),
-            Bp::G => ([1, 0, 2], Some([0_usize, 2])),
-            Bp::T => ([0, 1, 2], Some([1_usize, 2])),
-        };
-
-        for i in 0..(BASE_L-1) {
-            grad[i][zeros[i]] = 0.0;
-        }
-
-        if let Some(negs) = neg_cols {
-            for i in 0..(BASE_L-1) {
-                grad[negs[0]][i] *= -1.0;
-                grad[negs[1]][i] *= -1.0;
-            }
-        }
-        
-        grad
-
-
-    }*/
- 
 
     fn max( arr: &[f64]) -> f64 {
         arr.iter().fold(f64::NAN, |x, y| x.max(*y))
@@ -846,9 +775,9 @@ impl Base {
     fn terminate_refect(triple: &[f64; BASE_L-1]) -> Option<usize> {
         
 
-        let first_checks = [triple[0].abs()+triple[1].abs()-*BARRIER,
-                            triple[0].abs()+triple[2].abs()-*BARRIER,
-                            triple[1].abs()+triple[2].abs()-*BARRIER];
+        let first_checks = [triple[0].abs()+triple[1].abs()-BARRIER,
+                            triple[0].abs()+triple[2].abs()-BARRIER,
+                            triple[1].abs()+triple[2].abs()-BARRIER];
 
         let mut first_barrier: Option<(usize, f64)> = None;
 
@@ -875,15 +804,15 @@ impl Base {
 
         //Implementation based on this math stack exchange answer: https://math.stackexchange.com/questions/4908539/reflective-dodecadron
         //
-        let triple_in_basis = [(-triple[0]+triple[1]+triple[2])/(4.0* *BARRIER),
-                               ( triple[0]-triple[1]+triple[2])/(4.0* *BARRIER),
-                               ( triple[0]+triple[1]-triple[2])/(4.0* *BARRIER)];
+        let triple_in_basis = [(-triple[0]+triple[1]+triple[2])/(4.0* BARRIER),
+                               ( triple[0]-triple[1]+triple[2])/(4.0* BARRIER),
+                               ( triple[0]+triple[1]-triple[2])/(4.0* BARRIER)];
 
         let reduce_reflection: [f64;BASE_L-1] = core::array::from_fn(|a| triple_in_basis[a].fract());
 
-        let triple = [(reduce_reflection[1]+reduce_reflection[2])*2.0* *BARRIER,
-                      (reduce_reflection[0]+reduce_reflection[2])*2.0* *BARRIER,
-                      (reduce_reflection[0]+reduce_reflection[1])*2.0* *BARRIER];
+        let triple = [(reduce_reflection[1]+reduce_reflection[2])*2.0* BARRIER,
+                      (reduce_reflection[0]+reduce_reflection[2])*2.0* BARRIER,
+                      (reduce_reflection[0]+reduce_reflection[1])*2.0* BARRIER];
 
         let (i, j): (usize, usize) = [(0, 1), (0, 2), (1, 2)][id];
 
@@ -900,12 +829,12 @@ impl Base {
         //We need to pick the biggest problem, because that's the first reflection
         if sum.abs() > diff.abs() {
             let sign = sum.signum();
-            new_triple[i] = -new_triple[i]+sign* *BARRIER;
-            new_triple[j] = -new_triple[j]+sign* *BARRIER;
+            new_triple[i] = -new_triple[i]+sign* BARRIER;
+            new_triple[j] = -new_triple[j]+sign* BARRIER;
         } else {
             let sign  = diff.signum();
-            new_triple[i] += sign* *BARRIER;
-            new_triple[j] -= sign* *BARRIER;
+            new_triple[i] += sign* BARRIER;
+            new_triple[j] -= sign* BARRIER;
         }
        
         new_triple
@@ -966,18 +895,16 @@ impl Base {
 
     pub fn rev(&self) -> Base {
 
-        let mut revved = self.props.clone();
+        let mut revved = self.scores.clone();
 
         revved.reverse();
 
-        //SAFETY: the reverse of a valid Base is still valid
-        unsafe{ Self::new(revved).unwrap_unchecked() }
-
+        Self::new(revved)
 
     }
 
     pub fn show(&self) -> [f64; BASE_L] {
-        let prop_rep = self.props.clone();
+        let prop_rep = self.scores.clone();
         prop_rep
     }
 
@@ -988,10 +915,10 @@ impl Base {
     //        is unsafe. When we use the bases from the Sequence object, the initialization of Sequence
     //        ensures that this is within bounds, but the compiler isn't smart enough to know that. 
     pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
-        *self.props.get_unchecked(bp)
+        *self.scores.get_unchecked(bp)
     }
     pub fn safe_bind(&self, bp: usize) -> f64 {
-        self.props[bp]
+        self.scores[bp]
     }
 
     pub fn seqlogo_heights(&self) -> [(usize, f64); BASE_L] {
@@ -1455,7 +1382,7 @@ impl Motif {
  
         let mut splitter_pwm: Vec<Base> = (0..num_bases).map(|i| self.pwm[i+start_ind].clone()).collect();
     
-        splitter_pwm = splitter_pwm.into_iter().map(|a| Base::new(core::array::from_fn(|j| a.props[j].sqrt())).unwrap()).collect();
+        splitter_pwm = splitter_pwm.into_iter().map(|a| Base::new(core::array::from_fn(|j| a.scores[j]/2.0))).collect();
 
         let pre_height_split = NORMAL_DIST.sample(rng);
 
@@ -1468,7 +1395,7 @@ impl Motif {
             let splitting_vec: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_DIST.sample(rng));
             ln_dens_gen += splitting_vec.iter().map(|&a| SPLIT_DIST.ln_pdf(a)).sum::<f64>();
             let splitting_base: Base = Base::vect_to_base(&splitting_vec);
-            a.sum_bases_and_lb_max(&splitting_base).unwrap().0
+            a.sum_bases_and_lb_max(&splitting_base).0
         }).collect();
 
         let splitter = Motif {
@@ -1657,13 +1584,13 @@ impl Motif {
 
         //let kmer: Vec<usize> = kmer_slice.to_vec();
 
-        let mut bind_forward: f64 = 1.0;
-        let mut bind_reverse: f64 = 1.0;
+        let mut bind_forward: f64 = 0.0;
+        let mut bind_reverse: f64 = 0.0;
 
         for i in 0..self.len() {
-            bind_forward *= self.pwm[i][*kmer.get_unchecked(i)];
+            bind_forward += self.pwm[i][*kmer.get_unchecked(i)];
             //bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
-            bind_reverse *= self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
+            bind_reverse += self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
         }
 
         let reverse: bool = bind_reverse > bind_forward;
@@ -1681,7 +1608,7 @@ impl Motif {
         let block_starts = seq.block_u8_starts(); //stored index space
 
 
-        let mut bind_scores: Vec<f64> = vec![0.0; BP_PER_U8*coded_sequence.len()];
+        let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
         let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
         let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
@@ -1747,7 +1674,7 @@ impl Motif {
 
         let mut store: [Bp; BP_PER_U8];
 
-        let max_ignore_bind = (-self.peak_height).exp2();
+        let max_ignore_bind = -self.peak_height;
 
         
 
@@ -1834,7 +1761,7 @@ impl Motif {
 
             let strand = if is_rev { "-" } else { "+" };
             let end_base = base+self.len();
-            let thousand_score = (bind*1000.) as usize;
+            let thousand_score = (bind.exp2()*1000.) as usize;
 
             if thousand_score == 0 { break; }
 
@@ -1868,7 +1795,7 @@ impl Motif {
 
         let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
-        let thresh = (-self.peak_height).exp2();
+        let thresh = -self.peak_height;
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
@@ -1880,7 +1807,7 @@ impl Motif {
 
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
                 if bind > thresh {
-                    actual_kernel = unit_kernel*(bind.log2()+self.peak_height) ;
+                    actual_kernel = unit_kernel*(bind+self.peak_height) ;
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -1914,7 +1841,7 @@ impl Motif {
 
         let h = self.peak_height;
 
-        let cutoff = (-h).exp2();
+        let cutoff = -h;
 
 
         for i in 0..starts.len() { //Iterating over each block
@@ -1923,7 +1850,7 @@ impl Motif {
                 //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
                 //SAFETY: THRESH is never modified at this point
                 if binds.0[starts[i]*BP_PER_U8+j] > cutoff {
-                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j].log2()+h) ;
+                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]+h) ;
                     //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
                     occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
                                                                                       //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
@@ -2016,7 +1943,7 @@ impl Motif {
         if distance > 0.0 { distance.sqrt() } else {0.0}
     }
 
-    fn sum_motifs(&self, other_mot: &Motif) -> Result<(Self, f64), InvalidBase> {
+    fn sum_motifs(&self, other_mot: &Motif) -> (Self, f64) {
 
         let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
 
@@ -2034,7 +1961,7 @@ impl Motif {
 
         //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
         //        The specific values here are also unimportant
-        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| unsafe{ Base::new([1.0; BASE_L]).unwrap_unchecked()}).collect();
+        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| Base::new([0.0; BASE_L])).collect();
 
         if off_center > 0 { 
             for i in 0..off_center {
@@ -2054,27 +1981,22 @@ impl Motif {
             let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
             let b2 = &pwm_long.pwm[off_center+ind];
 
-            match b2.sum_bases_and_lb_max(&b1) {
+            let (b,s) = b2.sum_bases_and_lb_max(&b1);
+            
+            new_pwm[off_center+ind] = b;
 
-                Ok((b, s)) => {
-                new_pwm[off_center+ind] = b;
-
-                correction += s;
-                },
-                Err(e) => { return Err(e);}
-            };
+            correction += s;
         }
 
         //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
         //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
         let new_height = self.peak_height()+other_mot.peak_height-correction;
 
-        Ok((Motif::raw_pwm(new_pwm, new_height), correction))
-        
+        (Motif::raw_pwm(new_pwm, new_height), correction)
 
     }
     
-    fn diff_motifs(&self, other_mot: &Motif) -> Result<(Self, f64), InvalidBase> {
+    fn diff_motifs(&self, other_mot: &Motif) -> (Self, f64) {
 
         let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
 
@@ -2092,7 +2014,7 @@ impl Motif {
 
         //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
         //        The specific values here are also unimportant
-        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| unsafe{ Base::new([1.0; BASE_L]).unwrap_unchecked()}).collect();
+        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| Base::new([0.0; BASE_L])).collect();
 
         if off_center > 0 { 
             for i in 0..off_center {
@@ -2112,23 +2034,18 @@ impl Motif {
             let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
             let b2 = &pwm_long.pwm[off_center+ind];
 
-            match b2.subtract_bases_and_lb_max(&b1) {
+            let (b,s) = b2.subtract_bases_and_lb_max(&b1);
+        
+            new_pwm[off_center+ind] = b;
+            correction += s;
 
-                Ok((b, s)) => {
-                new_pwm[off_center+ind] = b;
-
-                correction += s;
-                },
-                Err(e) => { return Err(e);}
-            };
         }
 
         //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
         //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
         let new_height = pwm_long.peak_height()-pwm_short.peak_height+correction;
 
-        Ok((Motif::raw_pwm(new_pwm, new_height), correction))
-        
+        (Motif::raw_pwm(new_pwm, new_height), correction)
 
     }
 
@@ -2318,15 +2235,15 @@ impl<'a> MotifSet<'a> {
             let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
 
             for i in 1..(motif_len+1) {
-                let mut props: [ f64; BASE_L] = [0.0; BASE_L];
+                let mut scores: [ f64; BASE_L] = [0.0; BASE_L];
                 let mut line_split = meme_as_vec[line+i].split_whitespace();
                 for j in 0..BASE_L {
                     let Some(prop_str) = line_split.next() else { return Err(Box::new(MemeParseError::ColumnLengthFailure{line_num: line+i+1})); };
                     let Ok(prop)= prop_str.parse::<f64>() else { return Err(Box::new(MemeParseError::FloatParseFailure{line_num: line+i+1}));}; 
-                    props[j] = prop;
+                    scores[j] = prop;
                 }
 
-                base_vec.push(Base::new(props)?);
+                base_vec.push(Base::new_with_pseudo(scores, 10.0, 0.1)?);
             }
 
             let mut motif = Motif::rand_height_pwm(base_vec, rng);
@@ -2813,7 +2730,7 @@ impl<'a> MotifSet<'a> {
         let gen_prior = new_mot.pwm_prior(self.data_ref.data().seq())+new_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
 
-        let Ok((split_mot, _)) = self.set[split_id].diff_motifs(&new_mot) else { return None;} ;
+        let (split_mot, _) = self.set[split_id].diff_motifs(&new_mot);
 
         let gen_prior = split_mot.pwm_prior(self.data_ref.data().seq())+split_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
@@ -2841,8 +2758,8 @@ impl<'a> MotifSet<'a> {
             
 
         let (which_longer, which_added) = if self.set[merge_1].len() <= self.set[merge_2].len() { (merge_2, merge_1) } else {(merge_1, merge_2)};
-
-        let Ok((merge_mot, cost_merge)) = self.set[which_longer].sum_motifs(&self.set[which_added]) else { return None;} ;
+ 
+        let (merge_mot, cost_merge) = self.set[which_longer].sum_motifs(&self.set[which_added]) ;
 
         let height_split_var = ((self.set[which_added].peak_height()-self.set[which_longer].peak_height())-cost_merge)*0.5;
 
@@ -5272,7 +5189,7 @@ mod tester{
         println!("{:?} {:?}", &bp_vec[0..10], &usize_vec[0..10]);
 
         let bad_safe_access = Instant::now();
-        let accessed_c: Vec<f64> = usize_vec.iter().map(|&b| base.props[b]).collect();
+        let accessed_c: Vec<f64> = usize_vec.iter().map(|&b| base.scores[b]).collect();
         let bad_safe_time = bad_safe_access.elapsed();
 
         let safe_access = Instant::now();
@@ -5316,8 +5233,8 @@ mod tester{
         println!("{:?} {:?} {} {} {}", b.base_to_vect(), b2.base_to_vect(), b2.base_to_vect()[0]-b.base_to_vect()[0],  b2.base_to_vect()[1]-b.base_to_vect()[1],  b2.base_to_vect()[2]-b.base_to_vect()[2]);
 
         
-        println!("{:?} {:?} {:?}", b0.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
-                 b2.props.iter().zip(b.props.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
+        println!("{:?} {:?} {:?}", b0.scores.iter().zip(b.scores.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(), b1.scores.iter().zip(b.scores.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>(),
+                 b2.scores.iter().zip(b.scores.iter()).map(|(&a, &b)| (a-b)/1e-6).collect::<Vec<_>>());
 
         let simp = [0.1_f64, -0.15, -0.11];
         let simp_b = Base::vect_to_base(&simp);
@@ -5893,8 +5810,8 @@ mod tester{
                     let new_base = single_mot.set[i].pwm[changed_bases[0]].clone();
 
                     println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
-                    let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
-                    let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
+                    let mut old_order = old_base.scores.iter().enumerate().collect::<Vec<_>>();
+                    let mut new_order = new_base.scores.iter().enumerate().collect::<Vec<_>>();
 
                     old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
                     new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
@@ -5931,8 +5848,8 @@ mod tester{
                         let new_base = single_mot.set[i].pwm[changed_bases[j]].clone();
 
                         println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
-                        let mut old_order = old_base.props.iter().enumerate().collect::<Vec<_>>();
-                        let mut new_order = new_base.props.iter().enumerate().collect::<Vec<_>>();
+                        let mut old_order = old_base.scores.iter().enumerate().collect::<Vec<_>>();
+                        let mut new_order = new_base.scores.iter().enumerate().collect::<Vec<_>>();
 
                         old_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
                         new_order.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());

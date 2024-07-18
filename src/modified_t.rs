@@ -1,4 +1,4 @@
-use crate::base::{BASE_L, Base};
+use crate::base::{BASE_L, SCORE_THRESH, Base, LN_2};
 
 use rand::Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal, Gamma};
@@ -8,6 +8,9 @@ use num_traits::Float;
 use serde::{Serialize, Deserialize};
 
 use std::f64;
+
+use once_cell::sync::Lazy;
+
 //use std::time::{Duration, Instant};
 
 //I apologize for this struct in advance, in particular, the FastT implementation.
@@ -43,6 +46,8 @@ const GAMMA_R: f64 = 10.900511;
 const GIVE_UP_AND_USE_NORMAL: f64 = 20.0;
 
 const IMPL_CUT: f64 = 1.; //
+
+static CONDITION_BASE: Lazy<f64> = Lazy::new(|| (-1.0+12.0/(3.+SCORE_THRESH.exp2())-12.0/(2.0+2.0*SCORE_THRESH.exp2())+4.0/(1.0+3.0*SCORE_THRESH.exp2())).ln());
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum BackgroundDist {
@@ -473,7 +478,8 @@ impl Continuous<&Base, f64> for SymmetricBaseDirichlet {
         self.ln_pdf(x).exp()
     }
     fn ln_pdf(&self, x: &Base) -> f64 {
-        self.ln_normalize+(self.alpha-1.0)*x.as_probabilities().iter().map(|&p| p.ln()).sum::<f64>()
+        self.ln_normalize+((BASE_L-1) as f64)*LN_2.ln()+LN_2*self.alpha*x.scores().iter().sum::<f64>()
+            -self.alpha*(BASE_L as f64)*x.scores().iter().map(|&a| a.exp2()).sum::<f64>().ln()-*CONDITION_BASE
     }
 
 }
@@ -484,7 +490,7 @@ impl ::rand::distributions::Distribution<Base> for SymmetricBaseDirichlet {
         //Note a small optimization: we don't actually divide by the sum of the samples here. 
         //This is because Base's implementation automatically regularizes its inputs for us
 
-        //SAFETY: we already guarenteed that none of the sampled bases will have even a single zero entry
+        //Avoiding a panic: we already guarenteed that none of the sampled bases will have even a single zero entry
         //        because we defined MIN_WELL_DEFINED_ALPHA as 53/1022. At most, there is a small probability
         //        that this will be slower because we need to delve into subnormal numbers.
         //        How am I able to make this guarentee? The gamma distribution is usually generated with the
@@ -494,7 +500,9 @@ impl ::rand::distributions::Distribution<Base> for SymmetricBaseDirichlet {
         //        taken to the root of alpha, is at least 2^(-1022), the smallest normal number. We DO divide by
         //        gamma(alpha) after, but at 53/1022, that's a little over 18 (less than 2^5), and we have leeway 
         //        with subnormals
-        unsafe{ Base::new(core::array::from_fn(|_| self.gamma_sample.sample(rng))).unwrap_unchecked()}
+
+        let gammas: [f64;BASE_L] = core::array::from_fn(|_| self.gamma_sample.sample(rng).log2());
+        Base::new(gammas)
     }
 
 }
