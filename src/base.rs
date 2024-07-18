@@ -239,9 +239,9 @@ pub const VEC_PAD_EPS: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3c2000000
 static BARRIER: Lazy<f64> = Lazy::new(|| unsafe {
                                       println!("THRESH is {THRESH}");
                                       -2.0* THRESH.ln() } );
-const SPLIT_SD: f64 = 0.4;
+const SPLIT_SD: f64 = 0.05;
 static SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, SPLIT_SD).unwrap());
-const HEIGHT_SPLIT_SD: f64 = 0.01;
+const HEIGHT_SPLIT_SD: f64 = 0.001;
 static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SPLIT_SD).unwrap());
 //BEGIN BASE
 
@@ -3863,6 +3863,9 @@ impl<'a> SetTrace<'a> {
                     (new_mot, accepted)
                 })
             },
+            8 => {
+                Some((self.active_set.randomize_motifs(self.thermo_beta, rng), true))
+            },
             _ => unreachable!(),
 
         };
@@ -4840,7 +4843,7 @@ impl<'a> TemperSetTraces<'a> {
                 
         println!("Ln posteriors of each trace before swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
 
-        /*
+        
 
                 let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
@@ -4881,7 +4884,7 @@ impl<'a> TemperSetTraces<'a> {
 
         println!("Current attentions {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.current_attention()).collect::<Vec<_>>());
 
-        */
+        /*
         
         let mut rng = rng_maker();
 
@@ -4930,8 +4933,8 @@ impl<'a> TemperSetTraces<'a> {
 
 
         println!("Ln posteriors of each trace after swaps and cool down: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
-        
-        /*if self.parallel_traces.len() >= 3  {
+        */
+        if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<(_, bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
@@ -4954,7 +4957,7 @@ impl<'a> TemperSetTraces<'a> {
             }).collect();
 
             println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        }*/
+        }
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
