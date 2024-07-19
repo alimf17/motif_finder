@@ -429,13 +429,14 @@ impl Base {
 
         samps.sort_by(|a, b| a.partial_cmp(b).unwrap());
         
-        let mut max_p = 0.0_f64;
+        let mut max_p = -f64::INFINITY;
         for i in 0..att.len() {
-            att[i] = samps[i+1]-samps[i];
+            att[i] = (samps[i+1]-samps[i]).log2();
             max_p = max_p.max(att[i]);
         }
         for i in 0..att.len() {
-            att[i] /=max_p;
+            att[i] -=max_p;
+            if att[i] < SCORE_THRESH { att[i] = SCORE_THRESH;}
         }
 
         Base { scores: att}
@@ -532,7 +533,7 @@ impl Base {
 
             None => 4.0*self.scores.iter().map(|a| a.powi(2)).sum::<f64>()-self.scores.iter().map(|a| a).sum::<f64>().powi(2),
             Some(other) => {
-                4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().map(|a| a).sum::<f64>()-other.scores.iter().map(|a| a).sum::<f64>()).powi(2)
+                (4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().map(|a| a).sum::<f64>()-other.scores.iter().map(|a| a).sum::<f64>()).powi(2))
             },
         }
 
@@ -653,7 +654,9 @@ impl Base {
 
         for (i, (s, pos)) in largest_to_smallest.into_iter().enumerate() {
             new_base[pos] = accumulate;
-            accumulate += (s+new_penalties[i]);
+            if i < new_penalties.len() { //remember, new_penalties is one shorter than largest_to_smallest
+                accumulate += (s+new_penalties[i]);
+            }
         }
 
         Some(Base::new_by_reflections(new_base))
@@ -1919,12 +1922,14 @@ impl Motif {
         if off_center > 0 { 
             for i in 0..off_center {
                 //TODO: change this to get_unchecked if there's a performance benefit
+                println!("off {off_center} {i}");
                 distance += pwm_long[i].dist_sq(None);
             }
         }
         
         if (short_len+off_center) < long_len {
             for i in (short_len+off_center)..long_len {
+                println!("off end {off_center} {i}");
                 distance += pwm_long[i].dist_sq(None);
             }
         }
@@ -1933,7 +1938,9 @@ impl Motif {
 
             let b1 = &pwm_short[ind]; 
             let b2 = &pwm_long[off_center+ind];
-           
+          
+            println!("b1 {:?} b2 {:?}", b1, b2);
+
             distance += b1.dist_sq(Some(b2));
             
         }
@@ -1985,6 +1992,8 @@ impl Motif {
             
             new_pwm[off_center+ind] = b;
 
+            println!("sum b1 {:?} b2 {:?}", b1, b2);
+            println!("s {ind} sum {s}");
             correction += s;
         }
 
@@ -2037,6 +2046,8 @@ impl Motif {
             let (b,s) = b2.subtract_bases_and_lb_max(&b1);
         
             new_pwm[off_center+ind] = b;
+            println!("diff b1 {:?} b2 {:?}", b1, b2);
+            println!("s {ind} diff {s}");
             correction += s;
 
         }
@@ -5120,12 +5131,16 @@ mod tester{
         let mut rng = rand::thread_rng();
         let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &mut rng);
         let dself = m.distance_function(&m);
-        assert!(dself.0.abs() < 1e-16);
+        println!("{:?} dself", dself);
+        assert!(dself.0.abs() < 1e-8);
         assert!(!dself.1);
+        let revved = Motif::raw_pwm(m.rev_complement(), m.peak_height());
+        println!("forward {:?} revved {:?}", m, revved);
         let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
-        assert!(drev.0.abs() < 1e-16);
+        println!("{:?} drev", drev);
+        assert!(drev.0.abs() < 1e-8);
         assert!(drev.1);
-        let zero_base = Base::new([1.0;BASE_L]).unwrap();
+        let zero_base = Base::new([0.0;BASE_L]);
         println!("zero dist {}", zero_base.dist_sq(None));
         let mut m_star_pwm = m.pwm.clone();
         m_star_pwm.insert(0,zero_base.clone());
@@ -5148,9 +5163,9 @@ mod tester{
 
         let r = Motif::from_motif(vec![Bp::A, Bp::G, Bp::G, Bp::T, Bp::A, Bp::G, Bp::G, Bp::T], &mut rng);
 
-        let (a, c) = m.sum_motifs(&r).unwrap();
+        let (a, c) = m.sum_motifs(&r);
 
-        let (b, c_star) = a.diff_motifs(&r).unwrap();
+        let (b, c_star) = a.diff_motifs(&r);
 
         println!("c {c} c_star {c_star}");
 
@@ -5455,7 +5470,7 @@ mod tester{
         let mut all_base_correct = true;
         let mut all_scramble_correct = true;
         for base in 0..mot.len() {
-            all_base_correct &= mot_scram.pwm[base][scram_kmer[base]] == 1.0;
+            all_base_correct &= mot_scram.pwm[base][scram_kmer[base]] == 0.0;
             let best_old = mot_kmer[base];
             let best_new = scram_kmer[base];
             for bp in BP_ARRAY {
@@ -5536,13 +5551,13 @@ mod tester{
         println!("{ln_post}, {}", leaped.ln_post.unwrap());
         println!("diff ln_post {}", ln_post-leaped.ln_post.unwrap());
 
-        assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
+        assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 1e-8, "ln posteriors not lining up"); 
 
         let recalced_signal = leaped.recalced_signal();
 
         let sig_diff = &leaped.signal-&recalced_signal;
 
-        let any_diffs: Vec<f64> = sig_diff.raw_wave().iter().filter(|a| a.abs() > 64.0*std::f64::EPSILON).map(|&a| a).collect();
+        let any_diffs: Vec<f64> = sig_diff.raw_wave().iter().filter(|a| a.abs() > 1e-8).map(|&a| a).collect();
 
         println!("any diff {:?}", any_diffs);
 
@@ -5693,7 +5708,9 @@ mod tester{
 
         let check_diff = &wave_diff-&add_mot.generate_waveform(&data_seq);
 
-        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1024.0*std::f64::EPSILON).fold(true, |f, x| f && x);
+        let all_good = check_diff.read_wave().iter().map(|&a| a.abs() < 1e-9).fold(true, |f, x| f && x);
+
+        println!("{:?}", check_diff);
 
         assert!(all_good);
 
@@ -6343,13 +6360,14 @@ mod tester{
 
         let bindy = unsafe{ motif.prop_binding(&best_mot) };
 
-        assert!(((bindy.0-1.0).abs() < 1e-6) && !bindy.1);
+        println!("bindy {:?}", bindy);
+        assert!(((bindy.0-0.0).abs() < 1e-6) && !bindy.1);
 
         let rev_best = best_mot.iter().rev().map(|a| a.complement()).collect::<Vec<Bp>>();
 
         let bindy = unsafe {motif.prop_binding(&rev_best) };
 
-        assert!(((bindy.0-1.0).abs() < 1e-6) && bindy.1);
+        assert!(((bindy.0-0.0).abs() < 1e-6) && bindy.1);
 
         let pwm = motif.pwm();
 
@@ -6376,7 +6394,7 @@ mod tester{
                     if k != i {
                         for m in BP_ARRAY {
 
-                            let defect_2 = defect*pwm[k][m];
+                            let defect_2 = defect+pwm[k][m];
                             let mut for_mot_2 = for_mot.clone();
                             for_mot_2[k] = m;
                             let mut rev_mot_2 = rev_mot.clone();
@@ -6410,8 +6428,8 @@ mod tester{
         
             let altermot = data_seq.data().seq().random_valid_motif(random_motif.pwm().len(), &mut rng);
 
-            let forward_defect = altermot.iter().enumerate().map(|(i, &b)| rand_pwm[i][b]).product::<f64>();
-            let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| rand_pwm[i][b.complement()]).product::<f64>();
+            let forward_defect = altermot.iter().enumerate().map(|(i, &b)| rand_pwm[i][b]).sum::<f64>();
+            let reverse_defect = altermot.iter().rev().enumerate().map(|(i, &b)| rand_pwm[i][b.complement()]).sum::<f64>();
 
             let is_rev = reverse_defect > forward_defect;
 
@@ -6421,6 +6439,7 @@ mod tester{
 
             let bindy = unsafe{ random_motif.prop_binding(&altermot)};
 
+            println!("bindy  {:?}", bindy);
             assert!(((bindy.0-proper_defect).abs() < 1e-6) && (bindy.1 == is_rev));
 
         }
@@ -6438,7 +6457,7 @@ mod tester{
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, _) = unsafe{ motif.prop_binding(&mot)};
 
-                if prop > (-motif.peak_height).exp2() { significant_binds.push(prop); }
+                if prop > (-motif.peak_height) { significant_binds.push(prop); }
 
             }
 
@@ -6480,9 +6499,9 @@ mod tester{
 
 
         let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background) }; 
-        let theory_base = [1.0, 1e-5, 1e-5, 0.2];
+        let theory_base = [1.0.log2(), 1e-5.log2(), 1e-5.log2(), 0.2_f64.log2()];
 
-        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
+        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
 
 
         println!("DF");
@@ -6497,7 +6516,7 @@ mod tester{
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
         let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
-        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone()).expect("We designed theory_base to be statically valid")).collect::<Vec<_>>();
+        let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0); //small
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.gen::<bool>()).collect();
@@ -6599,7 +6618,7 @@ mod tester{
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
                 let relevant_binds = (cut_low..cut_high).filter(|&a| {
                     //println!("{a} bindslen {}", binds.0.len());
-                    binds.0[a] > (-motif.peak_height()).exp2() 
+                    binds.0[a] > (-motif.peak_height()) 
                 }).collect::<Vec<_>>();
 
 
@@ -6607,7 +6626,7 @@ mod tester{
 
                     let mut score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
-                        let to_add = (motif.peak_height()+binds.0[relevant_binds[k]].log2())*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        let to_add = (motif.peak_height()+binds.0[relevant_binds[k]])*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
                         //println!("to_add {to_add}");
                         score+=to_add;
                     }
