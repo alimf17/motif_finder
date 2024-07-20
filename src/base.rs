@@ -36,7 +36,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use  rand_distr::weighted_alias::*;
 
 use statrs::{consts, StatsError};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp};
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp, Beta};
 use statrs::statistics::{Min, Max};
 
 use ordered_float::*;
@@ -226,8 +226,11 @@ const SPLIT_SD: f64 = 0.05;
 static SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, SPLIT_SD).unwrap());
 const HEIGHT_SPLIT_SD: f64 = 0.001;
 static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SPLIT_SD).unwrap());
-//BEGIN BASE
 
+static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
+
+
+//BEGIN BASE
 #[repr(usize)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Bp {
@@ -378,7 +381,7 @@ impl Base {
 
         scores.iter_mut().for_each(|pos| {
             if *pos < SCORE_THRESH { 
-                *pos = *pos + 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
+                *pos = *pos - 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
                 if *pos > 0.0 { *pos = -*pos;}
             }
         });
@@ -564,6 +567,74 @@ impl Base {
         simplex
     }
 
+    //Returns two bases and the ln Jacobian of the split
+    pub fn split_base<R: Rng+?Sized>(&self, rng: &mut R) -> (Base, Base, f64) {
+
+        let not_bests = self.all_non_best();
+
+        let energy_penalties: [f64; BASE_L-1] = core::array::from_fn(|a| self[not_bests[a]]);
+
+        let scales: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_BASE_DIST.sample(rng));
+
+        //TODO: fix jacobian to be compatible with x0/1 = (x/2)*(1+/-p)
+        let ln_jacobian = -((BASE_L-1) as f64)*LN_2+not_bests.iter().map(|&a| (-self[a]).ln()).sum::<f64>();
+
+        let ln_selection_density = -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
+
+        let base_0_choices: [bool; BASE_L-1] = core::array::from_fn(|_| rng.gen());
+
+        let mut base_0 = Base::new([0.0; BASE_L]);
+        let mut base_1 = Base::new([0.0; BASE_L]);
+
+        let new_penalty_pairs: [[f64;2];BASE_L-1] = core::array::from_fn(|a| {
+            let half_energy = self[not_bests[a]]*0.5;
+            [half_energy*(1.0-scales[a]), half_energy*(1.0+scales[a])]
+        });
+
+        for (i, &not_best) in not_bests.iter().enumerate(){
+
+            if base_0_choices[i] {
+                base_0[not_best] = new_penalty_pairs[i][0];
+                base_1[not_best] = new_penalty_pairs[i][1];
+            } else {
+                base_0[not_best] = new_penalty_pairs[i][1];
+                base_1[not_best] = new_penalty_pairs[i][0];
+            }
+
+        }
+
+        (base_0, base_1, ln_jacobian-ln_selection_density)
+    }
+
+    //Returns two bases and the ln Jacobian of the split, but only if they have the same best base
+    pub fn merge_bases(&self, other_base: &Base) -> Option<(Base, f64)> {
+
+        let best = self.best_base();
+        if best != other_base.best_base() { return None; }
+
+        let not_bests = self.all_non_best();
+
+        let sum_energy_penalties: [f64; BASE_L-1] = core::array::from_fn(|a| self[not_bests[a]]+other_base[not_bests[a]]);
+
+        let scales: [f64; BASE_L-1] = core::array::from_fn(|a| (self[not_bests[a]]-other_base[not_bests[a]]).abs());
+
+        if sum_energy_penalties.iter().any(|a| *a < SCORE_THRESH) { return None; }
+
+        let ln_jacobian = ((BASE_L-1) as f64)*LN_2-sum_energy_penalties.iter().map(|&a| (-a).ln()).sum::<f64>();
+
+        let ln_selection_density =  -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
+
+        let mut pre_base = Base::new([0.0; BASE_L]);
+
+        for (i, &not_best) in not_bests.iter().enumerate(){
+            pre_base[not_best] = sum_energy_penalties[i];
+        }
+
+
+        Some((pre_base, ln_jacobian+ln_selection_density))
+
+    }
+    
     pub fn sum_bases_and_lb_max(&self, other_base: &Base) -> (Self, f64) {
 
         let mut max_prop: f64 = 0.0;
