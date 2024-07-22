@@ -229,6 +229,10 @@ static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SP
 
 static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
 
+//These were determined through numerical experiments and rough fits
+const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
+const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
+const EXPONENT_WEIGHT_CONST: f64 = 1.4;
 
 //BEGIN BASE
 #[repr(usize)]
@@ -576,7 +580,6 @@ impl Base {
 
         let scales: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_BASE_DIST.sample(rng));
 
-        //TODO: fix jacobian to be compatible with x0/1 = (x/2)*(1+/-p)
         let ln_jacobian = -((BASE_L-1) as f64)*LN_2+not_bests.iter().map(|&a| (-self[a]).ln()).sum::<f64>();
 
         let ln_selection_density = -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
@@ -695,7 +698,6 @@ impl Base {
         let sanitized_base: [f64; BASE_L-1] = Self::reflect_triple_to_finite(base_as_vec); 
 
 
-        //TODO: fix this so that it starts with best base at 1.0
         let unnormalized_base: [f64; BASE_L] = 
             [-(sanitized_base[0]+sanitized_base[1]+sanitized_base[2])*0.25, 
               (sanitized_base[0]+sanitized_base[1]-sanitized_base[2])*0.25,
@@ -4717,7 +4719,8 @@ pub enum TrackingOptions {
 
 pub struct TemperSetTraces<'a> {
     //Each trace knows its thermodynamic beta
-    parallel_traces: Vec<(SetTrace<'a>, Option<MoveTracker>)>,
+    parallel_traces: Vec<(SetTrace<'a>, Option<MoveTracker>, f64)>,
+    currently_tracking: usize,
     track: TrackingOptions,
 }
 
@@ -4782,11 +4785,13 @@ impl<'a> TemperSetTraces<'a> {
         }
 
 
-        let mut parallel_traces: Vec<(SetTrace, Option<MoveTracker>)> = Vec::with_capacity(thermos.len());
+        let mut parallel_traces: Vec<(SetTrace, Option<MoveTracker>, f64)> = Vec::with_capacity(thermos.len());
 
         //pub fn new_trace(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, mut rng: R) -> SetTrace<'a>
 
         let past_initial: bool = false;
+
+        let mut current_weight: f64 = 0.0;
 
         for (i, thermo_beta) in thermos.into_iter().enumerate() {
             println!("thermo check {i} {:?}", null_block_groups[i]);
@@ -4797,18 +4802,58 @@ impl<'a> TemperSetTraces<'a> {
             };
             let set_trace = SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, null_block_groups[i].clone(), sparse, rng); 
             println!("thermo {} attention {:?}", set_trace.thermo_beta, set_trace.active_set.current_attention());
-            parallel_traces.push((set_trace, potential_tracker));
+        
+            parallel_traces.push((set_trace, potential_tracker,current_weight));
+
+            current_weight += thermo_step*(ADDITIVE_WEIGHT_CONST+0.5*MULTIPLY_WEIGHT_CONST*(EXPONENT_WEIGHT_CONST*thermo_beta)*(1.0+thermo_step.exp()));
         }
 
-        Ok(TemperSetTraces { parallel_traces: parallel_traces, track: how_to_track })
+        Ok(TemperSetTraces { parallel_traces: parallel_traces, currently_tracking: 0, track: how_to_track })
     }
 
     pub fn do_shuffles<R: Rng+?Sized>(&mut self, number_secondaries: usize, burning_in: bool, rng: &mut R) {
 
-        self.parallel_traces.iter_mut().for_each(|(set, track)| {
+        self.parallel_traces.iter_mut().for_each(|(set, track, _)| {
             set.advance_only_shuffles(track.as_mut(), true, burning_in, rng);
             for _ in 0..number_secondaries { set.advance_only_shuffles(track.as_mut(), false, burning_in, rng); } 
         });
+
+    }
+
+   
+    pub fn recalibrate_weights(&mut self) {
+
+        let thermo_step = (1_f64-self.parallel_traces[self.parallel_traces.len()-1].0.thermo_beta())/((self.parallel_traces.len()-1) as f64);
+
+        let mut current_like_list: Vec<f64> = self.parallel_traces[0].0.trace.iter().map(|a| a.ln_post).collect();
+        let mut median_ln_post = if current_like_list.len() == 0 { self.parallel_traces[0].0.active_set.ln_posterior() } else {
+                current_like_list.sort_by(|a,b| a.partial_cmp(b).unwrap());
+                let len = current_like_list.len();
+                if (len & 1) == 1 {
+                    current_like_list[(len-1)/2]
+                } else {
+                    0.5*(current_like_list[len/2]+current_like_list[(len/2)-1])
+                }
+        };
+
+        let mut weight: f64 = 0.0;
+        for i in 1..self.parallel_traces.len() {
+            let mut current_like_list: Vec<f64> = self.parallel_traces[i].0.trace.iter().map(|a| a.ln_post).collect();
+            let med = if current_like_list.len() == 0 { self.parallel_traces[i].0.active_set.ln_posterior() } else {
+                current_like_list.sort_by(|a,b| a.partial_cmp(b).unwrap());
+                let len = current_like_list.len();
+                if (len & 1) == 1 {
+                    current_like_list[(len-1)/2]
+                } else {
+                    0.5*(current_like_list[len/2]+current_like_list[(len/2)-1])
+                }
+            };
+
+            weight += -thermo_step*0.5*(median_ln_post+med);
+        
+            self.parallel_traces[i].2 = weight;
+            median_ln_post = med;
+        }
 
     }
 
@@ -4818,7 +4863,7 @@ impl<'a> TemperSetTraces<'a> {
 
         for _ in 0..iters_before_swaps {
        
-            self.parallel_traces.par_iter_mut().for_each(|(set, track)| {
+            self.parallel_traces.par_iter_mut().for_each(|(set, track, _)| {
                 let mut rng = rng_maker();
                 for _ in 0..iters_between_shuffles { set.advance(track.as_mut(), false, &mut rng); }
             });
@@ -4874,7 +4919,7 @@ impl<'a> TemperSetTraces<'a> {
 
         
 
-                let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
+        let odd_swaps: Vec<([f64;2], bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
@@ -4963,7 +5008,7 @@ impl<'a> TemperSetTraces<'a> {
 
         println!("Ln posteriors of each trace after swaps and cool down: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
         */
-        if self.parallel_traces.len() >= 3  {
+    /*    if self.parallel_traces.len() >= 3  {
             let odd_attention_swaps: Vec<(_, bool)> = self.parallel_traces[1..].par_chunks_exact_mut(2).map(|x| { 
                 let (c, d) = x.split_at_mut(1);
                 let (a, b) = (&mut c[0], &mut d[0]);
@@ -4985,8 +5030,43 @@ impl<'a> TemperSetTraces<'a> {
                 ([a.0.active_set.current_attention().clone(), b.0.active_set.current_attention().clone()], accept_swap)
             }).collect();
 
+
             println!("Odd attention swaps: {:?}", odd_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
+        
+            }*/
+
+    }
+
+    pub fn serially_temper<R: Rng>(&mut self, iters_between_shuffles: usize, iters_before_swaps: usize, cooldown_iters: usize, rng: &mut R) {
+
+        let index = self.currently_tracking;
+
+        for _ in 0..(iters_between_shuffles*iters_before_swaps) { 
+            let (set, trace, _) = &mut self.parallel_traces[index];
+            set.advance(trace.as_mut(), false, rng); }
+
+        let attempt_index_up: bool = rng.gen();
+
+        let trace_len = self.parallel_traces.len();
+
+        if !attempt_index_up && (index == 0) { return;}
+        if attempt_index_up && (index == (self.parallel_traces.len()-1)) { return;}
+
+        let alter_index = if attempt_index_up { index + 1} else {index-1};
+
+        let current_ln_post = self.parallel_traces[index].0.active_set.ln_posterior();
+
+        let try_shift: f64 = rng.gen();
+
+        let shift_cutoff = (self.parallel_traces[index].0.thermo_beta()-self.parallel_traces[alter_index].0.thermo_beta())*current_ln_post
+                          -(self.parallel_traces[alter_index].2-self.parallel_traces[index].2);
+
+        if try_shift <= shift_cutoff {
+            self.currently_tracking = alter_index;
+            let (set, trace, _) = &mut self.parallel_traces[alter_index];
+            for _ in 0..(cooldown_iters*iters_before_swaps) { set.advance(trace.as_mut(), true, rng); }
         }
+
     }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
