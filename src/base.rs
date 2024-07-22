@@ -175,7 +175,7 @@ const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+9;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 20]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 1]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -579,11 +579,7 @@ impl Base {
         //TODO: fix jacobian to be compatible with x0/1 = (x/2)*(1+/-p)
         let ln_jacobian = -((BASE_L-1) as f64)*LN_2+not_bests.iter().map(|&a| (-self[a]).ln()).sum::<f64>();
 
-        println!("ln jacobian split {ln_jacobian}");
-
         let ln_selection_density = -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
-
-        println!("ln selection density {ln_selection_density}");
 
         let base_0_choices: [bool; BASE_L-1] = core::array::from_fn(|_| rng.gen());
 
@@ -622,18 +618,14 @@ impl Base {
 
         let scales: [f64; BASE_L-1] = core::array::from_fn(|a| (self[not_bests[a]]-other_base[not_bests[a]]).abs()/sum_energy_penalties[a].abs());
 
-        println!("scales {:?}", scales);
 
         if sum_energy_penalties.iter().any(|a| *a < SCORE_THRESH) { return None; }
 
-        println!("sum energy penalties: {:?}", sum_energy_penalties);
 
         let ln_jacobian = ((BASE_L-1) as f64)*LN_2-sum_energy_penalties.iter().map(|&a| (-a).ln()).sum::<f64>();
-        println!("ln jacobian merge {ln_jacobian}");
 
         let ln_selection_density =  -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
 
-        println!("ln selection density {ln_selection_density}");
         let mut pre_base = Base::new([0.0; BASE_L]);
 
         for (i, &not_best) in not_bests.iter().enumerate(){
@@ -1511,7 +1503,6 @@ impl Motif {
         let height_a = self.peak_height*0.5+rand_height_split;
         let height_b = self.peak_height-height_a;
 
-        println!("split adding to {} {}", rand_height_split, NORMAL_DIST.ln_pdf(rand_height_split/height_sd)-height_sd.ln());
 
         (Motif::raw_pwm(pwm_a, height_a), Motif::raw_pwm(pwm_b, height_b), ln_jacob_minus_proposal)
 
@@ -1526,11 +1517,9 @@ impl Motif {
 
         let mut ln_jacob_plus_proposal = 0.0;
 
-        println!("to merge {:?} {:?} {:?} {:?}", self.best_motif(), self, motif_b.best_motif(), motif_b);
 
         let Some(fused_pwm) = (0..self.len()).map(|i| {
             let Some((fused_base, add_to)) = self.pwm[i].merge_bases(&motif_b.pwm[i]) else { return None; };
-            println!("adding {i} {add_to}");
             ln_jacob_plus_proposal += add_to;
             Some(fused_base)
         }).collect::<Option<Vec<Base>>>() else {return None;};
@@ -1544,7 +1533,6 @@ impl Motif {
 
         ln_jacob_plus_proposal += NORMAL_DIST.ln_pdf(rand_split_height/height_sd)-height_sd.ln();
       
-        println!("adding to {} {}",rand_split_height, NORMAL_DIST.ln_pdf(rand_split_height/height_sd)-height_sd.ln());
 
         let merged = Motif::raw_pwm(fused_pwm, new_height);
 
@@ -2065,14 +2053,12 @@ impl Motif {
         if off_center > 0 { 
             for i in 0..off_center {
                 //TODO: change this to get_unchecked if there's a performance benefit
-                println!("off {off_center} {i}");
                 distance += pwm_long[i].dist_sq(None);
             }
         }
         
         if (short_len+off_center) < long_len {
             for i in (short_len+off_center)..long_len {
-                println!("off end {off_center} {i}");
                 distance += pwm_long[i].dist_sq(None);
             }
         }
@@ -2082,7 +2068,6 @@ impl Motif {
             let b1 = &pwm_short[ind]; 
             let b2 = &pwm_long[off_center+ind];
           
-            println!("b1 {:?} b2 {:?}", b1, b2);
 
             distance += b1.dist_sq(Some(b2));
             
@@ -2135,8 +2120,6 @@ impl Motif {
             
             new_pwm[off_center+ind] = b;
 
-            println!("sum b1 {:?} b2 {:?}", b1, b2);
-            println!("s {ind} sum {s}");
             correction += s;
         }
 
@@ -2189,8 +2172,6 @@ impl Motif {
             let (b,s) = b2.subtract_bases_and_lb_max(&b1);
         
             new_pwm[off_center+ind] = b;
-            println!("diff b1 {:?} b2 {:?}", b1, b2);
-            println!("s {ind} diff {s}");
             correction += s;
 
         }
@@ -2909,7 +2890,6 @@ impl<'a> MotifSet<'a> {
 
         let Some((merge_mot, ln_merge_jacobian_plus_pick_prob)) = self.set[merge_1].merge_motifs(&self.set[merge_2], HEIGHT_SPLIT_SD) else {return None;} ;
 
-        println!("merging {:?} {:?} {} {} {}", merge_mot.best_motif(), merge_mot, merge_mot.pwm_prior(self.data_ref.data().seq()), merge_mot.height_prior(), ln_merge_jacobian_plus_pick_prob);
         let mut new_set = self.derive_set();
 
         let (replace, delete) = if merge_1 < merge_2 { (merge_1, merge_2) } else { (merge_2, merge_1)};
@@ -2918,7 +2898,6 @@ impl<'a> MotifSet<'a> {
 
         let ln_post = new_set.remove_motif(delete);
 
-        println!("ln post {} ln like {} ln priors {}", new_set.ln_posterior(), new_set.ln_likelihood(), new_set.ln_prior());
 
         Some((new_set, ln_post+ln_merge_jacobian_plus_pick_prob))
     }
@@ -5283,18 +5262,19 @@ mod tester{
         assert!(d_unalt_rev.0.abs()-(newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt() < 1e-9);
         assert!(d_unalt_rev.1);
 
-        let r = Motif::from_motif(vec![Bp::A, Bp::G, Bp::G, Bp::T, Bp::A, Bp::G, Bp::G, Bp::T], &mut rng);
+        //let r = Motif::from_motif(vec![Bp::A, Bp::G, Bp::G, Bp::T, Bp::A, Bp::G, Bp::G, Bp::T], &mut rng);
 
-        let (a, c) = m.sum_motifs(&r);
+        let (r, a, c) = m.split_motif(HEIGHT_SPLIT_SD, &mut rng); 
 
-        let (b, c_star) = a.diff_motifs(&r);
+
+        let Some((b, c_star)) = a.merge_motifs(&r, HEIGHT_SPLIT_SD) else {panic!("not reversing a split");};
 
         println!("c {c} c_star {c_star}");
 
         println!("m {:?} b {:?}", m, b);
 
         println!("{:?}", b.distance_function(&m));
-        assert!((c-c_star).abs() < 1e-9);
+        assert!((c+c_star).abs() < 1e-9);
         assert!(b.distance_function(&m).0 < 1e-9);
         assert!(!b.distance_function(&m).1);
 
@@ -6254,6 +6234,8 @@ mod tester{
                                 .map(|(a,b)| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()-1))
                                 .fold(true, |acc, y| acc && y), "contract messed up contracting" );
                     },
+                    4 => assert!(step_set.set.len() == motif_set.set.len()+1, "split not birthing"),
+                    5 => assert!(step_set.set.len() == motif_set.set.len()-1, "merge not deathing"),
                     _ => assert!(false, "Picking an impossible move!"),
                 };
             }
