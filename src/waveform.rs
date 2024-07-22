@@ -981,7 +981,7 @@ impl<'a> Noise<'a> {
         //let mut extras: Vec<f64> = self.extraneous_resids();
         forward.append(&mut extras);
         drop(extras);
-        forward.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap()); //Tried having par sort, something is playing nastily with rayon
 
         let n = forward.len();
         let mut a_d = -(n as f64);

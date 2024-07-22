@@ -5095,7 +5095,7 @@ impl<'a> TemperSetTraces<'a> {
         match tracker {
             TrackingOptions::NoTracking => (),
             TrackingOptions::TrackTrueTrace => {self.parallel_traces[0].1.as_ref().map(|a| a.all_move_hists(pre_file_name, num_bins));},
-            TrackingOptions::TrackAllTraces => {self.parallel_traces.par_iter().map(|b| b.1.as_ref()
+            TrackingOptions::TrackAllTraces => {self.parallel_traces.iter().map(|b| b.1.as_ref() //Tried having this be a par_iter, but something plays very nastily with Rayon
                                                                                 .map(|a| {
                                                                                     let alter_name = format!("{}_thermo_beta_{}", pre_file_name, b.0.thermo_beta);
                                                                                     a.all_move_hists(&alter_name, num_bins)
