@@ -20,7 +20,7 @@ use core::slice::{Iter, IterMut};
 
 use crate::waveform::{Kernel, Waveform, Noise};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
-use crate::modified_t::{ContinuousLnCDF};
+use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 
 use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
@@ -214,6 +214,8 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 //The more you increase this, the fewer motifs you will get, on average
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 */
+
+pub static BASE_PRIOR: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap());
 
 pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "Split Motif", "Merge Motif"];
 
@@ -1674,9 +1676,11 @@ impl Motif {
             //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
             //number possible kmers = BASE_L^k, but this actually cancels with our integral
             //over the regions of possible bases, leaving only number unique kmers. 
-            let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
+            //The commented out part is technically "necessary." It just get cancelled with the commented out part that would get added for each base
+            let mut prior = -((MAX_BASE+1-MIN_BASE) as f64).ln()+((seq.number_unique_kmers(self.len()) as f64).ln());//-(self.len() as f64)*(BASE_L as f64).ln(); 
 
-            prior += (self.len() as f64) * BASE_PRIOR_DENS.ln();
+            //The probability is P(this best motif)*f(this motif| this best motif). So we have to add a BASE_L.ln() for each base
+            prior += self.pwm.iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>();//+(BASE_L as f64).ln();
 
             prior
 
@@ -6519,9 +6523,9 @@ mod tester{
 
         //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), (sequence.number_unique_kmers(motif.len()) as f64).ln() - (motif.len() as f64)*BASE_PRIOR_DENS.ln());
-        assert!((motif.pwm_prior(&sequence)+(sequence.number_unique_kmers(motif.len()) as f64).ln()
-                 -(motif.len() as f64)*BASE_PRIOR_DENS.ln()).abs() < 1e-6);
+        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), ((MAX_BASE+1-MIN_BASE) as f64).ln()-(sequence.number_unique_kmers(motif.len()) as f64).ln() - motif.pwm_ref().iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>());
+        assert!((motif.pwm_prior(&sequence)-(sequence.number_unique_kmers(motif.len()) as f64).ln()+((MAX_BASE+1-MIN_BASE) as f64).ln()
+                 -motif.pwm_ref().iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>()).abs() < 1e-6);
 
         let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],&mut rng);//Sequence
 
