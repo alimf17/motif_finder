@@ -1816,7 +1816,6 @@ impl Motif {
 
         let max_ignore_bind = -self.peak_height;
 
-        
 
         {
             let uncoded_seq = uncoded_seq.as_mut_slice();
@@ -2727,6 +2726,7 @@ impl<'a> MotifSet<'a> {
         match self.ln_post {
             None => {
                 let ln_prior = self.ln_prior();
+                self.recalc_negatives();
                 if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                     self.ln_post = Some(ln_prior+self.ln_likelihood());
                 } else{
@@ -2803,13 +2803,22 @@ impl<'a> MotifSet<'a> {
         &self.null_seq_attentions
     }
 
+    pub fn recalc_negatives(&mut self) {
+        self.null_peak_scores = if self.null_seq_attentions.len() == 0 {Vec::new()} else {
+            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
+                                     .iter().map(|&b| a.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+        };
+
+
+    }
+
     pub fn change_set_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
 
         self.null_seq_attentions = negative_blocks;
 
         self.null_peak_scores = if self.null_seq_attentions.len() == 0 {Vec::new()} else {
             self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
-                                     .iter().map(|&b| a.peak_height()+b.log2()).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+                                     .iter().map(|&b| a.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
         };
 
         self.ln_post = None;
@@ -4879,15 +4888,18 @@ impl<'a> TemperSetTraces<'a> {
 
         
         for j in 0..self.parallel_traces.len(){
+            if self.parallel_traces[j].0.active_set.null_peak_scores.len() > 0 {println!("{j} binds_saved {} {} len {}", self.parallel_traces[j].0.active_set.null_peak_scores[0], self.parallel_traces[j].0.active_set.null_peak_scores.last().unwrap(), self.parallel_traces[j].0.active_set.null_peak_scores.len());}
+            else {println!("no null binds in active {j}");}
             for (i, motif) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
-            let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height()).exp2()).collect::<Vec<f64>>();
-            if binds.len() >0{
+            
+                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height())).collect::<Vec<f64>>();
+                if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
-            //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
-             println!("{j} {i} binds {} {} len {}", binds[0], binds.last().unwrap(), binds.len());
-            //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
-            } else {println!("{j} {i} no extraneous");}
-        }
+                //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
+                println!("{j} {i} binds {} {} len {}", binds[0], binds.last().unwrap(), binds.len());
+                //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
+                }else {println!("{j} {i} no extraneous");}
+            }
         }
 
         //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
@@ -6471,9 +6483,10 @@ mod tester{
         let null_blocks: Vec<usize> = (0..null_block_lens.len()).collect();
 
         let start_null = Instant::now();
-        let _null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
+        let null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
         let duration_null = start_null.elapsed();
 
+        println!("height {} null binds {:?}", motif.peak_height(), null_binds);
         println!("null dur {:?}", duration_null);
 
 

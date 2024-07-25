@@ -201,7 +201,11 @@ pub fn main() {
     let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
 
     println!("Best motif set: {:?}", best_single_motif_set);
-
+    let activated = best_single_motif_set.reactivate_set(&data_ref);
+    for i in 0..best_single_motif_set.num_motifs(){
+        let mot = activated.get_nth_motif(i);
+        println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), &(0..data_ref.null_seq().num_sequence_blocks()).collect::<Vec<_>>()));
+    }
     let save_file = format!("{}_best_trace", base_file);
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
