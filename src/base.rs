@@ -2278,11 +2278,10 @@ impl fmt::Debug for Motif {
 //
 pub struct MotifSet<'a> {
 
-    set: Vec<Motif>, 
+    set: Vec<(Motif, Vec<f64>)>, 
     signal: Waveform<'a>,
     ln_post: Option<f64>,
     null_seq_attentions: Vec<usize>,
-    null_peak_scores: Vec<f64>,
     data_ref: &'a AllDataUse<'a>, 
 }
 
@@ -2298,7 +2297,14 @@ impl<'a> MotifSet<'a> {
 
             let signal = set[0].generate_waveform(data_ref);
 
-            let mut mot_set_try = MotifSet{ set: set, signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
+            let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
+
+            let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
+                let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+                (a,null)
+            }).collect();
+
+            let mut mot_set_try = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
 
             let like = mot_set_try.ln_posterior();
 
@@ -2317,8 +2323,16 @@ impl<'a> MotifSet<'a> {
         let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), rng)];
 
         let signal = set[0].generate_waveform(data_ref);
+            
+        let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
 
-        let mut mot_set = MotifSet{ set: set,  signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+            (a,null)
+        }).collect();
+
+        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
+
 
         let _ = mot_set.ln_posterior();
 
@@ -2332,7 +2346,14 @@ impl<'a> MotifSet<'a> {
 
         let signal = set[0].generate_waveform(data_ref);
 
-        let mut mot_set = MotifSet{ set: set, signal: signal, ln_post: None, null_seq_attentions: Vec::new(), null_peak_scores: Vec::new(), data_ref: data_ref};
+        let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
+
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+            (a,null)
+        }).collect();
+
+        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
 
         let _ = mot_set.ln_posterior();
 
@@ -2407,12 +2428,13 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a, Vec::new())).collect();
+
         let mut full_set = MotifSet {
-            set: set,
+            set: set_with_nulls,
             signal: signal, 
             ln_post: None, 
             null_seq_attentions: Vec::new(),
-            null_peak_scores: Vec::new(),
             data_ref: data_ref, 
         };
 
@@ -2453,7 +2475,7 @@ impl<'a> MotifSet<'a> {
 
     pub fn recalced_signal(&self) -> Waveform {
         let mut signal = self.data_ref.data().derive_zero();
-        for mot in self.set.iter() {
+        for (mot, _) in self.set.iter() {
             signal += &(mot.generate_waveform(self.data_ref));
         }
 
@@ -2462,10 +2484,19 @@ impl<'a> MotifSet<'a> {
 
     fn recalc_signal(&mut self) {
         self.signal = self.data_ref.data().derive_zero();
-        for mot in self.set.iter() {
+        for (mot, _) in self.set.iter() {
             self.signal += &(mot.generate_waveform(self.data_ref));
         }
         self.ln_post = None;
+    }
+
+    fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
+    
+        if self.null_seq_attentions.len() == 0 {
+            Vec::new()
+        } else {
+            mot.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| mot.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>() 
+        }
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -2480,7 +2511,7 @@ impl<'a> MotifSet<'a> {
             for (i, _mot) in self.set.iter().enumerate() {
 
                 let sub_directory = format!("{}/Motif_{}", signal_directory, i);
-                let sub_signal = self.set[i].generate_waveform(data_ref);
+                let sub_signal = self.nth_motif(i).generate_waveform(data_ref);
                 sub_signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN);
 
             }
@@ -2491,11 +2522,11 @@ impl<'a> MotifSet<'a> {
     //I deliberately chose not to scale anything by peak heights here
     pub fn generate_set_binding_report(&self, data_ref:&AllDataUse) -> Vec<(usize, usize, usize, f64)> {
 
-        let mut binding = self.set[0].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+        let mut binding = self.nth_motif(0).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>();
 
         if self.set.len() > 1 { for i in 1..self.set.len() {
 
-            let new_binding = self.set[i].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[i].len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+            let new_binding = self.nth_motif(i).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(i).len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
 
             for j in 0..binding.len() {
                 if new_binding[j].2 > binding[j].2 {
@@ -2516,9 +2547,9 @@ impl<'a> MotifSet<'a> {
         if omit >= self.set.len() { return self.generate_set_binding_report(data_ref); }
 
         let mut binding = if omit == 0 {
-            self.set[1].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
+            self.nth_motif(1).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
         } else {
-            self.set[0].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[0].len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
+            self.nth_motif(0).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
         };
 
         if self.set.len() == 2 { return binding;}
@@ -2528,7 +2559,7 @@ impl<'a> MotifSet<'a> {
         for i in start_id..self.set.len() {
 
             if i != omit {
-                let new_binding = self.set[i].gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.set[i].len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
+                let new_binding = self.nth_motif(i).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(i).len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
 
                 for j in 0..binding.len() {
                     if new_binding[j].2 > binding[j].2 {
@@ -2656,7 +2687,7 @@ impl<'a> MotifSet<'a> {
 
         if omit_weakest && self.set.len() > 1 {
 
-            let weakest = self.set.iter().map(|a| a.peak_height()).enumerate().min_by(|(_, a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
+            let weakest = self.set.iter().map(|a| a.0.peak_height()).enumerate().min_by(|(_, a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
 
             let precision_weakest: Vec<f64> = self.precision_for_each_recall_omit_motif(data_ref,&peak_locations, weakest);
 
@@ -2691,15 +2722,26 @@ impl<'a> MotifSet<'a> {
             set: self.set.clone(),
             signal: self.signal.clone(),
             null_seq_attentions: self.null_seq_attentions.clone(),
-            null_peak_scores: self.null_peak_scores.clone(),
             ln_post: None,
             data_ref: self.data_ref, //pointer
         }
 
     }
 
+    pub fn nth_motif(&self, n: usize) -> &Motif {
+        &self.set[n].0
+    }
+
+    pub fn nth_motif_mut(&mut self, n: usize) -> &mut Motif {
+        &mut self.set[n].0
+    }
+
     pub fn get_nth_motif(&self, n: usize) -> Motif {
-        self.set[n].clone()
+        self.set[n].0.clone()
+    }
+
+    pub fn null_peak_scores(&self) -> Vec<f64> {
+        self.set.iter().map(|a| a.1.iter().map(|&b| b)).flatten().collect()
     }
 
     //This is our prior on the number of motifs
@@ -2715,18 +2757,18 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn ln_prior(&self) -> f64 {
-        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
+        self.motif_num_prior() + self.set.iter().map(|a| a.0.height_prior()+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn ln_likelihood(&self) -> f64 {
-        Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores).ad_calc(self.data_ref.data().spacer()))
+        Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer()))
     }
 
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
         match self.ln_post {
             None => {
                 let ln_prior = self.ln_prior();
-                self.recalc_negatives();
+                //self.recalc_negatives();
                 if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                     self.ln_post = Some(ln_prior+self.ln_likelihood());
                 } else{
@@ -2741,13 +2783,14 @@ impl<'a> MotifSet<'a> {
         match self.ln_post {
             None => {
                 let mut ln_post: f64 = self.ln_prior();
-                if ln_post > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
-                    ln_post += self.ln_likelihood();
-                } 
-                ln_post
-            }, 
-            Some(f) => f,
-        }
+                    if ln_post > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
+                        ln_post += self.ln_likelihood();
+                    } 
+                    ln_post
+                }, 
+                Some(f) => f,
+            }
+       
     }
 
     pub fn median_data_dist(&self) -> f64 {
@@ -2756,7 +2799,8 @@ impl<'a> MotifSet<'a> {
     fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
-        self.set.push(new_mot);
+        let new_nulls = self.calc_motif_null_binds(&new_mot);
+        self.set.push((new_mot, new_nulls));
         self.ln_post = None;
         self.ln_posterior()
 
@@ -2765,7 +2809,8 @@ impl<'a> MotifSet<'a> {
     fn insert_motif(&mut self, new_mot: Motif, position: usize) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
-        self.set.insert(position, new_mot);
+        let new_nulls = self.calc_motif_null_binds(&new_mot);
+        self.set.insert(position, (new_mot, new_nulls));
         self.ln_post = None;
         self.ln_posterior()
 
@@ -2775,7 +2820,7 @@ impl<'a> MotifSet<'a> {
         assert!(rem_id < self.set.len());
 
         let rem_mot = self.set.swap_remove(rem_id);
-        self.signal -= &rem_mot.generate_waveform(self.data_ref);
+        self.signal -= &rem_mot.0.generate_waveform(self.data_ref);
         self.ln_post = None;
         self.ln_posterior()
 
@@ -2785,18 +2830,20 @@ impl<'a> MotifSet<'a> {
 
         assert!(rem_id < self.set.len());
         let rem_mot = self.set.swap_remove(rem_id);
-        self.signal -= &rem_mot.generate_waveform(self.data_ref);
+        self.signal -= &rem_mot.0.generate_waveform(self.data_ref);
         self.ln_post = None;
 
     }
 
     pub fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
-        let rem_mot = self.set[rem_id].clone();
+        let rem_mot = self.nth_motif(rem_id).clone();
         self.signal -= &rem_mot.generate_waveform(self.data_ref);
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
-        self.set[rem_id] = new_mot;
+        let new_nulls = self.calc_motif_null_binds(&new_mot); 
+        self.set[rem_id] = (new_mot, new_nulls);
         self.ln_post = None;
         self.ln_posterior()
+
     }
 
     pub fn current_attention(&self) -> &Vec<usize> {
@@ -2804,22 +2851,17 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn recalc_negatives(&mut self) {
-        self.null_peak_scores = if self.null_seq_attentions.len() == 0 {Vec::new()} else {
-            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
-                                     .iter().map(|&b| a.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
+        for i in 0..self.set.len() {
+            let nulls = self.calc_motif_null_binds(self.nth_motif(i));
+            self.set[i].1 = nulls;
         };
-
-
     }
 
     pub fn change_set_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
 
         self.null_seq_attentions = negative_blocks;
 
-        self.null_peak_scores = if self.null_seq_attentions.len() == 0 {Vec::new()} else {
-            self.set.iter().map(|a| a.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions)
-                                     .iter().map(|&b| a.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>()).flatten().collect::<Vec<f64>>()
-        };
+        self.recalc_negatives();
 
         self.ln_post = None;
         self.ln_posterior()
@@ -2861,12 +2903,12 @@ impl<'a> MotifSet<'a> {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
 
-            let pick_prob = self.set[rem_id].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
+            let pick_prob = self.nth_motif(rem_id).pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.set[rem_id].peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.set[rem_id].len()) as f64).ln());
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());
 
             let ln_post = new_set.remove_motif(rem_id);
-            //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.set[rem_id].height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+            //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
@@ -2875,7 +2917,7 @@ impl<'a> MotifSet<'a> {
 
         let split_id = rng.gen_range(0..self.set.len());
 
-        let (new_mot, split_mot, ln_split_jacobian_minus_pick_prob) = self.set[split_id].split_motif(HEIGHT_SPLIT_SD, rng);
+        let (new_mot, split_mot, ln_split_jacobian_minus_pick_prob) = self.nth_motif(split_id).split_motif(HEIGHT_SPLIT_SD, rng);
         
         let gen_prior = new_mot.pwm_prior(self.data_ref.data().seq())+new_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
@@ -2903,7 +2945,7 @@ impl<'a> MotifSet<'a> {
             .choose(rng).expect("We guaranteed that the length of the set is at least two, so this has at least one element");
             
 
-        let Some((merge_mot, ln_merge_jacobian_plus_pick_prob)) = self.set[merge_1].merge_motifs(&self.set[merge_2], HEIGHT_SPLIT_SD) else {return None;} ;
+        let Some((merge_mot, ln_merge_jacobian_plus_pick_prob)) = self.nth_motif(merge_1).merge_motifs(&self.nth_motif(merge_2), HEIGHT_SPLIT_SD) else {return None;} ;
 
         let mut new_set = self.derive_set();
 
@@ -2925,11 +2967,11 @@ impl<'a> MotifSet<'a> {
 
         let extend_id = rng.gen_range(0..self.set.len());
 
-        if self.set[extend_id].len() >= MAX_BASE { //We want to immediately reject any move which extends a motif beyond maximum length
+        if self.nth_motif(extend_id).len() >= MAX_BASE { //We want to immediately reject any move which extends a motif beyond maximum length
             None
         } else {
 
-            let mut add_base_mot = self.set[extend_id].best_motif();
+            let mut add_base_mot = self.nth_motif(extend_id).best_motif();
             add_base_mot.push(Bp::A);
             let last_ind = add_base_mot.len()-1;
             let mut valid_extends: Vec<Bp> = Vec::with_capacity(BASE_L);
@@ -2941,7 +2983,7 @@ impl<'a> MotifSet<'a> {
 
             let new_bp = valid_extends.choose(rng).expect("We already returned if there are no valid extensions");
             
-            let mut new_mot = self.set[extend_id].clone();
+            let mut new_mot = self.nth_motif(extend_id).clone();
             let new_base = Base::propose_safe_new(rng).make_best(*new_bp);
             let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) - (valid_extends.len() as f64).ln();
             new_mot.pwm.push(new_base);
@@ -2958,10 +3000,10 @@ impl<'a> MotifSet<'a> {
 
         let contract_id = rng.gen_range(0..self.set.len());
 
-        if self.set[contract_id].len() <= MIN_BASE { //We want to immediately reject any move which contracts a motif below minimum length
+        if self.nth_motif(contract_id).len() <= MIN_BASE { //We want to immediately reject any move which contracts a motif below minimum length
             None
         } else {
-            let mut new_mot = self.set[contract_id].clone();
+            let mut new_mot = self.nth_motif(contract_id).clone();
             let new_mot_bps = new_mot.best_motif();
             let old_base = new_mot.pwm.pop();
             let ln_post = new_set.replace_motif(new_mot, contract_id);
@@ -3060,7 +3102,7 @@ impl<'a> MotifSet<'a> {
 
         for id in ids {
 
-            let current_mot = current_set.set[id].clone();
+            let current_mot = current_set.nth_motif(id).clone();
 
             let mut base_set = current_set.clone();
             base_set.remove_motif_void(id);
@@ -3130,7 +3172,7 @@ impl<'a> MotifSet<'a> {
 
         for id in ids {
 
-            let current_mot = current_set.set[id].clone();
+            let current_mot = current_set.get_nth_motif(id).clone();
 
             let mut base_set = current_set.clone();
             base_set.remove_motif_void(id);
@@ -3187,7 +3229,7 @@ impl<'a> MotifSet<'a> {
 
         for id in ids {
 
-            let current_mot = current_set.set[id].clone();
+            let current_mot = current_set.get_nth_motif(id).clone();
 
             let mut base_set = current_set.clone();
             base_set.remove_motif_void(id);
@@ -3300,7 +3342,7 @@ impl<'a> MotifSet<'a> {
 
         let c_id = rng.gen_range(0..self.set.len());
 
-        let mut replacement = new_set.set[c_id].clone();
+        let mut replacement = new_set.nth_motif(c_id).clone();
 
         let base_change = rng.gen_range(0..replacement.pwm.len());
 
@@ -3320,9 +3362,9 @@ impl<'a> MotifSet<'a> {
 
         let c_id = rng.gen_range(0..self.set.len());
 
-        let mut replacement = new_set.set[c_id].clone();
+        let mut replacement = new_set.nth_motif(c_id).clone();
         
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE]*0.25;
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.25;
 
         let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd*scaler, linear_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
@@ -3340,7 +3382,7 @@ impl<'a> MotifSet<'a> {
 
         let c_id = rng.gen_range(0..self.set.len());
 
-        let mut replacement = new_set.set[c_id].clone();
+        let mut replacement = new_set.nth_motif(c_id).clone();
 
         replacement.peak_height += NORMAL_DIST.sample(rng)*height_sd;
 
@@ -3358,7 +3400,7 @@ impl<'a> MotifSet<'a> {
 
         let c_id = rng.gen_range(0..self.set.len());
 
-        let mut replacement = new_set.set[c_id].clone();
+        let mut replacement = new_set.nth_motif(c_id).clone();
 
         let base_change = rng.gen_range(0..replacement.pwm.len());
 
@@ -3380,9 +3422,9 @@ impl<'a> MotifSet<'a> {
 
         let c_id = rng.gen_range(0..self.set.len());
 
-        let mut replacement = new_set.set[c_id].clone();
+        let mut replacement = new_set.nth_motif(c_id).clone();
 
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.set[c_id].len()-MIN_BASE]*0.25;
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.25;
 
         let Some(attempt_new) = replacement.pwm.iter().map(|a| a.scaled_base(scale_exponent_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
@@ -3408,8 +3450,8 @@ impl<'a> MotifSet<'a> {
         let mut pwm_dists_sq = 0_f64;
 
         for i in 0..self.set.len() {
-            pwm_dists_sq += self.set[i].distance_function(&proposal.set[i]).0.powi(2); 
-            height_dists_sq += (proposal.set[i].peak_height-self.set[i].peak_height).powi(2);
+            pwm_dists_sq += self.nth_motif(i).distance_function(proposal.nth_motif(i)).0.powi(2); 
+            height_dists_sq += (proposal.nth_motif(i).peak_height-self.nth_motif(i).peak_height).powi(2);
         }
         
         [rmse, likelihood_diff, height_dists_sq.sqrt(), pwm_dists_sq.sqrt()]
@@ -3464,11 +3506,10 @@ impl StrippedMotifSet {
 
         let mut revived = MotifSet {
 
-            set: self.set.clone(),
+            set: self.set.clone().into_iter().map(|a| (a, Vec::new())).collect(),
             signal: data_ref.data().derive_zero(),
             ln_post: None,
             null_seq_attentions: Vec::new(),
-            null_peak_scores: Vec::new(),
             data_ref: data_ref,
         };
 
@@ -3636,8 +3677,8 @@ impl StrippedMotifSet {
     //Notice that the lifetime of the potential &Motif also matches the lifetime of &self. This is also intentional
     pub fn pair_to_other_set(&self, reference_set: &StrippedMotifSet) -> Vec<Option<(f64, bool, &Motif)>>/*Some type here */ {
     
-        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self.set[j].distance_function(&reference_set.set[i]).0);
-        let rev_comp_by_index = |(i, j): (usize, usize)| self.set[j].distance_function(&reference_set.set[i]).1;
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self.get_nth_motif(j).distance_function(&reference_set.get_nth_motif(i)).0);
+        let rev_comp_by_index = |(i, j): (usize, usize)| self.get_nth_motif(j).distance_function(reference_set.get_nth_motif(i)).1;
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
@@ -3645,13 +3686,13 @@ impl StrippedMotifSet {
 
         if self.num_motifs() >= reference_set.num_motifs() {
             let (_, matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
-            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(), *rev_c_matrix.get((i,x)).unwrap(),&self.set[x]))).collect()
+            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(), *rev_c_matrix.get((i,x)).unwrap(),self.get_nth_motif(x)))).collect()
         } else {
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
             let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; reference_set.num_motifs()];
             for (i, j) in pre_matches.into_iter().enumerate() {
-                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), &self.set[i]));
+                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), self.get_nth_motif(i)));
             }
             matches
         }
@@ -3715,7 +3756,7 @@ impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
     fn from(other: &'a MotifSet) -> StrippedMotifSet {
         let ln_post: f64 = other.calc_ln_post();
         StrippedMotifSet {
-            set: other.set.clone(),
+            set: other.set.iter().map(|a| a.0.clone()).collect(),
             null_seq_attentions: other.null_seq_attentions.clone(),
             ln_post: ln_post,
         }
@@ -4061,7 +4102,7 @@ impl<'a> SetTrace<'a> {
         if recalc_ln_post {
             repoint_set.signal = self.data_ref.data().derive_zero();
             for i in 0..repoint_set.set.len() {
-                repoint_set.signal += &repoint_set.set[i].generate_waveform(&self.data_ref);
+                repoint_set.signal += &repoint_set.nth_motif(i).generate_waveform(&self.data_ref);
             }
             repoint_set.ln_post = None;
             repoint_set.ln_posterior();
@@ -4173,7 +4214,7 @@ impl<'a> SetTrace<'a> {
 
         //generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str)
 
-        self.loan_active().set.iter().enumerate().map(|(i,mot)| {
+        self.loan_active().set.iter().enumerate().map(|(i,(mot, _))| {
             let bedgraph_file:  String = format!("{}/{}_bedgraph_{:0>7}_motif_{i}.bed",output_dir,run_name,zeroth_step);
             mot.generate_bedgraph(self.data_ref, None, &bedgraph_file)
         }).collect::<Result<_,_>>()
@@ -4220,11 +4261,11 @@ impl<'a> SetTrace<'a> {
     }
 
     pub fn active_set_motif_lens(&self) -> Vec<usize> {
-        self.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>()
+        self.active_set.set.iter().map(|a| a.0.len()).collect::<Vec<_>>()
     }
 
     pub fn active_set_peak_heights(&self) -> Vec<f64> {
-        self.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>()
+        self.active_set.set.iter().map(|a| a.0.peak_height()).collect::<Vec<_>>()
     }
 
 
@@ -4430,7 +4471,7 @@ impl SetTraceDef {
 
         for i in 0..max_draw {
 
-            let occupancy = current_active.set[i].generate_waveform(current_active.data_ref);
+            let occupancy = current_active.get_nth_motif(i).generate_waveform(current_active.data_ref);
             chart.draw_series(LineSeries::new(occupancy.read_wave().iter().zip(locs.iter()).map(|(&k, &i)| (i as f64, k)), colors[i])).unwrap().label(format!("Motif {}", i).as_str());
 
         }
@@ -4888,15 +4929,14 @@ impl<'a> TemperSetTraces<'a> {
 
         
         for j in 0..self.parallel_traces.len(){
-            if self.parallel_traces[j].0.active_set.null_peak_scores.len() > 0 {println!("{j} binds_saved {} {} len {}", self.parallel_traces[j].0.active_set.null_peak_scores[0], self.parallel_traces[j].0.active_set.null_peak_scores.last().unwrap(), self.parallel_traces[j].0.active_set.null_peak_scores.len());}
-            else {println!("no null binds in active {j}");}
-            for (i, motif) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
+            for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             
                 let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height())).collect::<Vec<f64>>();
                 if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
                 //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
                 println!("{j} {i} binds {} {} len {}", binds[0], binds.last().unwrap(), binds.len());
+                println!("{j} {i} recorded binds {} {} {}", rec_binds[0], rec_binds.last().unwrap(), rec_binds.len());
                 //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
                 }else {println!("{j} {i} no extraneous");}
             }
@@ -5092,13 +5132,13 @@ impl<'a> TemperSetTraces<'a> {
         match tracker {
             TrackingOptions::NoTracking => (),
             TrackingOptions::TrackTrueTrace => {
-                println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
-                println!("Motif heights: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
+                println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.0.len()).collect::<Vec<_>>());
+                println!("Motif heights: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.0.peak_height()).collect::<Vec<_>>());
                 self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
             TrackingOptions::TrackAllTraces => { _ = self.parallel_traces.iter().map(|b| { 
                 println!("Thermodynamic beta: {}", b.0.thermo_beta);
-                println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.len()).collect::<Vec<_>>());
-                println!("Motif heights: {:?}", b.0.active_set.set.iter().map(|a| a.peak_height()).collect::<Vec<_>>());
+                println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.0.len()).collect::<Vec<_>>());
+                println!("Motif heights: {:?}", b.0.active_set.set.iter().map(|a| a.0.peak_height()).collect::<Vec<_>>());
                 b.1.as_ref().map(|a| a.give_status())
             }).collect::<Vec<_>>();},
         }
@@ -5962,7 +6002,7 @@ mod tester{
         assert!(all_good);
 
         //I'm comfortable enforcing exactly equality because this should be an exact copy
-        assert!(motif_set.set[0].peak_height() == add_mot.peak_height());
+        assert!(motif_set.nth_motif(0).peak_height() == add_mot.peak_height());
 
 
         assert!(motif_set.set.len() == 2);
@@ -5987,7 +6027,7 @@ mod tester{
 
         assert!(motif_set.set.len() == 2);
 
-        assert!(motif_set.set[0].peak_height() == add_mot2.peak_height());
+        assert!(motif_set.nth_motif(0).peak_height() == add_mot2.peak_height());
 
 
         //move tests. These should all produce Options of tuples
@@ -6008,21 +6048,21 @@ mod tester{
         assert!(single_mot.set.len() == motif_set.set.len());
         let mut found_change: bool = false;
         for i in 0..motif_set.set.len() {
-            assert!(motif_set.set[i].peak_height() == single_mot.set[i].peak_height());
-            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            assert!(motif_set.nth_motif(i).peak_height() == single_mot.nth_motif(i).peak_height());
+            let unchanged = motif_set.nth_motif(i).pwm.iter().zip(single_mot.nth_motif(i).pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
             if !unchanged {
                 if found_change {
                     panic!("multiple motifs changed in single base scale move!");
                 } else { 
                     found_change = true; 
 
-                    let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
+                    let changed_bases = motif_set.nth_motif(i).pwm.iter().zip(single_mot.nth_motif(i).pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
 
                     println!("{}", changed_bases.len());
                     assert!(changed_bases.len() == 1);
 
-                    let old_base = motif_set.set[i].pwm[changed_bases[0]].clone();
-                    let new_base = single_mot.set[i].pwm[changed_bases[0]].clone();
+                    let old_base = motif_set.nth_motif(i).pwm[changed_bases[0]].clone();
+                    let new_base = single_mot.nth_motif(i).pwm[changed_bases[0]].clone();
 
                     println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
                     let mut old_order = old_base.scores.iter().enumerate().collect::<Vec<_>>();
@@ -6046,21 +6086,21 @@ mod tester{
         assert!(single_mot.set.len() == motif_set.set.len());
         let mut found_change: bool = false;
         for i in 0..motif_set.set.len() {
-            assert!(motif_set.set[i].peak_height() == single_mot.set[i].peak_height());
-            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            assert!(motif_set.nth_motif(i).peak_height() == single_mot.nth_motif(i).peak_height());
+            let unchanged = motif_set.nth_motif(i).pwm.iter().zip(single_mot.nth_motif(i).pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
             if !unchanged {
                 if found_change {
                     panic!("multiple motifs changed in single base scale move!");
                 } else { 
                     found_change = true; 
 
-                    let changed_bases = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
+                    let changed_bases = motif_set.nth_motif(i).pwm.iter().zip(single_mot.nth_motif(i).pwm.iter()).enumerate().filter(|(_, (a, b))| a.dist_sq(Some(*b)).sqrt() >= 1e-6).map(|(i,_)| i).collect::<Vec<_>>();
 
                     println!("{}", changed_bases.len());
 
                     for j in 0..changed_bases.len(){
-                        let old_base = motif_set.set[i].pwm[changed_bases[j]].clone();
-                        let new_base = single_mot.set[i].pwm[changed_bases[j]].clone();
+                        let old_base = motif_set.nth_motif(i).pwm[changed_bases[j]].clone();
+                        let new_base = single_mot.nth_motif(i).pwm[changed_bases[j]].clone();
 
                         println!("{:?} {:?} {:?} {:?}", old_base, old_base.base_to_vect(), new_base, new_base.base_to_vect());
                         let mut old_order = old_base.scores.iter().enumerate().collect::<Vec<_>>();
@@ -6096,7 +6136,7 @@ mod tester{
         println!("pre merge split {:?}", check_set);
         println!("post merge split {:?}", merge_mot);
 
-        println!("distance {:?}", check_set.set[0].distance_function(&merge_mot.set[0]));
+        println!("distance {:?}", check_set.nth_motif(0).distance_function(&merge_mot.nth_motif(0)));
 
         let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
@@ -6108,7 +6148,7 @@ mod tester{
         assert!(single_mot.set.len() == motif_set.set.len());
         let mut found_change: bool = false;
         for i in 0..motif_set.set.len() {
-            let height_unchanged = motif_set.set[i].peak_height() == single_mot.set[i].peak_height();
+            let height_unchanged = motif_set.nth_motif(i).peak_height() == single_mot.nth_motif(i).peak_height();
 
             if found_change { 
                 assert!(height_unchanged, "Multiple heights changing");
@@ -6116,7 +6156,7 @@ mod tester{
                 if !height_unchanged { found_change = true; }
             }
 
-            let unchanged = motif_set.set[i].pwm.iter().zip(single_mot.set[i].pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
+            let unchanged = motif_set.nth_motif(i).pwm.iter().zip(single_mot.nth_motif(i).pwm.iter()).all(|(a, b)| a.dist_sq(Some(b)).sqrt() < 1e-6);
             assert!(unchanged, "Changing motif during height move!");
         }
 
@@ -6132,7 +6172,7 @@ mod tester{
 
         let l = birth_mot.set.len()-1;
         for i in 0..motif_set.set.len() {
-            assert!(motif_set.set[i].peak_height() == birth_mot.set[i].peak_height());
+            assert!(motif_set.nth_motif(i).peak_height() == birth_mot.nth_motif(i).peak_height());
         }
 
         println!("birth mot {:?}", birth_mot);
@@ -6140,11 +6180,11 @@ mod tester{
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&motif_set.signal;
-        let _propensities = remaining.kmer_propensities(birth_mot.set[l].len());
-        let pick_prob = birth_mot.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
+        let _propensities = remaining.kmer_propensities(birth_mot.nth_motif(l).len());
+        let pick_prob = birth_mot.nth_motif(l).pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.nth_motif(l).len()) as f64).ln());
 
         println!("{should_prior} {actual_prior} asd");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
@@ -6165,12 +6205,12 @@ mod tester{
         let mut found_off = false;
         for i in 0..death_mot.set.len() {
             let j = if found_off {i+1} else {i};
-            let mut matching = motif_set.set[j].peak_height() == death_mot.set[i].peak_height();
+            let mut matching = motif_set.nth_motif(j).peak_height() == death_mot.nth_motif(i).peak_height();
             if !matching {
                 assert!(!found_off, "Found two mismatches when looking for deleted motif!");
                 found_off = true;
                 l = j;
-                matching = motif_set.set[j+1].peak_height() == death_mot.set[i].peak_height();
+                matching = motif_set.nth_motif(j+1).peak_height() == death_mot.nth_motif(i).peak_height();
             }
             assert!(matching, "there is a mismatch!");
         }
@@ -6178,13 +6218,13 @@ mod tester{
         let should_prior = ln_prop-(death_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&death_mot.signal;
-        let propensities = remaining.kmer_propensities(motif_set.set[l].len());
-        let pick_prob = motif_set.set[l].pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
+        let propensities = remaining.kmer_propensities(motif_set.nth_motif(l).len());
+        let pick_prob = motif_set.nth_motif(l).pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").pdf(a)).product::<f64>();
 
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.set[l].peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.set[l].len()) as f64).ln());
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob.ln()-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.nth_motif(l).len()) as f64).ln());
 
-        println!("priors {} {} {} {} {}", motif_set.set[l].height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.set[l].len(),Sequence::kmer_to_u64(&motif_set.set[l].best_motif()))]);
+        println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(), should_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
 
         //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
         assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
@@ -6205,16 +6245,16 @@ mod tester{
         let mut l: Option<usize> = None;
         let mut found_off = false;
         for i in 0..extend_mot.set.len() {
-            assert!(motif_set.set[i].peak_height() == extend_mot.set[i].peak_height());
-            let mut matching = motif_set.set[i].len() == extend_mot.set[i].len();
+            assert!(motif_set.nth_motif(i).peak_height() == extend_mot.nth_motif(i).peak_height());
+            let mut matching = motif_set.nth_motif(i).len() == extend_mot.nth_motif(i).len();
             if !matching {
                 assert!(!found_off, "Found two mismatches when looking for extended motif!");
-                assert!(sequence.kmer_in_seq(&(extend_mot.set[i].best_motif())), "Extension can produce illegal kmer!");
+                assert!(sequence.kmer_in_seq(&(extend_mot.nth_motif(i).best_motif())), "Extension can produce illegal kmer!");
                 found_off = true;
                 l = Some(i);
-                matching = (motif_set.set[i].len()+1) == extend_mot.set[i].len();
-                matching = motif_set.set[i].pwm.iter()
-                    .zip(extend_mot.set[i].pwm[0..(extend_mot.set[i].len()-1)].iter())
+                matching = (motif_set.nth_motif(i).len()+1) == extend_mot.nth_motif(i).len();
+                matching = motif_set.nth_motif(i).pwm.iter()
+                    .zip(extend_mot.nth_motif(i).pwm[0..(extend_mot.nth_motif(i).len()-1)].iter())
                     .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
                     .fold(matching, |acc, b| acc && b);
 
@@ -6226,7 +6266,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
 
@@ -6251,15 +6291,15 @@ mod tester{
         let mut l: Option<usize> = None;
         let mut found_off = false;
         for i in 0..contract_mot.set.len() {
-            assert!(motif_set.set[i].peak_height() == contract_mot.set[i].peak_height());
-            let mut matching = motif_set.set[i].len() == contract_mot.set[i].len();
+            assert!(motif_set.nth_motif(i).peak_height() == contract_mot.nth_motif(i).peak_height());
+            let mut matching = motif_set.nth_motif(i).len() == contract_mot.nth_motif(i).len();
             if !matching {
                 assert!(!found_off, "Found two mismatches when looking for contracted motif!");
                 found_off = true;
                 l = Some(i);
-                matching = (motif_set.set[i].len()-1) == contract_mot.set[i].len();
-                matching = contract_mot.set[i].pwm.iter()
-                    .zip(motif_set.set[i].pwm[0..(contract_mot.set[i].len()-1)].iter())
+                matching = (motif_set.nth_motif(i).len()-1) == contract_mot.nth_motif(i).len();
+                matching = contract_mot.nth_motif(i).pwm.iter()
+                    .zip(motif_set.nth_motif(i).pwm[0..(contract_mot.nth_motif(i).len()-1)].iter())
                     .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
                     .fold(matching, |acc, b| acc && b);
 
@@ -6271,7 +6311,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.set[l.unwrap()].pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
 
@@ -6321,13 +6361,13 @@ mod tester{
                     2 => {
                         assert!(step_set.set.len() == motif_set.set.len(), "extend not maintaining");
                         assert!(step_set.set.iter().zip(motif_set.set.iter())
-                                .map(|(a,b)| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()+1))
+                                .map(|((a,_),(b,_))| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()+1))
                                 .fold(true, |acc, y| acc && y), "extend messed up extending" );
                     },
                     3 => {
                         assert!(step_set.set.len() == motif_set.set.len(), "contract not maintaining");
                         assert!(step_set.set.iter().zip(motif_set.set.iter())
-                                .map(|(a,b)| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()-1))
+                                .map(|((a, _),(b, _))| (a.pwm.len() == b.pwm.len()) || (a.pwm.len() == b.pwm.len()-1))
                                 .fold(true, |acc, y| acc && y), "contract messed up contracting" );
                     },
                     4 => assert!(step_set.set.len() == motif_set.set.len()+1, "split not birthing"),
