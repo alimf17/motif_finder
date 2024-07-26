@@ -221,7 +221,7 @@ pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
-pub const SCORE_THRESH: f64 = -4.0;
+pub const SCORE_THRESH: f64 = -MIN_HEIGHT;
 const BARRIER: f64 = -SCORE_THRESH*2.0;
 
 const SPLIT_SD: f64 = 0.05;
@@ -1740,6 +1740,38 @@ impl Motif {
         return (bind, reverse)
 
     }
+    
+    unsafe fn cut_prop_binding(&self, kmer: &[Bp], max_compensation: f64) -> Option<f64> { 
+
+
+        //let kmer: Vec<usize> = kmer_slice.to_vec();
+
+        let mut bind_forward: f64 = 0.0;
+        let mut bind_reverse: f64 = 0.0;
+        let cutoff = -max_compensation;
+
+        let mut try_forward = true;
+        let mut try_reverse = true;
+
+        for i in 0..self.len() {
+            if try_forward {
+                bind_forward += self.pwm[i][*kmer.get_unchecked(i)];
+                if bind_forward < cutoff { try_forward = false;}
+            }
+            if try_reverse {
+                bind_reverse += self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
+                if bind_reverse < cutoff { try_reverse = false;}
+            }
+            if !try_forward && !try_reverse {return None;}
+        }
+
+        let reverse: bool = bind_reverse > bind_forward;
+
+        let bind: f64 = if reverse {bind_reverse} else {bind_forward};
+
+        Some(bind)
+
+    }
 
     pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
@@ -1840,11 +1872,10 @@ impl Motif {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
-                    let (bind, _) = unsafe {self.prop_binding(binding_borrow) };
-
-                    if bind > max_ignore_bind {
+                    if let Some(bind) = unsafe {self.cut_prop_binding(binding_borrow, max_ignore_bind) } {
                         bind_scores.push(bind);
-                    }
+                    };
+
                 }
 
             }
