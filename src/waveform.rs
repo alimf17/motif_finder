@@ -1495,7 +1495,7 @@ mod tests{
         //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
         //breaking if we have an EXACT zero coincidentally. 
         let mut noise_arr = n1.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
-        noise_arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        noise_arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
         let noise_length = noise_arr.len();
         let mut ad_try = -(noise_length as f64);
 
@@ -1532,7 +1532,7 @@ mod tests{
 
         extraneous_noises.append(&mut extra_resids);
 
-        extraneous_noises.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        extraneous_noises.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let noise_length = extraneous_noises.len();
         let mut ad_try = -(noise_length as f64);

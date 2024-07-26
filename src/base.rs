@@ -436,7 +436,7 @@ impl Base {
             samps[i] = rng.gen();
         }
 
-        samps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        samps.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
         
         let mut max_p = -f64::INFINITY;
         for i in 0..att.len() {
@@ -1851,7 +1851,7 @@ impl Motif {
         }
 
 
-        bind_scores.sort_by(|f, g| g.partial_cmp(f).unwrap());
+        bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
 
         if bind_scores.len() > CAPACITY_FOR_NULL {
             _ = bind_scores.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
@@ -4881,7 +4881,7 @@ impl<'a> TemperSetTraces<'a> {
 
         let mut current_like_list: Vec<f64> = self.parallel_traces[0].0.trace.iter().map(|a| a.ln_post).collect();
         let mut median_ln_post = if current_like_list.len() == 0 { self.parallel_traces[0].0.active_set.ln_posterior() } else {
-                current_like_list.sort_by(|a,b| a.partial_cmp(b).unwrap());
+                current_like_list.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
                 let len = current_like_list.len();
                 if (len & 1) == 1 {
                     current_like_list[(len-1)/2]
@@ -4894,7 +4894,7 @@ impl<'a> TemperSetTraces<'a> {
         for i in 1..self.parallel_traces.len() {
             let mut current_like_list: Vec<f64> = self.parallel_traces[i].0.trace.iter().map(|a| a.ln_post).collect();
             let med = if current_like_list.len() == 0 { self.parallel_traces[i].0.active_set.ln_posterior() } else {
-                current_like_list.sort_by(|a,b| a.partial_cmp(b).unwrap());
+                current_like_list.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
                 let len = current_like_list.len();
                 if (len & 1) == 1 {
                     current_like_list[(len-1)/2]
@@ -6702,8 +6702,8 @@ mod tester{
 
             }
 
-            binds.sort_by(|b, a| a.partial_cmp(b).unwrap());
-            significant_binds.sort_by(|b, a| a.partial_cmp(b).unwrap());
+            binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
+            significant_binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
 
             if significant_binds.len() > CAPACITY_FOR_NULL {
                 let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
