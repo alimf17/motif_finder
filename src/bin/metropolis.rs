@@ -227,7 +227,7 @@ fn main() {
     
         //trace.serially_temper(min_thermo_beta, &mut track, steps_per_exchange_attempt, burn_in_after_swap, &mut rng);
 
-        for _ in 0..steps_per_exchange_attempt{
+        for _ in 0..3{
 
             trace.advance(Some(track.get_mut(0).unwrap()), false, &mut rng)
 

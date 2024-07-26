@@ -2,7 +2,7 @@
 
 use std::{f64, fmt, fs};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use std::ops::{Index, IndexMut};
 
@@ -175,7 +175,7 @@ const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+9;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 1]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 5, 5, 20, 20, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -1727,10 +1727,15 @@ impl Motif {
         let mut bind_forward: f64 = 0.0;
         let mut bind_reverse: f64 = 0.0;
 
-        for i in 0..self.len() {
-            bind_forward += self.pwm[i][*kmer.get_unchecked(i)];
+        let l = self.len();
+
+        for i in 0..l {
+            let bf = *kmer.get_unchecked(i);
+            bind_forward += self.pwm[i][bf];
+            let br = *kmer.get_unchecked(l-1-i);
+            let brc = br.complement();
             //bind_reverse *= self.pwm[i].rel_bind(BASE_L-1-*kmer.get_unchecked(self.len()-1-i));
-            bind_reverse += self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
+            bind_reverse += self.pwm[i][brc];
         }
 
         let reverse: bool = bind_reverse > bind_forward;
@@ -1742,24 +1747,31 @@ impl Motif {
     }
     
     unsafe fn cut_prop_binding(&self, kmer: &[Bp], max_compensation: f64) -> Option<f64> { 
+    //unsafe fn cut_prop_binding(&self, kmer: *const Bp, max_compensation: f64) -> Option<f64> { 
 
+        let cutoff = max_compensation;
+        let l = self.len();
 
         //let kmer: Vec<usize> = kmer_slice.to_vec();
 
         let mut bind_forward: f64 = 0.0;
         let mut bind_reverse: f64 = 0.0;
-        let cutoff = -max_compensation;
 
         let mut try_forward = true;
         let mut try_reverse = true;
 
-        for i in 0..self.len() {
+
+        
+        for i in 0..l {
             if try_forward {
-                bind_forward += self.pwm[i][*kmer.get_unchecked(i)];
+                let bf = *kmer.get_unchecked(i);
+                bind_forward += self.pwm[i][bf];
                 if bind_forward < cutoff { try_forward = false;}
             }
             if try_reverse {
-                bind_reverse += self.pwm[i][kmer.get_unchecked(self.len()-1-i).complement()];
+                let br = *kmer.get_unchecked(l-1-i);
+                let brc = br.complement();
+                bind_reverse += self.pwm[i][brc];
                 if bind_reverse < cutoff { try_reverse = false;}
             }
             if !try_forward && !try_reverse {return None;}
@@ -1770,7 +1782,24 @@ impl Motif {
         let bind: f64 = if reverse {bind_reverse} else {bind_forward};
 
         Some(bind)
+       
+        /*let for_bind = (0..l).map(|i|{                       
+            //let bf = *kmer.add(i);
+            let bf = *kmer.get_unchecked(i);
+            self.pwm.get_unchecked(i)[bf]
+        }).sum::<f64>();
 
+        let rev_bind = (0..l).rev().map(|i| {
+            //let br = *kmer.add(i);
+            let br = *kmer.get_unchecked(i);
+            let brc = br.complement();
+            self.pwm.get_unchecked(i)[brc]
+        }).sum::<f64>();
+
+        let bind = for_bind.max(rev_bind);
+
+        if bind > cutoff { Some(bind) } else {None}
+*/        
     }
 
     pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
@@ -1871,11 +1900,14 @@ impl Motif {
                 for j in 0..((block_lens[i])-self.len()) {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
-                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
-                    if let Some(bind) = unsafe {self.cut_prop_binding(binding_borrow, max_ignore_bind) } {
+                    unsafe{
+                    let binding_borrow = uncoded_seq.get_unchecked(j..(j+self.len())) ;
+                    //let start_seq = uncoded_seq.as_ptr().add(j);
+                    if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
+                    //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) {
                         bind_scores.push(bind);
                     };
-
+                }
                 }
 
             }
@@ -1894,6 +1926,7 @@ impl Motif {
         bind_scores
 
     }
+
 
     pub fn gen_single_mot_binding_report(&self, data_seq: &AllDataUse) -> Vec<(usize, bool, f64)> {
 
@@ -6739,6 +6772,9 @@ mod tester{
             if significant_binds.len() > CAPACITY_FOR_NULL {
                 let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             }
+
+            println!("binds {:?}\n sig_binds {:?}", binds, significant_binds);
+
             assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
             for k in 0..binds.len() {
 
