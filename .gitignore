@@ -5,3 +5,4 @@ core*
 *.err
 *.log
 perf.data*
+cachegrind.out*
