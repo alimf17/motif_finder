@@ -1762,7 +1762,7 @@ impl Motif {
 
 
         
-        for i in 0..l {
+        /*for i in 0..l {
             if try_forward {
                 let bf = *kmer.get_unchecked(i);
                 bind_forward += self.pwm[i][bf];
@@ -1782,24 +1782,35 @@ impl Motif {
         let bind: f64 = if reverse {bind_reverse} else {bind_forward};
 
         Some(bind)
-       
+       */ 
         /*let for_bind = (0..l).map(|i|{                       
             //let bf = *kmer.add(i);
             let bf = *kmer.get_unchecked(i);
             self.pwm.get_unchecked(i)[bf]
         }).sum::<f64>();
 
-        let rev_bind = (0..l).rev().map(|i| {
+        let rev_bind = (0..l).map(|i| {
             //let br = *kmer.add(i);
-            let br = *kmer.get_unchecked(i);
+            let br = *kmer.get_unchecked(l-1-i);
             let brc = br.complement();
             self.pwm.get_unchecked(i)[brc]
         }).sum::<f64>();
+        */
+
+        let mut for_bind: f64 = 0.0;
+        let mut rev_bind: f64 = 0.0;
+
+        for (i, base) in self.pwm.iter().enumerate() {
+            let bf = *kmer.get_unchecked(i);
+            let brc = kmer.get_unchecked(l-1-i).complement();
+            for_bind += base[bf];
+            rev_bind += base[brc];
+        }
 
         let bind = for_bind.max(rev_bind);
 
         if bind > cutoff { Some(bind) } else {None}
-*/        
+       
     }
 
     pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
@@ -1901,29 +1912,55 @@ impl Motif {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     unsafe{
-                    let binding_borrow = uncoded_seq.get_unchecked(j..(j+self.len())) ;
-                    //let start_seq = uncoded_seq.as_ptr().add(j);
-                    if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
-                    //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) {
-                        bind_scores.push(bind);
-                    };
-                }
+                    
+                        let binding_borrow = uncoded_seq.get_unchecked(j..(j+self.len())) ;
+                        //let start_seq = uncoded_seq.as_ptr().add(j);
+                        if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
+                            //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) { //}
+                            bind_scores.push(bind);
+                    
+                    
+                        };
+                
+
+                    }
                 }
 
             }
         }
 
 
-        bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
+
+        /*bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
 
         if bind_scores.len() > CAPACITY_FOR_NULL {
             _ = bind_scores.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             
 
+        }*/
+
+        if bind_scores.len() <= CAPACITY_FOR_NULL { 
+            bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
+            return bind_scores;
+        }
+
+        let mut sub_bind_scores: Vec<f64> = bind_scores[0..CAPACITY_FOR_NULL].iter().map(|&a| a).collect();
+
+        sub_bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
+
+        for i in CAPACITY_FOR_NULL..bind_scores.len(){
+
+            let last = unsafe{ sub_bind_scores.last_mut().unwrap_unchecked()};
+
+            if bind_scores[i] > *last { 
+                *last = bind_scores[i];
+                sub_bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap()); //This is linear in CAPACITY_FOR_NULL
+            }
         }
 
 
-        bind_scores
+
+        sub_bind_scores
 
     }
 
@@ -6773,7 +6810,7 @@ mod tester{
                 let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             }
 
-            println!("binds {:?}\n sig_binds {:?}", binds, significant_binds);
+            println!("binds {:?}\n sig_binds {:?} \nheight {}", binds, significant_binds, motif.peak_height);
 
             assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
             for k in 0..binds.len() {
