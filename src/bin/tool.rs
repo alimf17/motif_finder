@@ -129,7 +129,7 @@ fn main() {
             },
     };
 
-    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args parsed");
@@ -249,6 +249,7 @@ fn main() {
 
 
     let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, data_string, &data_ref, maybe_init, None, &mut rng).unwrap();
+    //let mut initialization_chains = TemperSetTraces::new_parallel_traces(min_thermo_beta, num_intermediate_traces, capacity, num_advances, TrackingOptions::TrackAllTraces, data_string, &data_ref, maybe_init, None, &mut rng).unwrap();
 
 
 
@@ -281,7 +282,7 @@ fn main() {
 
         let num_bins: usize = 100;
 
-        initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
+        //initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
 
         initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
 
