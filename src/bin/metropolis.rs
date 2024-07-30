@@ -129,7 +129,7 @@ fn main() {
             },
     };
 
-    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
+    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args parsed");
@@ -223,7 +223,7 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
-    for step in 0..pushes {
+    for step in 0..1 {
     
         //trace.serially_temper(min_thermo_beta, &mut track, steps_per_exchange_attempt, burn_in_after_swap, &mut rng);
 
@@ -241,7 +241,7 @@ fn main() {
         if step % 5 == 0 {
             println!("Acceptances for thermo_beta = 1.0 when sampling");
             track[0].give_status();
-            track[0].all_move_hists(&hist_names[0], num_bins);
+            //track[0].all_move_hists(&hist_names[0], num_bins);
             /* println!("Acceptances for thermo_beta = {min_thermo_beta}");
             track[1].give_status();
             track[1].all_move_hists(&hist_names[1], num_bins);

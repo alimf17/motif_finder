@@ -1728,8 +1728,9 @@ impl Motif {
         let mut bind_reverse: f64 = 0.0;
 
         let l = self.len();
+        //
 
-        for i in 0..l {
+        for i in 0..l { //}
             let bf = *kmer.get_unchecked(i);
             bind_forward += self.pwm[i][bf];
             let br = *kmer.get_unchecked(l-1-i);
@@ -1800,17 +1801,33 @@ impl Motif {
         let mut for_bind: f64 = 0.0;
         let mut rev_bind: f64 = 0.0;
 
-        for (i, base) in self.pwm.iter().enumerate() {
+        //for (i, base) in self.pwm.iter().enumerate() { //}
+        for i in 0..MIN_BASE{
+            let base = self.pwm.get_unchecked(i);
             let bf = *kmer.get_unchecked(i);
             let brc = kmer.get_unchecked(l-1-i).complement();
             for_bind += base[bf];
             rev_bind += base[brc];
         }
-
+        
         let bind = for_bind.max(rev_bind);
+        if bind <= cutoff { return None;}
+        if l == MIN_BASE { 
+            return Some(bind); 
+        }
 
-        if bind > cutoff { Some(bind) } else {None}
-       
+        for i in MIN_BASE..l {
+            let base = self.pwm.get_unchecked(i);
+            let bf = *kmer.get_unchecked(i);
+            let brc = kmer.get_unchecked(l-1-i).complement();
+            for_bind += base[bf];
+            rev_bind += base[brc];
+
+        }
+        
+        let bind = for_bind.max(rev_bind);
+        if bind <= cutoff {None} else {Some(bind)}
+
     }
 
     pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
@@ -4072,6 +4089,7 @@ impl<'a> SetTrace<'a> {
         
         if let Some(tracker) = track {
             let total_id = VARIANT_CUMULATIVE[which_move]+which_variant;
+            println!("total id {total_id}");
             tracker.document_motion(total_id, movement_tracker).expect("We only track the proper moves");
         };
 
@@ -4715,6 +4733,7 @@ impl MoveTracker {
             println!("Base leap move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
             println!("Secondary shuffle move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
+            ind += 1;
             for i in 0..SCALE_SDS.len() {
                 println!("Base scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                          SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
@@ -6573,8 +6592,9 @@ mod tester{
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
         
 
-        let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
-        let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        //let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
+        let null_blocks: Vec<u8> = (0..(u8_count)).map(|_| rng.gen::<u8>()).collect();
         let _block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let null_block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
