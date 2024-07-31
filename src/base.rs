@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 //use std::time::{Duration, Instant};
 use std::error::Error;
 use std::ptr;
-
+use std::mem::size_of;
 
 use std::process::*;
 
@@ -1801,8 +1801,8 @@ impl Motif {
         let mut for_bind: f64 = 0.0;
         let mut rev_bind: f64 = 0.0;
 
-        //for (i, base) in self.pwm.iter().enumerate() { //}
-        for i in 0..MIN_BASE{
+        for (i, base) in self.pwm.iter().enumerate() { //}
+        //for i in 0..MIN_BASE{
             let base = self.pwm.get_unchecked(i);
             let bf = *kmer.get_unchecked(i);
             let brc = kmer.get_unchecked(l-1-i).complement();
@@ -1810,7 +1810,7 @@ impl Motif {
             rev_bind += base[brc];
         }
         
-        let bind = for_bind.max(rev_bind);
+        /*let bind = for_bind.max(rev_bind);
         if bind <= cutoff { return None;}
         if l == MIN_BASE { 
             return Some(bind); 
@@ -1824,7 +1824,8 @@ impl Motif {
             rev_bind += base[brc];
 
         }
-        
+        */
+
         let bind = for_bind.max(rev_bind);
         if bind <= cutoff {None} else {Some(bind)}
 
@@ -1863,7 +1864,7 @@ impl Motif {
                 }
 
 
-                for j in 0..((block_lens[i])-self.len()) {
+                for j in 0..=((block_lens[i])-self.len()) {
 
                     ind = BP_PER_U8*block_starts[i]+(j as usize);
 
@@ -1888,6 +1889,7 @@ impl Motif {
     //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
     pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, groups: &[usize]) -> Vec<f64> {
 
+        const SPAN: usize = (1+(MAX_BASE+2)/4);
 
         if groups.len() == 0 { return Vec::new();}
 
@@ -1897,17 +1899,17 @@ impl Motif {
 
         let mut bind_scores: Vec<f64> = Vec::new();
         
-        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+        //let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+        //println!("memory size uncoded_seq {}", seq.max_len()*size_of::<Bp>());
 
         let num_blocks = block_lens.len();
-
-        let mut store: [Bp; BP_PER_U8];
 
         let max_ignore_bind = -self.peak_height;
 
 
         {
-            let uncoded_seq = uncoded_seq.as_mut_slice();
+            //let uncoded_seq = uncoded_seq.as_mut_slice();
             
             for &i in groups.iter() {
 
@@ -1915,34 +1917,95 @@ impl Motif {
                     continue;
                 }
 
-                for jd in 0..(block_lens[i]/BP_PER_U8) {
+                /*for jd in 0..(block_lens[i]/BP_PER_U8) {
 
                     store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
                     for k in 0..BP_PER_U8 {
                         uncoded_seq[BP_PER_U8*jd+k] = store[k];
                     }
 
+                }*/
+
+                let mut u8_seq_window: [u8; SPAN] = core::array::from_fn(|a| coded_sequence[block_starts[i]+a]);
+                let mut bp_seq_window: [Bp; SPAN*4] = [Bp::A; SPAN*4];
+                for k in 0..SPAN {
+                    let bases = Sequence::code_to_bases(u8_seq_window[k]);
+                    bp_seq_window[4*k] = bases[0];
+                    bp_seq_window[4*k+1] = bases[1];
+                    bp_seq_window[4*k+2] = bases[2];
+                    bp_seq_window[4*k+3] = bases[3];
                 }
 
+                let mut prev_jd: usize = 0; 
 
-                for j in 0..((block_lens[i])-self.len()) {
+                for j in 0..((block_lens[i])-(4*SPAN)) {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     unsafe{
-                    
-                        let binding_borrow = uncoded_seq.get_unchecked(j..(j+self.len())) ;
+        
+
+                        //This is dividing j by 4, the number of BP in a u8, then rounding down
+                        let jd = j / 4;
+                        if jd > prev_jd {
+                            //println!("j {j} jd {jd} prev {prev_jd}");
+                            u8_seq_window.rotate_left(1);
+                            u8_seq_window[SPAN-1] = coded_sequence[block_starts[i]+SPAN-1+jd];
+                            bp_seq_window.rotate_left(4);
+
+                            let bases = Sequence::code_to_bases(u8_seq_window[SPAN-1]);
+                            bp_seq_window[4*SPAN-4] = bases[0];
+                            bp_seq_window[4*SPAN-3] = bases[1];
+                            bp_seq_window[4*SPAN-2] = bases[2];
+                            bp_seq_window[4*SPAN-1] = bases[3];
+                        }
+
+                        let start_ind = j % 4;
+                        
+
+                        let binding_borrow = bp_seq_window.get_unchecked(start_ind..(start_ind+self.len())) ;
+
                         //let start_seq = uncoded_seq.as_ptr().add(j);
                         if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
                             //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) { //}
+                            
                             bind_scores.push(bind);
-                    
+                  
                     
                         };
-                
+               
+                        prev_jd = jd;
 
                     }
                 }
 
+                //block_lens[i] is always divisible by 4, as is 4*SPAN, so we must always do this
+                //swap
+                //
+                u8_seq_window.rotate_left(1);
+                u8_seq_window[SPAN-1] = coded_sequence[block_starts[i]+SPAN-1+( ((block_lens[i])-(4*SPAN)))/4];
+                bp_seq_window.rotate_left(4);
+                let bases = Sequence::code_to_bases(u8_seq_window[SPAN-1]);
+                bp_seq_window[4*SPAN-4] = bases[0];
+                bp_seq_window[4*SPAN-3] = bases[1];
+                bp_seq_window[4*SPAN-2] = bases[2];
+                bp_seq_window[4*SPAN-1] = bases[3];
+
+                for j in ((block_lens[i])-(4*SPAN))..=((block_lens[i])-self.len()) {
+
+                    unsafe{
+        
+                        let start_ind = j-(block_lens[i]-(4*SPAN));
+                    
+
+                        let binding_borrow = bp_seq_window.get_unchecked(start_ind..(start_ind+self.len()));
+
+
+                        if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
+                            bind_scores.push(bind);
+                        };
+                    }
+
+                }
             }
         }
 
@@ -6814,12 +6877,17 @@ mod tester{
 
             let mut binds = motif.return_any_null_binds_in_group(&null_seq,&group);
 
-            for j in 0..(null_block_lens[i]-motif.len()) {
+            println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
+
+            for j in 0..=(null_block_lens[i]-motif.len()) {
 
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, _) = unsafe{ motif.prop_binding(&mot)};
 
-                if prop > (-motif.peak_height) { significant_binds.push(prop); }
+                if prop > (-motif.peak_height) { 
+                    significant_binds.push(prop); 
+                    println!("sig calc {i} {j} prop {prop} seq {:?}", mot);
+                }
 
             }
 
@@ -6830,7 +6898,7 @@ mod tester{
                 let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             }
 
-            println!("binds {:?}\n sig_binds {:?} \nheight {}", binds, significant_binds, motif.peak_height);
+            println!("binds {:?}\n sig_binds {:?} \nheight {} width {}", binds, significant_binds, motif.peak_height, motif.len());
 
             assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
             for k in 0..binds.len() {
