@@ -217,7 +217,7 @@ fn main() {
 
     let num_null_blocks = data_ref.null_seq().num_sequence_blocks();
 
-    let mut trace = SetTrace::new_trace(capacity, maybe_init, data_string, &data_ref, 1.0, (0..num_null_blocks).collect(), None, &mut rng);
+    let mut trace = SetTrace::new_trace(capacity, maybe_init, data_string, &data_ref, 1.0, None, &mut rng);
 
     let num_bins: usize = 100;
 

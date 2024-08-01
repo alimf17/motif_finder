@@ -1831,6 +1831,24 @@ impl Motif {
 
     }
 
+    pub fn calc_6mer_prefix_binding(&self, kmer: u64) -> f64 {
+
+        let mut kmer_track = kmer;
+
+        let mut forward_score: f64 = 0.0;
+
+        for i in 0..6 {
+
+            //SAFETY: the result of this bit manipulation must always be at most 3
+            let for_bp = unsafe{ Bp::usize_to_bp((kmer_track & 3) as usize)};
+            kmer_track = kmer_track >> 2;
+            forward_score += self.pwm[i][for_bp];
+        }
+
+        forward_score
+
+    }
+
     pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
         let coded_sequence = seq.seq_blocks();
@@ -1885,13 +1903,238 @@ impl Motif {
 
 
     }
-    
+   
+    pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
+
+        let cutoff = -(self.peak_height-distribution_cutoff);
+
+        let mut check_cutoff = cutoff;
+
+        const CHECK_CUTOFF_INDEX: usize = CAPACITY_FOR_NULL-1;
+
+        let mut reverse = self.clone();
+        reverse.pwm = self.rev_complement();
+        let len = self.len();
+
+        
+        let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
+        let mut reverse_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
+
+        for sixmer in 0_u64..0b11_11_11_11_11_11 {
+
+            let forward_score = self.calc_6mer_prefix_binding(sixmer);
+            if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
+            let reverse_score = reverse.calc_6mer_prefix_binding(sixmer);
+            if reverse_score >= cutoff { reverse_checks.push((sixmer, reverse_score)); }
+        }
+
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+        reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+            let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1+((len-6) as f64)*SCORE_THRESH;
+            check_cutoff = cutoff.max(potential_cutoff);
+        }
+        if reverse_checks.len() > CAPACITY_FOR_NULL {
+            let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1+((len-6) as f64)*SCORE_THRESH;
+            check_cutoff = cutoff.max(potential_cutoff);
+        }
+
+
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        if forward_partition < forward_checks.len() {
+            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+        }
+        let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
+        if reverse_partition < reverse_checks.len() {
+            _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
+        }
+
+        let rev_pwm_pointer = reverse.pwm.as_ptr();
+
+        forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
+            (0_u64..0b11_11).filter_map(move |twomer| {
+                let eightmer = (twomer << 12) + sixmer;
+                if seq.kmer_count(eightmer, 8).is_none() {return None;};
+                //SAFETY: two bits can only add up to 3 at most
+                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
+                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
+                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
+                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
+            })
+        }).flatten().collect();
+
+        reverse_checks = reverse_checks.into_iter().map(|(sixmer, score)| {
+            (0_u64..0b11_11).filter_map(move |twomer| {
+                let eightmer = (twomer << 12) + sixmer;
+                if seq.kmer_count(eightmer, 8).is_none() {return None;};
+                //SAFETY: two bits can only add up to 3 at most
+                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
+                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
+                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                //Also, yeah, I have to use a raw pointer here. Rust was complaining that I was moving in an external variable
+                //It's safe regardless, but still obnoxious, especially since it knows better with the self PWM
+                let new_score = unsafe {score + (*rev_pwm_pointer.add(6))[b1]+(*rev_pwm_pointer.add(7))[b2]};
+                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
+            })
+        }).flatten().collect();
+        
+        let mut accounted_length: usize = 8;
+
+        while accounted_length < len {
+
+            //This starts the segment where we cut as many kmers as possible from consideration
+            //All the kmers we cut are the ones which could never beat any of the top 200 of either group
+            check_cutoff = cutoff;
+            
+            forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+            reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+            if forward_checks.len() > CAPACITY_FOR_NULL {
+                let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1+((len-accounted_length) as f64)*SCORE_THRESH;
+                check_cutoff = cutoff.max(potential_cutoff);
+            }
+            if reverse_checks.len() > CAPACITY_FOR_NULL {
+                let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1+((len-accounted_length) as f64)*SCORE_THRESH;
+                check_cutoff = cutoff.max(potential_cutoff);
+            }
+
+
+            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+            if forward_partition < forward_checks.len() {
+                _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+            }
+            let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
+            if reverse_partition < reverse_checks.len() {
+                _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
+            }
+
+            //This ends the "cut more kmers" part of this
+
+            //This segment actually iterates to check the k+1 mers
+            forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
+                BP_ARRAY.iter().filter_map(move |&base| {
+                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
+                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
+                    //SAFETY: two bits can only add up to 3 at most
+                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                    let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
+                    if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
+                })
+            }).flatten().collect();
+
+            reverse_checks = reverse_checks.into_iter().map(|(kmer, score)| {
+                BP_ARRAY.iter().filter_map(move |&base| {
+                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
+                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
+                    //SAFETY: two bits can only add up to 3 at most
+                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                    //Also, yeah, I have to use a raw pointer here. Rust was complaining that I was moving in an external variable
+                    //It's safe regardless, but still obnoxious, especially since it knows better with the self PWM
+                    let new_score = unsafe {score + (*rev_pwm_pointer.add(accounted_length))[base]};
+                        if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
+                    })
+                }).flatten().collect();
+
+            accounted_length+=1;
+        }
+
+
+        //Now, forward_checks and reverse_checks hold all of the scores which could possibly matter. 
+        
+        //We start with a short circuit. Especially later on in the inference, I anticipate we'll end up using it a lot 
+        if forward_checks.len() == 0 && reverse_checks.len() == 0 { return Vec::new();}
+
+        //We now do a final pruning where necessary. I suspect that it will be short circuited a lot, but still
+        check_cutoff = cutoff;
+        
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+        reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+            let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1;
+            check_cutoff = cutoff.max(potential_cutoff);
+        }
+        if reverse_checks.len() > CAPACITY_FOR_NULL {
+            let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1;
+            check_cutoff = cutoff.max(potential_cutoff);
+        }
+
+
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        if forward_partition < forward_checks.len() {
+            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+        }
+        let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
+        if reverse_partition < reverse_checks.len() {
+            _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
+        }
+
+
+        //Now, forward_checks and reverse_checks are both sorted, AND only contain binding that can possibly be relevant
+        
+        let mut final_binds: Vec<f64> = Vec::with_capacity(CAPACITY_FOR_NULL);
+        let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
+
+        while final_binds.len() < CAPACITY_FOR_NULL {
+
+            match (forward_checks.get(0), reverse_checks.get(0)) {
+
+                (None, None) => break,
+                (Some(t), None)  => {
+                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
+                    //That's because it _can't_: we only store any particular kmer in one direction
+                    //And we check for the reverse complement through the reverse complement MATRIX
+                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
+                    //Which corresponds to both forward and reverse binding happening to seem fine
+                    //But we already have the score which is actually the better one, and thus we ignore the other
+                    if accounted_kmers.contains(&t.0) {continue;}
+                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    for _ in 0..times_to_add { final_binds.push(t.1); }
+                    _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                },
+                (None, Some(t))  => {
+                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
+                    //That's because it _can't_: we only store any particular kmer in one direction
+                    //And we check for the reverse complement through the reverse complement MATRIX
+                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
+                    //Which corresponds to both forward and reverse binding happening to seem fine
+                    //But we already have the score which is actually the better one, and thus we ignore the other
+                    if accounted_kmers.contains(&t.0) {continue;}
+                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    for _ in 0..times_to_add { final_binds.push(t.1); }
+                    _ = reverse_checks.drain(0..1).collect::<Vec<_>>();
+                },
+                (Some(for_tup), Some(rev_tup)) => {
+
+                    let forward_next = for_tup.1 > rev_tup.1;
+                    let t = if forward_next { forward_checks.drain(0..1).collect::<Vec<_>>().pop().expect("We're only here because this vector has elements")
+                    } else {reverse_checks.drain(0..1).collect::<Vec<_>>().pop().expect("We're only here because this vector has elements")
+                    };
+                    if accounted_kmers.contains(&t.0) {continue;}
+                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    for _ in 0..times_to_add { final_binds.push(t.1); }
+                },
+            };
+
+        }
+
+        //This can technically happen if we add more than one element at the end
+        if final_binds.len() > CAPACITY_FOR_NULL { 
+            _ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+        }
+
+        final_binds
+
+
+    }
+
     //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
-    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, groups: &[usize]) -> Vec<f64> {
+    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence) -> Vec<f64> {
 
         const SPAN: usize = (1+(MAX_BASE+2)/4);
 
-        if groups.len() == 0 { return Vec::new();}
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -1911,11 +2154,8 @@ impl Motif {
         {
             //let uncoded_seq = uncoded_seq.as_mut_slice();
             
-            for &i in groups.iter() {
+            for i in  0..num_blocks {
 
-                if i >= num_blocks {
-                    continue;
-                }
 
                 /*for jd in 0..(block_lens[i]/BP_PER_U8) {
 
@@ -2462,7 +2702,6 @@ pub struct MotifSet<'a> {
     set: Vec<(Motif, Vec<f64>)>, 
     signal: Waveform<'a>,
     ln_post: Option<f64>,
-    null_seq_attentions: Vec<usize>,
     data_ref: &'a AllDataUse<'a>, 
 }
 
@@ -2478,14 +2717,12 @@ impl<'a> MotifSet<'a> {
 
             let signal = set[0].generate_waveform(data_ref);
 
-            let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
-
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+                let null = a.return_any_null_binds_in_group(data_ref.null_seq());
                 (a,null)
             }).collect();
 
-            let mut mot_set_try = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
+            let mut mot_set_try = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, data_ref: data_ref};
 
             let like = mot_set_try.ln_posterior();
 
@@ -2505,14 +2742,12 @@ impl<'a> MotifSet<'a> {
 
         let signal = set[0].generate_waveform(data_ref);
             
-        let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
-
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq());
             (a,null)
         }).collect();
-
-        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
+        
+        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, data_ref: data_ref};
 
 
         let _ = mot_set.ln_posterior();
@@ -2526,15 +2761,13 @@ impl<'a> MotifSet<'a> {
         let set = vec![Motif::rand_mot_with_height_and_motif_len(peak_height, motif_len, data_ref.data().seq(), rng)];
 
         let signal = set[0].generate_waveform(data_ref);
-
-        let attentions: Vec<usize> = (0..data_ref.null_seq().num_sequence_blocks()).collect();
-
+        
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), &attentions);
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq());
             (a,null)
         }).collect();
 
-        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, null_seq_attentions: attentions, data_ref: data_ref};
+        let mut mot_set = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, data_ref: data_ref};
 
         let _ = mot_set.ln_posterior();
 
@@ -2615,7 +2848,6 @@ impl<'a> MotifSet<'a> {
             set: set_with_nulls,
             signal: signal, 
             ln_post: None, 
-            null_seq_attentions: Vec::new(),
             data_ref: data_ref, 
         };
 
@@ -2673,11 +2905,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        if self.null_seq_attentions.len() == 0 {
-            Vec::new()
-        } else {
-            mot.return_any_null_binds_in_group(self.data_ref.null_seq(), &self.null_seq_attentions).iter().map(|&b| mot.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>() 
-        }
+        mot.return_any_null_binds_in_group(self.data_ref.null_seq()).iter().map(|&b| mot.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>() 
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -2902,7 +3130,6 @@ impl<'a> MotifSet<'a> {
         MotifSet {
             set: self.set.clone(),
             signal: self.signal.clone(),
-            null_seq_attentions: self.null_seq_attentions.clone(),
             ln_post: None,
             data_ref: self.data_ref, //pointer
         }
@@ -3027,9 +3254,6 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn current_attention(&self) -> &Vec<usize> {
-        &self.null_seq_attentions
-    }
 
     pub fn recalc_negatives(&mut self) {
         for i in 0..self.set.len() {
@@ -3038,24 +3262,6 @@ impl<'a> MotifSet<'a> {
         };
     }
 
-    pub fn change_set_attention(&mut self, negative_blocks: Vec<usize>) -> f64 {
-
-        self.null_seq_attentions = negative_blocks;
-
-        self.recalc_negatives();
-
-        self.ln_post = None;
-        self.ln_posterior()
-
-    }
-
-    pub fn set_with_new_attention(&self, negative_blocks: Vec<usize>) -> (Self, f64) {
-
-        let mut clone = self.clone();
-        let clone_like = clone.change_set_attention(negative_blocks);
-
-        (clone, clone_like)
-    }
 
 
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
@@ -3676,7 +3882,6 @@ impl Debug for MotifSet<'_> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrippedMotifSet {
     set: Vec<Motif>,
-    null_seq_attentions: Vec<usize>,
     ln_post: f64,
 }
 
@@ -3690,14 +3895,12 @@ impl StrippedMotifSet {
             set: self.set.clone().into_iter().map(|a| (a, Vec::new())).collect(),
             signal: data_ref.data().derive_zero(),
             ln_post: None,
-            null_seq_attentions: Vec::new(),
             data_ref: data_ref,
         };
 
 
         revived.recalc_signal();
 
-        let _ = revived.change_set_attention(self.null_seq_attentions.clone()); //I don't believe these ln posteriors if I'm going to be using them for inference. 
                                                                                 //I only have this struct save a ln posterior because I want to record it for post processing
 
         revived
@@ -3723,7 +3926,6 @@ impl StrippedMotifSet {
         self.set.iter_mut()
     }
 
-    pub fn current_attention(&self) -> &Vec<usize> { &self.null_seq_attentions }
 
     pub fn output_to_meme(&self, output_dir: &str, run_name: &str) -> std::io::Result<String> {
 
@@ -3938,7 +4140,6 @@ impl<'a> From<&'a MotifSet<'a>> for StrippedMotifSet {
         let ln_post: f64 = other.calc_ln_post();
         StrippedMotifSet {
             set: other.set.iter().map(|a| a.0.clone()).collect(),
-            null_seq_attentions: other.null_seq_attentions.clone(),
             ln_post: ln_post,
         }
     }
@@ -4055,7 +4256,7 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
-    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, null_attention: Vec<usize>, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
+    pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
 
         thermo_beta = thermo_beta.abs();
 
@@ -4063,8 +4264,6 @@ impl<'a> SetTrace<'a> {
             Some(set) => set,
             None => MotifSet::rand_with_one(data_ref, rng),
         };
-
-        active_set.change_set_attention(null_attention);
 
         SetTrace{
             trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
@@ -4256,8 +4455,7 @@ impl<'a> SetTrace<'a> {
 
                 //This order INCLUDES the last possible motif set
                 //and specifically EXCLUDES the initial state
-                let (full_set, _) = set.set_with_new_attention((0..self.data_ref.null_seq().num_sequence_blocks()).collect::<Vec<usize>>());
-                self.trace.push(StrippedMotifSet::from(&full_set));
+                self.trace.push(StrippedMotifSet::from(&set));
             }
         }
 
@@ -5003,7 +5201,6 @@ impl<'a> TemperSetTraces<'a> {
 
         //let mut null_block_groups: Vec<Vec<usize>> = vec![Vec::with_capacity(1+num_null_blocks/(num_intermediate_traces+2));num_intermediate_traces+2];
 
-        let null_block_groups: Vec<Vec<usize>> = vec![(0..num_null_blocks).collect();num_intermediate_traces+2];
 
         //null_block_groups[0] = (0..num_null_blocks).collect();
 
@@ -5031,14 +5228,13 @@ impl<'a> TemperSetTraces<'a> {
         let mut current_weight: f64 = 0.0;
 
         for (i, thermo_beta) in thermos.into_iter().enumerate() {
-            println!("thermo check {i} {:?}", null_block_groups[i]);
             let potential_tracker = match how_to_track {
                 TrackingOptions::NoTracking => None, 
                 TrackingOptions::TrackAllTraces => Some(MoveTracker::new(step_num_estimate)),
                 TrackingOptions::TrackTrueTrace => if past_initial { None } else { Some(MoveTracker::new(step_num_estimate)) },
             };
-            let set_trace = SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, null_block_groups[i].clone(), sparse, rng); 
-            println!("thermo {} attention {:?}", set_trace.thermo_beta, set_trace.active_set.current_attention());
+            let set_trace = SetTrace::new_trace(capacity_per_trace, initial_condition.clone(), all_data_file.clone(),data_ref, thermo_beta, sparse, rng); 
+            println!("thermo {}", set_trace.thermo_beta);
         
             parallel_traces.push((set_trace, potential_tracker,current_weight));
 
@@ -5114,7 +5310,7 @@ impl<'a> TemperSetTraces<'a> {
         for j in 0..self.parallel_traces.len(){
             for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             
-                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), &list_of_nulls).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height())).collect::<Vec<f64>>();
+                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq()).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height())).collect::<Vec<f64>>();
                 if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
                 //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
@@ -5195,7 +5391,6 @@ impl<'a> TemperSetTraces<'a> {
 
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 
-        println!("Current attentions {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.current_attention()).collect::<Vec<_>>());
 
         /*
         

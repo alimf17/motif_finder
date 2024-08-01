@@ -21,12 +21,12 @@ pub const U64_BITMASK: u64 = 3;
 //I promise you, you only every want to use the constructors we have provided you
 //You do NOT want to try to initialize this manually. 
 //If you think you can:
-//   1) No, you can't.
-//   2) If you're lucky, your code will panic like a kid in a burning building. 
-//   3) If you're UNlucky, your code will silently produce results that are wrong. 
-//   4) I've developed this thing for 5 years over two different programming languages 
-//   5) I still screw it up when I have to do it manually. 
-//   6) Save yourself. 
+//   0) No, you can't.
+//   1) If you're lucky, your code will panic like a kid in a burning building. 
+//   2) If you're UNlucky, your code will silently produce results that are wrong. 
+//   3) I've developed this thing for 5 years over two different programming languages 
+//   4) I still screw it up when I have to do it manually. 
+//   5) Save yourself. 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
@@ -504,7 +504,8 @@ pub struct NullSequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
-    block_sets: Vec<Vec<usize>>,
+    kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE],
+    kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE],
 }
 
 
@@ -576,15 +577,18 @@ impl NullSequence {
 
         }
 
-        let block_sets = Self::assign_block_sets(&block_ls);
 
-        let seq = NullSequence {
+        let mut seq = NullSequence {
                     seq_blocks: seq_bls,
                     block_u8_starts: block_is,
                     block_lens: block_ls,
                     max_len: max_len,
-                    block_sets: block_sets,
-                    };
+                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
+                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+
+        };
+
+        seq.initialize_kmer_count();
 
         seq
 
@@ -611,152 +615,83 @@ impl NullSequence {
 
         let max_len: usize = *block_lens.iter().max().unwrap();
     
-        let block_sets = Self::assign_block_sets(&block_lens);
 
-
-        NullSequence{
+        let mut seq = NullSequence{
                     seq_blocks: seq_blocks,
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
                     max_len: max_len,
-                    block_sets: block_sets,
-        }
+                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
+                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+        };
+
+        seq.initialize_kmer_count();
+        seq
 
     }
+    
+    fn initialize_kmer_count(&mut self) {
 
-    fn assign_block_sets(block_lens: &[usize]) -> Vec<Vec<usize>> {
+        let kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
+        self.kmer_counts = kmer_counts;
+        let kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
+            let mut kmers: Vec<u64> = self.kmer_counts[a].keys().map(|&b| b).collect();
+            kmers.sort_unstable();
+            kmers
+        });
+        self.kmer_lists = kmer_lists;
 
-        //This is included for potential safety guarantees
-        //Do NOT do this. Like, it's technically correct, but don't be dumb
-        if block_lens.len() == 0 { return Vec::new();}
+    }
+    
+    //NOTE: Pretty much any time anybody can access this array without automatically using the 
+    //      the correct len should be immediately considered incorrect, especially because it 
+    //      it will NOT fail: it will just give the wrong answer SILENTLY.
+    pub fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize> {
 
-        if block_lens.len() == 1 { return vec![vec![0]];}
+        let mut unel: Vec<u64> = Vec::new();
+       
+        let guess_capacity = 2_usize.pow(len as u32).min(self.block_lens.iter().sum::<usize>());
 
-        let mut ordered_lens: Vec<Option<(usize, usize)>> = 
-            block_lens.iter().enumerate().map(|(a, &b)| Some((a,b))).collect();
+        let mut lenmer_counts: HashMap<u64,usize> = HashMap::with_capacity(guess_capacity);
 
-        //SAFETY: We KNOW that all elements of ordered_lens must be Some right now.
-        //Other note: we want this ordered largest to smallest, hence b and a reversed
-        unsafe{
-            ordered_lens.sort_unstable_by(|a, b| b.unwrap_unchecked().1.cmp(&a.unwrap_unchecked().1));
-        }                                              
-
-        //println!("start ordered {:?}", ordered_lens);
-        let account_blocks = ordered_lens.len();
-
-        let mut block_sets: Vec<Vec<usize>> = Vec::new();
-
-        //SAFETY: We already returned if ordered_lens.get_unchecked_mut(0) would be UB 
-        //        AND we did not change the all Some-ness of ordered_lens yet
-        let (first_block, target_len): (usize, usize) = unsafe{ ordered_lens.get_unchecked_mut(0).take().unwrap_unchecked() };
-
-        block_sets.push(vec![first_block]);
-
-        let mut largest_counted: usize = 1;
-
-        let mut prior_block_set_len = target_len;
-
-        loop{
-        //while /*some condition I will define*/ {//}
-
-        //println!("ordered {:?}", ordered_lens);
-        
-            //If we hit the end of the list, break our loop and prepare for final cleanup
-            let Some(valid_take) = ordered_lens.get_mut(largest_counted) else{
-                break;                                    
-                //return block_sets;
-            };
-
-            //If the next possible element is None, skip it: it's already been accounted for. 
-            let Some((begin_block, mut block_set_len)) = valid_take.take() else {
-                largest_counted += 1;
-                continue;
-            };
-
-            let mut current_block_set: Vec<usize> = vec![begin_block];
-
-            let mut next_block = largest_counted + 1;
-
-            loop {
-
-                //I want to be sure that the compiler doesn't yell:
-                //  "But ordered_lens() could change size!" Hence, account_blocks
-                if next_block >= account_blocks {
-
-                    block_sets.push(current_block_set);
-                    largest_counted += 1;
-                    break;
-
+        for i in 0..self.block_lens.len() {
+            if self.block_lens[i] >= len {
+                for j in 0..(self.block_lens[i]-len+1){
+                    let mut kmer_u64 = Sequence::kmer_to_u64(&self.return_bases(i, j, len));
+                    kmer_u64 = kmer_u64.min(reverse_complement_u64_kmer(kmer_u64, len));
+                    lenmer_counts.entry(kmer_u64).and_modify(|count| *count += 1).or_insert(1);
                 }
-                
-                //SAFETY: We literally just returned if we exceeded the length of ordered_lens
-                //If we hit upon a block that has already been accounted for, ignore it and move on
-                let potential_next_block_and_len: &mut Option<(usize, usize)> = unsafe{ ordered_lens.get_unchecked_mut(next_block)};
-
-                /*else {
-                    next_block += 1;
-                    continue;
-                };*/
-
-                if potential_next_block_and_len.is_none(){
-                        next_block += 1;
-                        continue;
-                }
-
-
-                //SAFETY: if potential_next_block_and_len is None, we already continued
-                let potential_len = block_set_len + unsafe{ potential_next_block_and_len.unwrap_unchecked().1};
-
-                if potential_len <= target_len {
-                    //SAFETY: if potential_next_block_and_len is None, we already continued
-                    let (next_block, next_len) = unsafe{ potential_next_block_and_len.take().unwrap_unchecked()} ;
-                    current_block_set.push(next_block);
-                    block_set_len += next_len;
-                    if block_set_len == target_len {
-                        block_sets.push(current_block_set);
-                        largest_counted += 1;
-                        break;
-                    }
-                } else {
-                    prior_block_set_len = block_set_len;
-                }
-                next_block += 1;
-               
-
-
             }
 
-
         }
 
-        //We know ordered_lens and block_sets must have a length of at least 2: 
-        //we would not have gotten here, otherwise. 
-        if block_sets.len() == 2 { return block_sets;}
+        lenmer_counts
 
-        let block_sets_len = block_sets.len();
+      
+    }
 
-        //SAFETY: We guarenteed that block_sets has at least three elements by this point
-        let len_penultimate: usize = unsafe{ block_sets.get_unchecked(block_sets_len-2).iter().map(|&a| block_lens[a]).sum()};
-        let len_final: usize = unsafe{ block_sets.get_unchecked(block_sets_len-1).iter().map(|&a| block_lens[a]).sum()};
+    /*
+    pub fn u64_kmers_with_hamming(&self, u64_kmer: u64, len: usize, hamming: usize) -> Vec<u64> {
+        self.kmer_lists[len-MIN_BASE].iter()
+                           .filter_map(|&b| if Sequence::u64_kmers_have_hamming(u64_kmer, b, hamming){ Some(b)} else {None})
+                           .collect::<Vec<u64>>()
+    }
 
-        let len_total = len_final+len_penultimate;
+    pub fn u64_kmers_with_unit_hamming(&self, u64_kmer: u64, len: usize) -> Vec<u64> {
 
+        let mut kmers = self.kmer_lists[len-MIN_BASE].iter()
+                            .filter_map(|&b| if true_have_hamming_u64_kmer(u64_kmer, b, len, 1) {
+                                Some(b)
+                            } else {None})
+                            .collect::<Vec<u64>>();
 
-
-        //This inequality is equivalent to "len_final+len_penultimate is closer to the target len than the individual lens are"
-        if len_total <= (3*target_len)/2 {
-            let mut last_elem = unsafe{block_sets.pop().unwrap_unchecked()};
-            unsafe{block_sets.get_unchecked_mut(block_sets_len-2).append(&mut last_elem);}
-        }
-
-        block_sets
 
     }
 
-    //Panics: If there are no sequence blocks, and thus self.block_sets is empty
-    pub fn yield_random_block_set<R: Rng + ?Sized>(&self, rng: &mut R) -> &Vec<usize> {
-        self.block_sets.choose(rng).unwrap()
-    }
+    pub fn filter_u64_for_hamming(candidates: Vec<u64>, u64_kmer: u64, len: usize, target_hamming: usize) -> Vec<u64> {
+        candidates.into_iter().filter(|&a| Sequence::u64_kmers_have_hamming(u64_kmer, a, target_hamming)).collect()
+    }*/
+
     //Regular reader functions
 
     //This can TECHNICALLY panic in debug mode and produce incorrect answers 
@@ -811,9 +746,40 @@ impl NullSequence {
 
     }
 
+    pub fn kmer_count(&self, kmer: u64, len: usize) -> Option<usize> {
+        self.kmer_counts[len-MIN_BASE].get(&kmer).map(|a| *a) 
+    }
+}
+
+pub fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
+
+    let mut track_kmer = kmer;
+    let mut rev_kmer: u64 = 0;
+    for _ in 0..len {
+        rev_kmer = rev_kmer << 2;
+        rev_kmer += ((track_kmer & 3) ^ 3);
+        track_kmer = track_kmer >> 2;
+    }
+
+    rev_kmer
 
 }
 
+pub fn plain_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize) -> usize {
+    let mut kmer_check = (kmer_a ^ kmer_b);
+    let mut hamming: usize = 0;
+    for _ in 0..len {
+        if (kmer_check & 3) > 0 { hamming += 1;}
+        kmer_check = kmer_check >> 2
+    }
+    hamming
+}
+
+pub fn true_have_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize, hamming_thresh: usize) -> bool {
+    let rc = reverse_complement_u64_kmer(kmer_a, len);
+    let hamming = plain_hamming_u64_kmer(kmer_a, kmer_b, len).min(plain_hamming_u64_kmer(rc, kmer_b, len));
+    hamming == hamming_thresh
+}
 #[cfg(test)]
 mod tests {
     use super::*; 

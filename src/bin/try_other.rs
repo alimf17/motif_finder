@@ -123,7 +123,7 @@ fn main() {
 
 //    2818 |     pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
 
-    let reg_trace = SetTrace::new_trace(1, Some(reg_set), bincode_string, &using, 1.0, Vec::new(), None, &mut rng);
+    let reg_trace = SetTrace::new_trace(1, Some(reg_set), bincode_string, &using, 1.0, None, &mut rng);
 
 //    let reg_trace = SetTrace::new_trace(1, bincode_string.clone(), InitializeSet::<rand::rngs::ThreadRng>::Set(reg_set), &using, None);
    
