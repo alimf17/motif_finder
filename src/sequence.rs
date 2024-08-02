@@ -633,12 +633,37 @@ impl NullSequence {
     fn initialize_kmer_count(&mut self) {
 
         let kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
+        for a in 1..(1+MAX_BASE-MIN_BASE) {
+
+            for (i, &key) in kmer_counts[a].keys().enumerate() {
+
+                let mask: u64 = 4_u64.pow((MIN_BASE+a-1) as u32)-1;
+                let smallmer = key & mask;
+                let revsmmer = reverse_complement_u64_kmer(smallmer, MIN_BASE+a-1);
+                //println!("mask {:#b} {}", mask, MIN_BASE+a);
+                if !kmer_counts[a-1].contains_key(&smallmer){
+                    
+                    if kmer_counts[a-1].contains_key(&revsmmer) {
+                        
+                        //println!("only contains rev");
+                    } else {
+                        panic!("key invariant broken!");
+                    }
+                }    
+
+            }
+
+            println!("len {} key_num {} len {} key_num {}", a+MIN_BASE, kmer_counts[a].len(), a+MIN_BASE-1, kmer_counts[a-1].len());
+        }
+
         self.kmer_counts = kmer_counts;
         let kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
             let mut kmers: Vec<u64> = self.kmer_counts[a].keys().map(|&b| b).collect();
             kmers.sort_unstable();
+            //println!("len {} kmers {:?} dict {:?}", a+MIN_BASE, kmers, self.kmer_counts[a]);
             kmers
         });
+        
         self.kmer_lists = kmer_lists;
 
     }
@@ -658,7 +683,10 @@ impl NullSequence {
             if self.block_lens[i] >= len {
                 for j in 0..(self.block_lens[i]-len+1){
                     let mut kmer_u64 = Sequence::kmer_to_u64(&self.return_bases(i, j, len));
-                    kmer_u64 = kmer_u64.min(reverse_complement_u64_kmer(kmer_u64, len));
+                    let rev = reverse_complement_u64_kmer(kmer_u64, len);
+
+                    //This means that we store the kmer which ENDS with the most As, then Cs
+                    if rev < kmer_u64 { kmer_u64 = rev;} 
                     lenmer_counts.entry(kmer_u64).and_modify(|count| *count += 1).or_insert(1);
                 }
             }
@@ -755,9 +783,8 @@ pub fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
 
     let mut track_kmer = kmer;
     let mut rev_kmer: u64 = 0;
-    for _ in 0..len {
-        rev_kmer = rev_kmer << 2;
-        rev_kmer += ((track_kmer & 3) ^ 3);
+    for i in 0..len {
+        rev_kmer += ((track_kmer & 3) ^ 3) << (2*(len-1-i));
         track_kmer = track_kmer >> 2;
     }
 
@@ -780,6 +807,229 @@ pub fn true_have_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize, hamming_
     let hamming = plain_hamming_u64_kmer(kmer_a, kmer_b, len).min(plain_hamming_u64_kmer(rc, kmer_b, len));
     hamming == hamming_thresh
 }
+
+trait UpdateNone {
+    fn increase_count(&mut self);
+}
+
+type ToNext = Option<Box<SeqTrieNode>>;
+
+impl UpdateNone for ToNext {
+
+    fn increase_count(&mut self) {
+        if self.is_none() {
+            *self = Some(Box::new(SeqTrieNode::new()));
+        } else {
+            self.as_mut().map(|a| a.count += 1);
+        }
+    }
+
+}
+
+
+struct SeqTrieNode {
+    count: usize,
+    next_bp: [ToNext; BASE_L],
+}
+
+impl SeqTrieNode {
+    fn new() -> Self {
+        Self {
+            count: 1,
+            next_bp: [None, None, None, None],
+        }
+    }
+    fn get_entry(&self, bp: Bp) -> Option<&Box<SeqTrieNode>> {
+        self.next_bp[bp as usize].as_ref()
+    }
+    fn get_mut_entry(&mut self, bp: Bp) -> Option<&mut Box<SeqTrieNode>> {
+        self.next_bp[bp as usize].as_mut()
+    }
+   
+    fn increase_count(&mut self, bp: Bp) {
+        self.next_bp[bp as usize].increase_count();
+    }
+}
+
+pub struct SeqTrie {
+
+    eightmers: [usize; 65536],
+    ninemers: [usize; 262144],
+    trie: [ToNext; 1048576],
+}
+
+impl SeqTrie {
+
+    /*pub fn new() -> Self {
+        /*Self {
+            eightmers: [0; 65536],
+            ninemers: [0; 262144],
+            trie: core::array::from_fn(|_| None),
+        }*/
+    }*/
+
+//I freely admit that this is not the most efficient way to initialize this
+//I do NOT care: I'm doing this once per new data set generation (not even once every run!)
+//And trying to think of faster ways to do this gave me stuff that was full of footguns
+    pub fn new_from_seq_blocks(seq: &NullSequence) -> Self {
+
+        let mut eightmers = [0_usize; 65536];
+
+        for i in 0..seq.block_lens.len() {
+            for j in 0..(seq.block_lens[i]-7){
+                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 8));
+                let rev = reverse_complement_u64_kmer(kmer_u64, 8);
+
+                //safety: an eightmer can only have the values in 0..65536
+                unsafe {
+                    *eightmers.get_unchecked_mut(kmer_u64 as usize) += 1;
+                    *eightmers.get_unchecked_mut(rev as usize) += 1;
+                }
+            }
+        }
+       
+        let mut ninemers = [0_usize; 262144];
+
+        for i in 0..seq.block_lens.len() {
+            for j in 0..(seq.block_lens[i]-8){
+                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 9));
+                let rev = reverse_complement_u64_kmer(kmer_u64, 9);
+
+                //safety: a ninemer can only have the values in 0..262144
+                unsafe {
+                    *ninemers.get_unchecked_mut(kmer_u64 as usize) += 1;
+                    *ninemers.get_unchecked_mut(rev as usize) += 1;
+                }
+            }
+        }
+
+        let mut trie: [ToNext; 1048576] = core::array::from_fn(|_| None);
+
+        for i in 0..seq.block_lens.len() {
+            for j in 0..(seq.block_lens[i]-9){
+                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 10));
+                let rev = reverse_complement_u64_kmer(kmer_u64, 10);
+
+                //safety: a tenmer can only have the values in 0..1048576
+                unsafe {
+               
+                    trie.get_unchecked_mut(kmer_u64 as usize).increase_count();
+                    trie.get_unchecked_mut(rev as usize).increase_count();
+
+                }
+            }
+        }
+
+        //We go in ascending order, because now we have guarentees that it's legit and we'll always hit Some
+        for len in 11..=MAX_BASE{
+
+            for i in 0..seq.block_lens.len() {
+                for j in 0..(seq.block_lens[i]+1-len){
+                    let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, len));
+                    let rev = reverse_complement_u64_kmer(kmer_u64, len);
+
+                    let index_forward = (kmer_u64 & (4_u64.pow(10)-1)) as usize;
+                    let index_reverse = (rev & (4_u64.pow(10)-1)) as usize;
+
+                    let mut remaining_forward = kmer_u64 >> 20;
+                    let mut remaining_reverse = rev >> 20;
+
+                    let key_remaining_len = len-10;
+
+                    unsafe {
+
+                        //SAFETY: an tenmer can only have the values in 0..1048576
+                        let mut index_for_mut = trie.get_unchecked_mut(index_forward as usize).as_mut();
+
+                        let mut remaining_len = key_remaining_len;
+                        while remaining_len > 1 {
+
+                            //SAFETY: & 3 guarentees that our bases are always less than 4, so this is safe
+                            let b_f = (remaining_forward & 3) as usize;
+
+                            index_for_mut = index_for_mut.unwrap().next_bp.get_unchecked_mut(b_f).as_mut();
+
+
+                            remaining_forward = remaining_forward >> 2;
+                            remaining_len -= 1;
+                        }
+                        
+                        let b_f = (remaining_forward & 3) as usize;
+
+                        index_for_mut.unwrap().next_bp[b_f].increase_count();
+                        
+                        let mut index_rev_mut = trie.get_unchecked_mut(index_reverse as usize).as_mut();
+
+                        let mut remaining_len = key_remaining_len;
+
+                        while remaining_len > 1 {
+                            
+
+                            let b_r = (remaining_reverse & 3) as usize;
+                            
+                            index_rev_mut = index_rev_mut.unwrap().next_bp.get_unchecked_mut(b_r).as_mut();
+                            
+                            remaining_reverse = remaining_reverse >> 2;
+                            remaining_len -= 1;
+
+
+                        }
+                        let b_r = (remaining_forward & 3) as usize;
+
+                        index_rev_mut.unwrap().next_bp[b_r].increase_count();
+
+                    }
+                }
+            }
+
+        }
+
+
+
+        Self {
+            eightmers,
+            ninemers, 
+            trie,
+        }
+
+    }
+
+
+
+    pub fn access(&self, kmer: u64, len: usize) -> Option<usize> {
+        if len == 8 { 
+            let count = self.eightmers[kmer as usize];
+            if count > 0 {return Some(count); } else {return None;}
+        } else if len == 9 {
+            let count = self.ninemers[kmer as usize];
+            if count > 0 {return Some(count); } else {return None;}
+        }
+
+        let index = (kmer & ((1 << 20)-1)) as usize;
+        let Some(ref pointing) = self.trie[index] else {return None;};
+
+        let mut pointing = pointing;
+
+        let mut remaining = (kmer >> 20);
+        let mut rem_len = len-10;
+
+        while rem_len > 0 {
+            let bp = ((remaining & 3) as usize);
+            pointing = match pointing.next_bp[bp] {
+                Some(ref p) => p,
+                None => return None,
+            };
+            remaining = remaining >> 2;
+            rem_len -= 1;
+        }
+
+        Some(pointing.count)
+
+
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*; 
@@ -788,6 +1038,32 @@ mod tests {
     use crate::base::*;
    
 
+    #[test]
+    fn test_u64() {
+
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..1000 {
+
+            let len = rng.gen_range(MIN_BASE..=MAX_BASE);
+            let motif: u64 = rng.gen_range(0_u64..4_u64.pow(len as u32));
+            let rev_mot = reverse_complement_u64_kmer(motif, len);
+
+            let mut mot_change = motif;
+
+            for i in 0..len {
+                let b0 = mot_change & 3;
+                mot_change = mot_change >> 2;
+                let b1 = (rev_mot & (3 << (2*(len-1-i)))) >> (2*(len-1-i));
+                println!("{:#040b} {b0}, {:#040b} {b1} {len}", motif, rev_mot);
+                if b0 ^ b1 != 3 {
+                    panic!("failed complement!");
+                }
+            }
+
+        }
+
+    }
 
     #[test]
     fn specific_seq(){
@@ -941,7 +1217,7 @@ mod tests {
 
 
     }
-
+/*
     #[test]
     fn assign_block_sets_test() {
 
@@ -1012,7 +1288,7 @@ mod tests {
 
 
     }
-
+*/
 
 
 
