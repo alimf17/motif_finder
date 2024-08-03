@@ -1904,7 +1904,7 @@ impl Motif {
 
     }
    
-    pub fn return_any_null_binds_by_kmers(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
+    pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
 
         let cutoff = -(self.peak_height-distribution_cutoff);
 
@@ -1920,13 +1920,12 @@ impl Motif {
         let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
         let mut reverse_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
 
-        for sixmer in 0_u64..=0b11_11_11_11_11_11 {
+        for sixmer in 0_u64..0b11_11_11_11_11_11 {
 
-                let forward_score = self.calc_6mer_prefix_binding(sixmer);
-                if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
-                let reverse_score = reverse.calc_6mer_prefix_binding(sixmer);
-                if reverse_score >= cutoff { reverse_checks.push((sixmer, reverse_score)); }
-        
+            let forward_score = self.calc_6mer_prefix_binding(sixmer);
+            if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
+            let reverse_score = reverse.calc_6mer_prefix_binding(sixmer);
+            if reverse_score >= cutoff { reverse_checks.push((sixmer, reverse_score)); }
         }
 
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
@@ -1942,21 +1941,19 @@ impl Motif {
         }
 
 
-        /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
         if forward_partition < forward_checks.len() {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
         }
         let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
         if reverse_partition < reverse_checks.len() {
             _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
-        }*/
+        }
 
         let rev_pwm_pointer = reverse.pwm.as_ptr();
-        
-        println!("before up {} {}", forward_checks.len(), reverse_checks.len());
 
         forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
-            (0_u64..=0b11_11).filter_map(move |twomer| {
+            (0_u64..0b11_11).filter_map(move |twomer| {
                 let eightmer = (twomer << 12) + sixmer;
                 if seq.kmer_count(eightmer, 8).is_none() {return None;};
                 //SAFETY: two bits can only add up to 3 at most
@@ -1969,7 +1966,7 @@ impl Motif {
         }).flatten().collect();
 
         reverse_checks = reverse_checks.into_iter().map(|(sixmer, score)| {
-            (0_u64..=0b11_11).filter_map(move |twomer| {
+            (0_u64..0b11_11).filter_map(move |twomer| {
                 let eightmer = (twomer << 12) + sixmer;
                 if seq.kmer_count(eightmer, 8).is_none() {return None;};
                 //SAFETY: two bits can only add up to 3 at most
@@ -1982,15 +1979,10 @@ impl Motif {
                 if new_score >= cutoff { Some((eightmer, new_score))} else {None}
             })
         }).flatten().collect();
-       
-        println!("after up {} {}", forward_checks.len(), reverse_checks.len());
-
+        
         let mut accounted_length: usize = 8;
 
-        let mut forward_dead = forward_checks.len() == 0;
-        let mut reverse_dead = reverse_checks.len() == 0;
-
-        while !(forward_dead && reverse_dead) && accounted_length < len  {
+        while accounted_length < len {
 
             //This starts the segment where we cut as many kmers as possible from consideration
             //All the kmers we cut are the ones which could never beat any of the top 200 of either group
@@ -2009,18 +2001,17 @@ impl Motif {
             }
 
 
-            /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
             if forward_partition < forward_checks.len() {
                 _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
             }
             let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
             if reverse_partition < reverse_checks.len() {
                 _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
-            }*/
+            }
 
             //This ends the "cut more kmers" part of this
 
-            if !forward_dead {
             //This segment actually iterates to check the k+1 mers
             forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
@@ -2032,9 +2023,7 @@ impl Motif {
                     if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
                 })
             }).flatten().collect();
-            }
 
-            if !reverse_dead  {
             reverse_checks = reverse_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
                     let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
@@ -2047,11 +2036,6 @@ impl Motif {
                         if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
                     })
                 }).flatten().collect();
-            }
-            forward_dead = forward_checks.len() == 0;
-            reverse_dead = reverse_checks.len() == 0;
-        
-            println!("length {accounted_length} {} {}", forward_checks.len(), reverse_checks.len());
 
             accounted_length+=1;
         }
@@ -6892,7 +6876,7 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
+        let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
 
         let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), &mut rng); //sequence
 
@@ -6917,28 +6901,14 @@ mod tester{
 
         let null_blocks: Vec<usize> = (0..null_block_lens.len()).collect();
 
-        for h in 2..14 {
-
-            println!("height {h}");
-            motif.peak_height = h as f64;
-
         let start_null = Instant::now();
-        let null_binds = motif.return_any_null_binds_in_group(&null_seq);
+        let null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
         let duration_null = start_null.elapsed();
 
         println!("height {} null binds {:?}", motif.peak_height(), null_binds);
         println!("null dur {:?}", duration_null);
 
-        let start_alter = Instant::now();
-        let new_nulls = motif.return_any_null_binds_by_kmers(&null_seq, 0.0);
-        let duration_alter = start_alter.elapsed();
 
-        println!("height {} null binds alternative {:?}", motif.peak_height(), new_nulls);
-        println!("alter dur {:?}",duration_alter);
-        
-        }
-        
-        motif.peak_height = 4.0;
         let start_b = Instant::now();
         let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
         let duration_b = start_b.elapsed();
@@ -7094,16 +7064,17 @@ mod tester{
 
         }
         
+        for i in 0..null_block_lens.len() {
         
-            let mut significant_binds: Vec<f64> = Vec::with_capacity(1_000_000);
+            let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[i]);
 
+            let group = [i];
 
-            let mut binds = motif.return_any_null_binds_in_group(&null_seq);
+            let mut binds = motif.return_any_null_binds_in_group(&null_seq,&group);
 
+            println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
 
-            for i in 0..null_block_lens.len() {
-                println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
-                for j in 0..=(null_block_lens[i]-motif.len()) {
+            for j in 0..=(null_block_lens[i]-motif.len()) {
 
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, _) = unsafe{ motif.prop_binding(&mot)};
