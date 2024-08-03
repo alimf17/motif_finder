@@ -606,7 +606,6 @@ impl NullSequence {
     //          Failure to uphold this will result in this panicking for your own good.
     pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> NullSequence {
 
-        println!("start man");
         let mut block_u8_starts: Vec<usize> = vec![0];
 
         for i in 0..(block_lens.len()-1) {
@@ -638,9 +637,7 @@ impl NullSequence {
 
         };
 
-        println!("pre trie");
         let trie = SeqTrie::new_from_seq_blocks(&seq);
-
 
         seq.kmer_trie = trie;
 
@@ -899,7 +896,6 @@ impl SeqTrie {
 //And trying to think of faster ways to do this gave me stuff that was full of footguns
     pub fn new_from_seq_blocks(seq: &NullSequence) -> Self {
 
-        println!("beign");
         let mut eightmers = [0_usize; 65536];
 
         for i in 0..seq.block_lens.len() {
@@ -909,14 +905,11 @@ impl SeqTrie {
 
                 //safety: an eightmer can only have the values in 0..65536
                 unsafe {
-                    //*eightmers.get_unchecked_mut(kmer_u64 as usize) += 1;
-                    //*eightmers.get_unchecked_mut(rev as usize) += 1;
-                    *eightmers.get_mut(kmer_u64 as usize).unwrap() += 1;
-                    *eightmers.get_mut(rev as usize).unwrap() += 1;
+                    *eightmers.get_unchecked_mut(kmer_u64 as usize) += 1;
+                    *eightmers.get_unchecked_mut(rev as usize) += 1;
                 }
             }
         }
-        println!("8");
        
         let mut ninemers = [0_usize; 262144];
 
@@ -927,14 +920,11 @@ impl SeqTrie {
 
                 //safety: a ninemer can only have the values in 0..262144
                 unsafe {
-//                    *ninemers.get_unchecked_mut(kmer_u64 as usize) += 1;
-//                    *ninemers.get_unchecked_mut(rev as usize) += 1;
-                    *ninemers.get_mut(kmer_u64 as usize).unwrap() += 1;
-                    *ninemers.get_mut(rev as usize).unwrap() += 1;
+                    *ninemers.get_unchecked_mut(kmer_u64 as usize) += 1;
+                    *ninemers.get_unchecked_mut(rev as usize) += 1;
                 }
             }
         }
-        println!("9");
 
         let mut trie: [ToNext; 1048576] = core::array::from_fn(|_| None);
 
@@ -946,16 +936,12 @@ impl SeqTrie {
                 //safety: a tenmer can only have the values in 0..1048576
                 unsafe {
                
-//                    trie.get_unchecked_mut(kmer_u64 as usize).increase_count();
-//                    trie.get_unchecked_mut(rev as usize).increase_count();
-                    trie.get_mut(kmer_u64 as usize).unwrap().increase_count();
-                    trie.get_mut(rev as usize).unwrap().increase_count();
+                    trie.get_unchecked_mut(kmer_u64 as usize).increase_count();
+                    trie.get_unchecked_mut(rev as usize).increase_count();
 
                 }
             }
         }
-
-        println!("base");
 
         //We go in ascending order, because now we have guarentees that it's legit and we'll always hit Some
         for len in 11..=MAX_BASE{
@@ -976,17 +962,16 @@ impl SeqTrie {
                     unsafe {
 
                         //SAFETY: an tenmer can only have the values in 0..1048576
-                        //let mut index_for_mut = trie.get_unchecked_mut(index_forward as usize).as_mut();
+                        let mut index_for_mut = trie.get_unchecked_mut(index_forward as usize).as_mut();
 
-                        let mut index_for_mut = trie.get_mut(index_forward as usize).unwrap().as_mut();
                         let mut remaining_len = key_remaining_len;
                         while remaining_len > 1 {
 
                             //SAFETY: & 3 guarentees that our bases are always less than 4, so this is safe
                             let b_f = (remaining_forward & 3) as usize;
 
-                            //index_for_mut = index_for_mut.unwrap().next_bp.get_unchecked_mut(b_f).as_mut();
-                            index_for_mut = index_for_mut.unwrap().next_bp.get_mut(b_f).unwrap().as_mut();
+                            index_for_mut = index_for_mut.unwrap().next_bp.get_unchecked_mut(b_f).as_mut();
+
 
                             remaining_forward = remaining_forward >> 2;
                             remaining_len -= 1;
@@ -996,8 +981,7 @@ impl SeqTrie {
 
                         index_for_mut.unwrap().next_bp[b_f].increase_count();
                         
-                        let mut index_rev_mut = trie.get_mut(index_reverse as usize).unwrap().as_mut();
-                        //let mut index_rev_mut = trie.get_unchecked_mut(index_reverse as usize).as_mut();
+                        let mut index_rev_mut = trie.get_unchecked_mut(index_reverse as usize).as_mut();
 
                         let mut remaining_len = key_remaining_len;
 
@@ -1006,8 +990,7 @@ impl SeqTrie {
 
                             let b_r = (remaining_reverse & 3) as usize;
                             
-                            index_rev_mut = index_rev_mut.unwrap().next_bp.get_mut(b_r).unwrap().as_mut();
-                            //index_rev_mut = index_rev_mut.unwrap().next_bp.get_unchecked_mut(b_r).as_mut();
+                            index_rev_mut = index_rev_mut.unwrap().next_bp.get_unchecked_mut(b_r).as_mut();
                             
                             remaining_reverse = remaining_reverse >> 2;
                             remaining_len -= 1;
@@ -1022,7 +1005,6 @@ impl SeqTrie {
                 }
             }
 
-            println!("{len}");
         }
 
 

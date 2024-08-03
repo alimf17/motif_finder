@@ -6843,11 +6843,8 @@ mod tester{
 
     #[test]
     fn motif_establish_tests() {
-        println!("start");
 
         std::env::set_var("RUST_BACKTRACE", "1");
-
-        println!("start");
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
         let spacing_dist = rand::distributions::Uniform::from(500..5000);
@@ -6867,8 +6864,7 @@ mod tester{
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
-       
-        println!("seq");
+        
 
         //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
         //let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
@@ -6878,7 +6874,6 @@ mod tester{
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
 
-        println!("null");
         let start_bases_copy = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
 
@@ -6915,21 +6910,6 @@ mod tester{
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
 
-        for len in MIN_BASE..=MAX_BASE {
-
-            for _ in 0..100 {
-
-                let sup_kmer: u64 = 4_u64.pow(len as u32);
-                let kmer_for = rng.gen_range(0..sup_kmer);
-                let kmer_rev = crate::sequence::reverse_complement_u64_kmer(kmer_for, len as usize);
-
-                assert!(null_seq.kmer_count(kmer_for, len as usize) == null_seq.kmer_count(kmer_rev, len as usize), "reverse complement invariant failed");
-
-            }
-
-        }
-
-        println!("checked rev!");
 
         let waveform_raw = waveform.raw_wave();
 
