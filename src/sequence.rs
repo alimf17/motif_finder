@@ -1,5 +1,6 @@
 
-use serde::{Serialize,Deserialize};
+use serde::{Serialize,Deserialize, Serializer, ser::SerializeTuple};
+use serde_big_array::BigArray;
 
 use std::collections::{HashMap, HashSet};
 use itertools::{Itertools};
@@ -504,8 +505,7 @@ pub struct NullSequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
-    kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE],
-    kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE],
+    kmer_trie: SeqTrie,
 }
 
 
@@ -583,12 +583,20 @@ impl NullSequence {
                     block_u8_starts: block_is,
                     block_lens: block_ls,
                     max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
-                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+                    kmer_trie: SeqTrie {
+                        eightmers: [0; 65536],
+                        ninemers: [0; 262144],
+                        trie: core::array::from_fn(|_| None),
+                    },
+
 
         };
 
-        seq.initialize_kmer_count();
+        let trie = SeqTrie::new_from_seq_blocks(&seq);
+
+        seq.kmer_trie = trie;
+
+
 
         seq
 
@@ -621,16 +629,23 @@ impl NullSequence {
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
                     max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
-                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+                    kmer_trie: SeqTrie {
+                        eightmers: [0; 65536],
+                        ninemers: [0; 262144],
+                        trie: core::array::from_fn(|_| None),
+                    },
+
         };
 
-        seq.initialize_kmer_count();
+        let trie = SeqTrie::new_from_seq_blocks(&seq);
+
+        seq.kmer_trie = trie;
+
         seq
 
     }
     
-    fn initialize_kmer_count(&mut self) {
+/*    fn initialize_kmer_count(&mut self) {
 
         let kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
         for a in 1..(1+MAX_BASE-MIN_BASE) {
@@ -697,7 +712,7 @@ impl NullSequence {
 
       
     }
-
+*/
     /*
     pub fn u64_kmers_with_hamming(&self, u64_kmer: u64, len: usize, hamming: usize) -> Vec<u64> {
         self.kmer_lists[len-MIN_BASE].iter()
@@ -775,7 +790,7 @@ impl NullSequence {
     }
 
     pub fn kmer_count(&self, kmer: u64, len: usize) -> Option<usize> {
-        self.kmer_counts[len-MIN_BASE].get(&kmer).map(|a| *a) 
+        self.kmer_trie.access(kmer, len)
     }
 }
 
@@ -826,7 +841,7 @@ impl UpdateNone for ToNext {
 
 }
 
-
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct SeqTrieNode {
     count: usize,
     next_bp: [ToNext; BASE_L],
@@ -851,12 +866,20 @@ impl SeqTrieNode {
     }
 }
 
-pub struct SeqTrie {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct SeqTrie {
 
+//    #[serde(with = "EightmerRemote")]
+    #[serde(with = "BigArray")]
     eightmers: [usize; 65536],
+    #[serde(with = "BigArray")]
+//    #[serde(with = "NinemerRemote")]
     ninemers: [usize; 262144],
+    #[serde(with = "BigArray")]
+//    #[serde(with = "TrieRemote")]
     trie: [ToNext; 1048576],
 }
+
 
 impl SeqTrie {
 
@@ -1029,6 +1052,38 @@ impl SeqTrie {
     }
 
 }
+/*
+impl Serialize for SeqTrie {
+
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq_trie_ser = serializer.serialize_struct("SeqTrie", 3)?;
+        let mut eightmer_ser = seq_trie_ser.serialize_field("eightmers", &self.eightmers)?;
+
+        for eightmer in self.eightmer.iter() {
+            eightmer_ser.serialize_element(eightmer);
+        }
+
+        eightmer_ser.end()?;
+        
+        let mut ninemer_ser = seq_trie_ser.serialize_field("ninemers", &self.ninemers)?;
+
+        for ninemer in self.ninemer.iter() {
+            ninemer_ser.serialize_element(ninemer);
+        }
+
+        ninemer_ser.end()?;
+        
+        seq_trie_ser.serialize_field("trie", &self.trie)?
+
+        seq.end()
+    }
+
+
+}
+*/
 
 #[cfg(test)]
 mod tests {
