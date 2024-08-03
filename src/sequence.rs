@@ -584,8 +584,8 @@ impl NullSequence {
                     block_lens: block_ls,
                     max_len: max_len,
                     kmer_trie: SeqTrie {
-                        eightmers: [0; 65536],
-                        ninemers: [0; 262144],
+                        //eightmers: [0; 65536],
+                        //ninemers: [0; 262144],
                         trie: core::array::from_fn(|_| None),
                     },
 
@@ -631,8 +631,8 @@ impl NullSequence {
                     block_lens: block_lens,
                     max_len: max_len,
                     kmer_trie: SeqTrie {
-                        eightmers: [0; 65536],
-                        ninemers: [0; 262144],
+                        //eightmers: [0; 65536],
+                        //ninemers: [0; 262144],
                         trie: core::array::from_fn(|_| None),
                     },
 
@@ -873,14 +873,16 @@ impl SeqTrieNode {
 struct SeqTrie {
 
 //    #[serde(with = "EightmerRemote")]
-    #[serde(with = "BigArray")]
-    eightmers: [usize; 65536],
-    #[serde(with = "BigArray")]
+    //#[serde(with = "BigArray")]
+    //eightmers: [usize; 65536],
+    //#[serde(with = "BigArray")]
 //    #[serde(with = "NinemerRemote")]
-    ninemers: [usize; 262144],
+    //ninemers: [usize; 262144],
     #[serde(with = "BigArray")]
 //    #[serde(with = "TrieRemote")]
-    trie: [ToNext; 1048576],
+    //trie: [ToNext; 1048576],
+    //trie: [ToNext; 262144],
+    trie: [ToNext; 65536],
 }
 
 
@@ -900,6 +902,7 @@ impl SeqTrie {
     pub fn new_from_seq_blocks(seq: &NullSequence) -> Self {
 
         println!("beign");
+        /*
         let mut eightmers = [0_usize; 65536];
 
         for i in 0..seq.block_lens.len() {
@@ -909,15 +912,16 @@ impl SeqTrie {
 
                 //safety: an eightmer can only have the values in 0..65536
                 unsafe {
-                    //*eightmers.get_unchecked_mut(kmer_u64 as usize) += 1;
-                    //*eightmers.get_unchecked_mut(rev as usize) += 1;
+                    // *eightmers.get_unchecked_mut(kmer_u64 as usize) += 1;
+                    // *eightmers.get_unchecked_mut(rev as usize) += 1;
                     *eightmers.get_mut(kmer_u64 as usize).unwrap() += 1;
                     *eightmers.get_mut(rev as usize).unwrap() += 1;
                 }
             }
         }
+         */
         println!("8");
-       
+       /*
         let mut ninemers = [0_usize; 262144];
 
         for i in 0..seq.block_lens.len() {
@@ -937,11 +941,13 @@ impl SeqTrie {
         println!("9");
 
         let mut trie: [ToNext; 1048576] = core::array::from_fn(|_| None);
-
+*/
+        //let mut trie: [ToNext; 262144] = core::array::from_fn(|_| None);
+        let mut trie: [ToNext; 65536] =  core::array::from_fn(|_| None);
         for i in 0..seq.block_lens.len() {
-            for j in 0..(seq.block_lens[i]-9){
-                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 10));
-                let rev = reverse_complement_u64_kmer(kmer_u64, 10);
+            for j in 0..(seq.block_lens[i]-7){
+                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 8));
+                let rev = reverse_complement_u64_kmer(kmer_u64, 8);
 
                 //safety: a tenmer can only have the values in 0..1048576
                 unsafe {
@@ -958,20 +964,20 @@ impl SeqTrie {
         println!("base");
 
         //We go in ascending order, because now we have guarentees that it's legit and we'll always hit Some
-        for len in 11..=MAX_BASE{
+        for len in 9..=MAX_BASE{
 
             for i in 0..seq.block_lens.len() {
                 for j in 0..(seq.block_lens[i]+1-len){
                     let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, len));
                     let rev = reverse_complement_u64_kmer(kmer_u64, len);
 
-                    let index_forward = (kmer_u64 & (4_u64.pow(10)-1)) as usize;
-                    let index_reverse = (rev & (4_u64.pow(10)-1)) as usize;
+                    let index_forward = (kmer_u64 & (4_u64.pow(8)-1)) as usize;
+                    let index_reverse = (rev & (4_u64.pow(8)-1)) as usize;
 
-                    let mut remaining_forward = kmer_u64 >> 20;
-                    let mut remaining_reverse = rev >> 20;
+                    let mut remaining_forward = kmer_u64 >> 16;
+                    let mut remaining_reverse = rev >> 16;
 
-                    let key_remaining_len = len-10;
+                    let key_remaining_len = len-8;
 
                     unsafe {
 
@@ -1028,8 +1034,8 @@ impl SeqTrie {
 
 
         Self {
-            eightmers,
-            ninemers, 
+            //eightmers,
+            //ninemers, 
             trie,
         }
 
@@ -1038,21 +1044,21 @@ impl SeqTrie {
 
 
     pub fn access(&self, kmer: u64, len: usize) -> Option<usize> {
-        if len == 8 { 
+        /*if len == 8 { 
             let count = self.eightmers[kmer as usize];
             if count > 0 {return Some(count); } else {return None;}
-        } else if len == 9 {
+        }*/ /*else if len == 9 {
             let count = self.ninemers[kmer as usize];
             if count > 0 {return Some(count); } else {return None;}
-        }
+        }*/
 
-        let index = (kmer & ((1 << 20)-1)) as usize;
+        let index = (kmer & ((1 << 16)-1)) as usize;
         let Some(ref pointing) = self.trie[index] else {return None;};
 
         let mut pointing = pointing;
 
-        let mut remaining = (kmer >> 20);
-        let mut rem_len = len-10;
+        let mut remaining = (kmer >> 16);
+        let mut rem_len = len-8;
 
         while rem_len > 0 {
             let bp = ((remaining & 3) as usize);
