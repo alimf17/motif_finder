@@ -2025,7 +2025,7 @@ impl Motif {
             forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
                     let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
-                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
+                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
                     //SAFETY: two bits can only add up to 3 at most
                     //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
                     let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
@@ -2038,7 +2038,7 @@ impl Motif {
             reverse_checks = reverse_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
                     let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
-                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
+                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
                     //SAFETY: two bits can only add up to 3 at most
                     //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
                     //Also, yeah, I have to use a raw pointer here. Rust was complaining that I was moving in an external variable

@@ -584,9 +584,9 @@ impl NullSequence {
                     block_lens: block_ls,
                     max_len: max_len,
                     kmer_trie: SeqTrie {
-                        eightmers: vec![0; 65536],
-                        ninemers: vec![0; 262144],
-                        trie: vec![None; 1048576],
+                        //eightmers: [0; 65536],
+                        //ninemers: [0; 262144],
+                        trie: core::array::from_fn(|_| None),
                     },
 
 
@@ -606,6 +606,7 @@ impl NullSequence {
     //          Failure to uphold this will result in this panicking for your own good.
     pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> NullSequence {
 
+        println!("start man");
         let mut block_u8_starts: Vec<usize> = vec![0];
 
         for i in 0..(block_lens.len()-1) {
@@ -630,13 +631,14 @@ impl NullSequence {
                     block_lens: block_lens,
                     max_len: max_len,
                     kmer_trie: SeqTrie {
-                        eightmers: vec![0; 65536],
-                        ninemers: vec![0; 262144],
-                        trie: (0..1048576).map(|_| None).collect(), 
+                        //eightmers: [0; 65536],
+                        //ninemers: [0; 262144],
+                        trie: core::array::from_fn(|_| None),
                     },
 
         };
 
+        println!("pre trie");
         let trie = SeqTrie::new_from_seq_blocks(&seq);
 
 
@@ -872,15 +874,15 @@ struct SeqTrie {
 
 //    #[serde(with = "EightmerRemote")]
     //#[serde(with = "BigArray")]
-    eightmers: Vec<usize>,
+    //eightmers: [usize; 65536],
     //#[serde(with = "BigArray")]
 //    #[serde(with = "NinemerRemote")]
-    ninemers: Vec<usize>,
-    //#[serde(with = "BigArray")]
+    //ninemers: [usize; 262144],
+    #[serde(with = "BigArray")]
 //    #[serde(with = "TrieRemote")]
-    trie: Vec<ToNext>,
+    //trie: [ToNext; 1048576],
     //trie: [ToNext; 262144],
-    //trie: Box<[ToNext; 65536]>,
+    trie: [ToNext; 65536],
 }
 
 
@@ -899,8 +901,9 @@ impl SeqTrie {
 //And trying to think of faster ways to do this gave me stuff that was full of footguns
     pub fn new_from_seq_blocks(seq: &NullSequence) -> Self {
 
-        
-        let mut eightmers = vec![0_usize; 65536];
+        println!("beign");
+        /*
+        let mut eightmers = [0_usize; 65536];
 
         for i in 0..seq.block_lens.len() {
             for j in 0..(seq.block_lens[i]-7){
@@ -916,9 +919,10 @@ impl SeqTrie {
                 }
             }
         }
-         
-       
-        let mut ninemers = vec![0_usize; 262144];
+         */
+        println!("8");
+       /*
+        let mut ninemers = [0_usize; 262144];
 
         for i in 0..seq.block_lens.len() {
             for j in 0..(seq.block_lens[i]-8){
@@ -934,14 +938,16 @@ impl SeqTrie {
                 }
             }
         }
+        println!("9");
 
-        let mut trie: Vec<ToNext>= (0..1048576).map(|_| None).collect();
-
+        let mut trie: [ToNext; 1048576] = core::array::from_fn(|_| None);
+*/
         //let mut trie: [ToNext; 262144] = core::array::from_fn(|_| None);
+        let mut trie: [ToNext; 65536] =  core::array::from_fn(|_| None);
         for i in 0..seq.block_lens.len() {
-            for j in 0..(seq.block_lens[i]-9){
-                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 10));
-                let rev = reverse_complement_u64_kmer(kmer_u64, 10);
+            for j in 0..(seq.block_lens[i]-7){
+                let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, 8));
+                let rev = reverse_complement_u64_kmer(kmer_u64, 8);
 
                 //safety: a tenmer can only have the values in 0..1048576
                 unsafe {
@@ -955,27 +961,23 @@ impl SeqTrie {
             }
         }
 
+        println!("base");
 
         //We go in ascending order, because now we have guarentees that it's legit and we'll always hit Some
-        for len in 11..=MAX_BASE{
+        for len in 9..=MAX_BASE{
 
             for i in 0..seq.block_lens.len() {
                 for j in 0..(seq.block_lens[i]+1-len){
-                    
-                    let forward = seq.return_bases(i, j, len);
-                    let reverse = forward.iter().rev().map(|a| a.complement()).collect::<Vec<_>>();
-                    let mut kmer_u64 = Sequence::kmer_to_u64(&forward);
+                    let mut kmer_u64 = Sequence::kmer_to_u64(&seq.return_bases(i, j, len));
                     let rev = reverse_complement_u64_kmer(kmer_u64, len);
 
-                    let index_forward = (kmer_u64 & (4_u64.pow(10)-1)) as usize;
-                    let index_reverse = (rev & (4_u64.pow(10)-1)) as usize;
+                    let index_forward = (kmer_u64 & (4_u64.pow(8)-1)) as usize;
+                    let index_reverse = (rev & (4_u64.pow(8)-1)) as usize;
 
-                    let mut remaining_forward = kmer_u64 >> 20;
-                    let mut remaining_reverse = rev >> 20;
+                    let mut remaining_forward = kmer_u64 >> 16;
+                    let mut remaining_reverse = rev >> 16;
 
-                    let key_remaining_len = len-10;
-
-
+                    let key_remaining_len = len-8;
 
                     unsafe {
 
@@ -989,9 +991,8 @@ impl SeqTrie {
                             //SAFETY: & 3 guarentees that our bases are always less than 4, so this is safe
                             let b_f = (remaining_forward & 3) as usize;
 
-
                             //index_for_mut = index_for_mut.unwrap().next_bp.get_unchecked_mut(b_f).as_mut();
-                            index_for_mut = index_for_mut.expect("die forward").next_bp.get_mut(b_f).unwrap().as_mut();
+                            index_for_mut = index_for_mut.unwrap().next_bp.get_mut(b_f).unwrap().as_mut();
 
                             remaining_forward = remaining_forward >> 2;
                             remaining_len -= 1;
@@ -999,9 +1000,8 @@ impl SeqTrie {
                         
                         let b_f = (remaining_forward & 3) as usize;
 
-                        let m = index_for_mut.expect("die save forward");
-                        m.next_bp[b_f].increase_count();
-
+                        index_for_mut.unwrap().next_bp[b_f].increase_count();
+                        
                         let mut index_rev_mut = trie.get_mut(index_reverse as usize).unwrap().as_mut();
                         //let mut index_rev_mut = trie.get_unchecked_mut(index_reverse as usize).as_mut();
 
@@ -1012,7 +1012,7 @@ impl SeqTrie {
 
                             let b_r = (remaining_reverse & 3) as usize;
                             
-                            index_rev_mut = index_rev_mut.expect("die reverse").next_bp.get_mut(b_r).unwrap().as_mut();
+                            index_rev_mut = index_rev_mut.unwrap().next_bp.get_mut(b_r).unwrap().as_mut();
                             //index_rev_mut = index_rev_mut.unwrap().next_bp.get_unchecked_mut(b_r).as_mut();
                             
                             remaining_reverse = remaining_reverse >> 2;
@@ -1020,22 +1020,22 @@ impl SeqTrie {
 
 
                         }
-                        let b_r = (remaining_reverse & 3) as usize;
+                        let b_r = (remaining_forward & 3) as usize;
 
-                        let m = index_rev_mut.expect("die save reverse");
-                        m.next_bp[b_r].increase_count();
+                        index_rev_mut.unwrap().next_bp[b_r].increase_count();
 
                     }
                 }
             }
 
+            println!("{len}");
         }
 
 
 
         Self {
-            eightmers,
-            ninemers, 
+            //eightmers,
+            //ninemers, 
             trie,
         }
 
@@ -1044,21 +1044,21 @@ impl SeqTrie {
 
 
     pub fn access(&self, kmer: u64, len: usize) -> Option<usize> {
-        if len == 8 { 
+        /*if len == 8 { 
             let count = self.eightmers[kmer as usize];
             if count > 0 {return Some(count); } else {return None;}
-        }else if len == 9 {
+        }*/ /*else if len == 9 {
             let count = self.ninemers[kmer as usize];
             if count > 0 {return Some(count); } else {return None;}
-        }
+        }*/
 
-        let index = (kmer & ((1 << 20)-1)) as usize;
+        let index = (kmer & ((1 << 16)-1)) as usize;
         let Some(ref pointing) = self.trie[index] else {return None;};
 
         let mut pointing = pointing;
 
-        let mut remaining = (kmer >> 20);
-        let mut rem_len = len-10;
+        let mut remaining = (kmer >> 16);
+        let mut rem_len = len-8;
 
         while rem_len > 0 {
             let bp = ((remaining & 3) as usize);
