@@ -1912,45 +1912,27 @@ impl Motif {
 
         const CHECK_CUTOFF_INDEX: usize = CAPACITY_FOR_NULL-1;
 
-        let mut reverse = self.clone();
-        reverse.pwm = self.rev_complement();
         let len = self.len();
 
         
         let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
-        let mut reverse_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
 
         for sixmer in 0_u64..0b11_11_11_11_11_11 {
 
             let forward_score = self.calc_6mer_prefix_binding(sixmer);
             if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
-            let reverse_score = reverse.calc_6mer_prefix_binding(sixmer);
-            if reverse_score >= cutoff { reverse_checks.push((sixmer, reverse_score)); }
         }
+
+
 
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-        reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
 
-        if forward_checks.len() > CAPACITY_FOR_NULL {
-            let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1+((len-6) as f64)*SCORE_THRESH;
-            check_cutoff = cutoff.max(potential_cutoff);
-        }
-        if reverse_checks.len() > CAPACITY_FOR_NULL {
-            let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1+((len-6) as f64)*SCORE_THRESH;
-            check_cutoff = cutoff.max(potential_cutoff);
-        }
+        //println!("motif in ham {:?} \n sixmers {:?}", self, forward_checks.iter().map(|(a,b)| (Sequence::u64_to_kmer(*a, 6), *b)).collect::<Vec<_>>());
 
-
-        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
         if forward_partition < forward_checks.len() {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-        }
-        let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
-        if reverse_partition < reverse_checks.len() {
-            _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
-        }
-
-        let rev_pwm_pointer = reverse.pwm.as_ptr();
+        }*/
 
         forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
             (0_u64..0b11_11).filter_map(move |twomer| {
@@ -1961,81 +1943,47 @@ impl Motif {
                 let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
                 //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
                 let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
+                //println!("in 8 sixmer {:?} twomer {:?} eightmer {:?} old score {} new_score {}", Sequence::u64_to_kmer(sixmer, 6), Sequence::u64_to_kmer(twomer, 2), Sequence::u64_to_kmer(eightmer, 8), score, new_score);
                 if new_score >= cutoff { Some((eightmer, new_score))} else {None}
             })
         }).flatten().collect();
 
-        reverse_checks = reverse_checks.into_iter().map(|(sixmer, score)| {
-            (0_u64..0b11_11).filter_map(move |twomer| {
-                let eightmer = (twomer << 12) + sixmer;
-                if seq.kmer_count(eightmer, 8).is_none() {return None;};
-                //SAFETY: two bits can only add up to 3 at most
-                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
-                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
-                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
-                //Also, yeah, I have to use a raw pointer here. Rust was complaining that I was moving in an external variable
-                //It's safe regardless, but still obnoxious, especially since it knows better with the self PWM
-                let new_score = unsafe {score + (*rev_pwm_pointer.add(6))[b1]+(*rev_pwm_pointer.add(7))[b2]};
-                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
-            })
-        }).flatten().collect();
-        
         let mut accounted_length: usize = 8;
 
         while accounted_length < len {
+
+
+            if forward_checks.len() == 0 {
+                return Vec::new();
+            }
 
             //This starts the segment where we cut as many kmers as possible from consideration
             //All the kmers we cut are the ones which could never beat any of the top 200 of either group
             check_cutoff = cutoff;
             
             forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-            reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-            if forward_checks.len() > CAPACITY_FOR_NULL {
-                let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1+((len-accounted_length) as f64)*SCORE_THRESH;
-                check_cutoff = cutoff.max(potential_cutoff);
-            }
-            if reverse_checks.len() > CAPACITY_FOR_NULL {
-                let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1+((len-accounted_length) as f64)*SCORE_THRESH;
-                check_cutoff = cutoff.max(potential_cutoff);
-            }
 
 
-            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+            /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
             if forward_partition < forward_checks.len() {
                 _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-            }
-            let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
-            if reverse_partition < reverse_checks.len() {
-                _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
-            }
-
+            }*/
             //This ends the "cut more kmers" part of this
 
             //This segment actually iterates to check the k+1 mers
             forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
+                    
                     let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
-                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
+                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
                     //SAFETY: two bits can only add up to 3 at most
                     //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+
                     let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
+
                     if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
                 })
             }).flatten().collect();
-
-            reverse_checks = reverse_checks.into_iter().map(|(kmer, score)| {
-                BP_ARRAY.iter().filter_map(move |&base| {
-                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
-                    if seq.kmer_count(kplus1mer, accounted_length).is_none() {return None;};
-                    //SAFETY: two bits can only add up to 3 at most
-                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
-                    //Also, yeah, I have to use a raw pointer here. Rust was complaining that I was moving in an external variable
-                    //It's safe regardless, but still obnoxious, especially since it knows better with the self PWM
-                    let new_score = unsafe {score + (*rev_pwm_pointer.add(accounted_length))[base]};
-                        if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
-                    })
-                }).flatten().collect();
 
             accounted_length+=1;
         }
@@ -2044,20 +1992,15 @@ impl Motif {
         //Now, forward_checks and reverse_checks hold all of the scores which could possibly matter. 
         
         //We start with a short circuit. Especially later on in the inference, I anticipate we'll end up using it a lot 
-        if forward_checks.len() == 0 && reverse_checks.len() == 0 { return Vec::new();}
+        if forward_checks.len() == 0 { return Vec::new();}
 
         //We now do a final pruning where necessary. I suspect that it will be short circuited a lot, but still
         check_cutoff = cutoff;
         
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-        reverse_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
 
-        if forward_checks.len() > CAPACITY_FOR_NULL {
+        /*if forward_checks.len() > CAPACITY_FOR_NULL {
             let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1;
-            check_cutoff = cutoff.max(potential_cutoff);
-        }
-        if reverse_checks.len() > CAPACITY_FOR_NULL {
-            let potential_cutoff = reverse_checks[CHECK_CUTOFF_INDEX].1;
             check_cutoff = cutoff.max(potential_cutoff);
         }
 
@@ -2066,11 +2009,7 @@ impl Motif {
         if forward_partition < forward_checks.len() {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
         }
-        let reverse_partition = reverse_checks.partition_point(|x| x.1 >= check_cutoff);
-        if reverse_partition < reverse_checks.len() {
-            _ = reverse_checks.drain(reverse_partition..).collect::<Vec<_>>();
-        }
-
+*/
 
         //Now, forward_checks and reverse_checks are both sorted, AND only contain binding that can possibly be relevant
         
@@ -2079,42 +2018,20 @@ impl Motif {
 
         while final_binds.len() < CAPACITY_FOR_NULL {
 
-            match (forward_checks.get(0), reverse_checks.get(0)) {
+            match forward_checks.get(0) {
 
-                (None, None) => break,
-                (Some(t), None)  => {
+                None => break,
+                Some(t) => {
                     //Notice: I don't seem to care if accounted_kmers contains the reverse complement
                     //That's because it _can't_: we only store any particular kmer in one direction
                     //And we check for the reverse complement through the reverse complement MATRIX
                     //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
                     //Which corresponds to both forward and reverse binding happening to seem fine
                     //But we already have the score which is actually the better one, and thus we ignore the other
-                    if accounted_kmers.contains(&t.0) {continue;}
+                    if accounted_kmers.contains(&t.0) {continue;} else {accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));}
                     let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
                     for _ in 0..times_to_add { final_binds.push(t.1); }
                     _ = forward_checks.drain(0..1).collect::<Vec<_>>();
-                },
-                (None, Some(t))  => {
-                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
-                    //That's because it _can't_: we only store any particular kmer in one direction
-                    //And we check for the reverse complement through the reverse complement MATRIX
-                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
-                    //Which corresponds to both forward and reverse binding happening to seem fine
-                    //But we already have the score which is actually the better one, and thus we ignore the other
-                    if accounted_kmers.contains(&t.0) {continue;}
-                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
-                    for _ in 0..times_to_add { final_binds.push(t.1); }
-                    _ = reverse_checks.drain(0..1).collect::<Vec<_>>();
-                },
-                (Some(for_tup), Some(rev_tup)) => {
-
-                    let forward_next = for_tup.1 > rev_tup.1;
-                    let t = if forward_next { forward_checks.drain(0..1).collect::<Vec<_>>().pop().expect("We're only here because this vector has elements")
-                    } else {reverse_checks.drain(0..1).collect::<Vec<_>>().pop().expect("We're only here because this vector has elements")
-                    };
-                    if accounted_kmers.contains(&t.0) {continue;}
-                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
-                    for _ in 0..times_to_add { final_binds.push(t.1); }
                 },
             };
 
@@ -2131,7 +2048,7 @@ impl Motif {
     }
 
     //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
-    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence) -> Vec<f64> {
+    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, penalty: f64) -> Vec<f64> {
 
         const SPAN: usize = (1+(MAX_BASE+2)/4);
 
@@ -2148,7 +2065,7 @@ impl Motif {
 
         let num_blocks = block_lens.len();
 
-        let max_ignore_bind = -self.peak_height;
+        let max_ignore_bind = -self.peak_height+penalty;
 
 
         {
@@ -2718,7 +2635,7 @@ impl<'a> MotifSet<'a> {
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_in_group(data_ref.null_seq());
+                let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
                 (a,null)
             }).collect();
 
@@ -2743,7 +2660,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq());
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
             (a,null)
         }).collect();
         
@@ -2763,7 +2680,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq());
+            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
             (a,null)
         }).collect();
 
@@ -2905,7 +2822,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_in_group(self.data_ref.null_seq()).iter().map(|&b| mot.peak_height()+b).filter(|&b| b > (self.data_ref.background_ref().noise_spread_par() * 4.0)).collect::<Vec<f64>>() 
+        mot.return_any_null_binds_in_group(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0)) 
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -5310,7 +5227,7 @@ impl<'a> TemperSetTraces<'a> {
         for j in 0..self.parallel_traces.len(){
             for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             
-                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq()).into_iter().filter(|&b| b > ((self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0)-motif.peak_height())).collect::<Vec<f64>>();
+                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0);
                 if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
                 //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
@@ -6876,7 +6793,7 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
+        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
 
         let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), &mut rng); //sequence
 
@@ -6894,6 +6811,42 @@ mod tester{
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
 
+        for _ in 0..1000 {
+            let len = rng.gen_range(MIN_BASE+1..=MAX_BASE);
+            let motif: u64 = rng.gen_range(0_u64..4_u64.pow(len as u32));
+            let rev_mot = crate::sequence::reverse_complement_u64_kmer(motif, len);
+
+
+            let red_mot = motif & (4_u64.pow((len-1) as u32)-1);
+            
+            
+            let check = null_seq.kmer_count(motif, len);
+            if check.is_some() {
+                println!("checking less");
+                assert!(null_seq.kmer_count(red_mot, len-1).unwrap() >= check.unwrap());
+            }
+
+            assert!(check == null_seq.kmer_count(rev_mot, len));
+        }
+            
+                
+
+        let block_lens = null_seq.block_lens().clone();
+
+        for (i, blen) in block_lens.into_iter().enumerate() {
+
+            for mot_len in MIN_BASE..=MAX_BASE {
+
+                for j in 0..(blen-mot_len){
+                let mot_check = Sequence::kmer_to_u64(&null_seq.return_bases(i, j, mot_len));
+                assert!(null_seq.kmer_count(mot_check, mot_len).is_some());
+
+                }
+            }
+
+
+        }
+
 
         let waveform_raw = waveform.raw_wave();
 
@@ -6901,14 +6854,21 @@ mod tester{
 
         let null_blocks: Vec<usize> = (0..null_block_lens.len()).collect();
 
+        let old_height = motif.peak_height();
+
+        for h in 2..12 {
+            motif.peak_height = h as f64;
+
         let start_null = Instant::now();
-        let null_binds = motif.return_any_null_binds_in_group(&null_seq,&null_blocks);
+        let null_binds = motif.return_any_null_binds_by_hamming(&null_seq, 0.0);
         let duration_null = start_null.elapsed();
 
         println!("height {} null binds {:?}", motif.peak_height(), null_binds);
         println!("null dur {:?}", duration_null);
 
+        }
 
+        motif.peak_height = old_height;
         let start_b = Instant::now();
         let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
         let duration_b = start_b.elapsed();
@@ -7064,24 +7024,25 @@ mod tester{
 
         }
         
+        let mut binds = motif.return_any_null_binds_by_hamming(&null_seq, 0.0);
+        let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[0]*50);
+
         for i in 0..null_block_lens.len() {
         
-            let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[i]);
 
             let group = [i];
 
-            let mut binds = motif.return_any_null_binds_in_group(&null_seq,&group);
 
-            println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
+            //println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
 
-            for j in 0..=(null_block_lens[i]-motif.len()) {
+            for j in 0..(null_block_lens[i]-motif.len()) {
 
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, _) = unsafe{ motif.prop_binding(&mot)};
 
                 if prop > (-motif.peak_height) { 
                     significant_binds.push(prop); 
-                    println!("sig calc {i} {j} prop {prop} seq {:?}", mot);
+                    //println!("sig calc {i} {j} prop {prop} seq {:?}", mot);
                 }
 
             }
@@ -7093,14 +7054,14 @@ mod tester{
                 let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
             }
 
-            println!("binds {:?}\n sig_binds {:?} \nheight {} width {}", binds, significant_binds, motif.peak_height, motif.len());
+        }
 
-            assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
-            for k in 0..binds.len() {
+        println!("binds {:?}\n sig_binds {:?} \nheight {} width {}", binds, significant_binds, motif.peak_height, motif.len());
 
-                assert!((binds[k]-significant_binds[k]).abs() < 1e-6, "not capturing proper binding {} {} {}", k, binds[k], significant_binds[k]);
+        assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
+        for k in 0..binds.len() {
 
-            }
+            assert!((binds[k]-significant_binds[k]).abs() < 1e-6, "not capturing proper binding {} {} {}", k, binds[k], significant_binds[k]);
 
         }
 

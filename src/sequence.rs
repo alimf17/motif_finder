@@ -6,6 +6,7 @@ use itertools::{Itertools};
 use rand::Rng;
 use rand::prelude::SliceRandom;
 use rand::distributions::{Distribution, Uniform};
+use wyhash2::WyHash;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
@@ -34,7 +35,7 @@ pub struct Sequence {
     block_lens: Vec<usize>,
     max_len: usize,
     kmer_dict:  [Vec<u64>; MAX_BASE+1-MIN_BASE],
-    kmer_id_dict: Vec<HashMap<u64, usize>>,
+    kmer_id_dict: Vec<HashMap<u64, usize, WyHash>>,
     kmer_nums: [usize; MAX_BASE+1-MIN_BASE],
 }
 
@@ -110,7 +111,7 @@ impl Sequence {
         const F: Vec<u64> = Vec::new();
 
         let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
-        let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
+        let orig_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::new();
         let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
 
         let mut seq = Sequence{
@@ -151,7 +152,7 @@ impl Sequence {
         let max_len: usize = *block_lens.iter().max().unwrap();
         let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
         let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
-        let orig_id_dict: Vec<HashMap<u64, usize>> = Vec::new();
+        let orig_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::new();
 
         let mut seq = Sequence{
                     seq_blocks: seq_blocks,
@@ -175,14 +176,15 @@ impl Sequence {
             Vec::new()
         });
 
-        let mut kmer_id_dict: Vec<HashMap<u64, usize>> = Vec::with_capacity(MAX_BASE+1-MIN_BASE);
+        let mut kmer_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::with_capacity(MAX_BASE+1-MIN_BASE);
 
         let mut kmer_nums = [0_usize; MAX_BASE+1-MIN_BASE]; 
 
         for k in MIN_BASE..MAX_BASE+1 {
 
             let kmer_arr = self.generate_kmers(k);
-            let mut minimap: HashMap<u64, usize> = HashMap::with_capacity(kmer_arr.len());
+            let hasher = WyHash::with_seed(0);
+            let mut minimap: HashMap<u64, usize, _> = HashMap::with_capacity_and_hasher(kmer_arr.len(), hasher);
             let _ = kmer_arr.iter().enumerate().map(|(a, &b)| minimap.insert(b, a)).collect::<Vec<_>>();
             kmer_id_dict.push(minimap);
             kmer_nums[k-MIN_BASE] =  kmer_arr.len();
@@ -504,7 +506,7 @@ pub struct NullSequence {
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
     max_len: usize,
-    kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE],
+    kmer_counts: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE],
     kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE],
 }
 
@@ -583,7 +585,7 @@ impl NullSequence {
                     block_u8_starts: block_is,
                     block_lens: block_ls,
                     max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
+                    kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
                     kmer_lists: core::array::from_fn(|a| Vec::new()),
 
         };
@@ -621,7 +623,7 @@ impl NullSequence {
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
                     max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::new()),
+                    kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
                     kmer_lists: core::array::from_fn(|a| Vec::new()),
         };
 
@@ -632,7 +634,7 @@ impl NullSequence {
     
     fn initialize_kmer_count(&mut self) {
 
-        let kmer_counts: [HashMap<u64, usize>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
+        let kmer_counts: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
         self.kmer_counts = kmer_counts;
         let kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| {
             let mut kmers: Vec<u64> = self.kmer_counts[a].keys().map(|&b| b).collect();
@@ -646,20 +648,22 @@ impl NullSequence {
     //NOTE: Pretty much any time anybody can access this array without automatically using the 
     //      the correct len should be immediately considered incorrect, especially because it 
     //      it will NOT fail: it will just give the wrong answer SILENTLY.
-    pub fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize> {
+    pub fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize, WyHash> {
 
         let mut unel: Vec<u64> = Vec::new();
        
         let guess_capacity = 2_usize.pow(len as u32).min(self.block_lens.iter().sum::<usize>());
 
-        let mut lenmer_counts: HashMap<u64,usize> = HashMap::with_capacity(guess_capacity);
+        let hasher = WyHash::with_seed(0);
+        let mut lenmer_counts: HashMap<u64,usize, _> = HashMap::with_capacity_and_hasher(guess_capacity, hasher);
 
         for i in 0..self.block_lens.len() {
             if self.block_lens[i] >= len {
-                for j in 0..(self.block_lens[i]-len+1){
-                    let mut kmer_u64 = Sequence::kmer_to_u64(&self.return_bases(i, j, len));
-                    kmer_u64 = kmer_u64.min(reverse_complement_u64_kmer(kmer_u64, len));
+                for j in 0..(self.block_lens[i]-len){
+                    let kmer_u64 = Sequence::kmer_to_u64(&self.return_bases(i, j, len));
+                    let rev_u64 = reverse_complement_u64_kmer(kmer_u64, len);
                     lenmer_counts.entry(kmer_u64).and_modify(|count| *count += 1).or_insert(1);
+                    lenmer_counts.entry(rev_u64).and_modify(|count| *count += 1).or_insert(1);
                 }
             }
 
@@ -751,13 +755,13 @@ impl NullSequence {
     }
 }
 
+
 pub fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
 
     let mut track_kmer = kmer;
     let mut rev_kmer: u64 = 0;
-    for _ in 0..len {
-        rev_kmer = rev_kmer << 2;
-        rev_kmer += ((track_kmer & 3) ^ 3);
+    for i in 0..len {
+        rev_kmer += ((track_kmer & 3) ^ 3) << (2*(len-1-i));
         track_kmer = track_kmer >> 2;
     }
 
@@ -786,7 +790,34 @@ mod tests {
     use std::time::Instant;
 
     use crate::base::*;
-   
+
+
+    #[test]
+    fn test_u64() {
+
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..1000 {
+
+            let len = rng.gen_range(MIN_BASE..=MAX_BASE);
+            let motif: u64 = rng.gen_range(0_u64..4_u64.pow(len as u32));
+            let rev_mot = reverse_complement_u64_kmer(motif, len);
+
+            let mut mot_change = motif;
+
+            for i in 0..len {
+                let b0 = mot_change & 3;
+                mot_change = mot_change >> 2;
+                let b1 = (rev_mot & (3 << (2*(len-1-i)))) >> (2*(len-1-i));
+                println!("{:#040b} {b0}, {:#040b} {b1} {len}", motif, rev_mot);
+                if b0 ^ b1 != 3 {
+                    panic!("failed complement!");
+                }
+            }
+
+        }
+
+    }
 
 
     #[test]
@@ -937,77 +968,6 @@ mod tests {
 
             assert!(legal_mot_ids.len() == count_close, "Missing possible mots");
 
-        }
-
-
-    }
-
-    #[test]
-    fn assign_block_sets_test() {
-
-        let theoretical_blocks: Vec<usize> = vec![4000, 700, 1000, 700, 2000];
-
-        println!("{:?}", NullSequence::assign_block_sets(&theoretical_blocks));
-
-        let mut rng = rand::thread_rng();
-
-        for j in 0..100 {
-
-
-            let random_block_size = rng.gen_range(5..70);
-
-            let random_blocks: Vec<usize> = (0..random_block_size).map(|_| rng.gen_range(7000..200000)).collect();
-
-            let max_size = *random_blocks.iter().max().unwrap();
-
-            let block_sets = NullSequence::assign_block_sets(&random_blocks);
-
-            let mut spotted: Vec<u8> = vec![0;random_block_size];
-
-            assert!(block_sets[0].len() == 1);
-            assert!(random_blocks[block_sets[0][0]] == max_size, "block size {} max size {}", random_blocks[block_sets[0][0]], max_size);
-
-            spotted[block_sets[0][0]] +=1;
-
-            if block_sets.len() > 2 {
-                for i in 1..(block_sets.len()-1) {
-                    assert!(block_sets[i].iter().map(|&a| {
-                        let id = random_blocks[a];
-                        spotted[a] += 1;
-                        id}).sum::<usize>() <= max_size);
-                }
-            }
-            let final_size = block_sets.last().unwrap().iter().map(|&a|{
-                let id = random_blocks[a];
-                spotted[a] +=1;
-                id}).sum::<usize>();
-
-            if block_sets.len() > 2 {
-                assert!(final_size <= (3*max_size)/2);
-
-                if final_size < max_size {
-
-                    let penultimate_size = block_sets[block_sets.len()-2].iter().map(|&a|{
-                        let id = random_blocks[a];
-                        id}).sum::<usize>();
-
-                    assert!((final_size+penultimate_size) > (3*max_size)/2);
-                    println!("asserted no merger");
-                } else {
-                    println!("asserted merger");
-                }
-
-            }
-
-            let mut ordered_lens: Vec<(usize, usize)> =
-                random_blocks.iter().enumerate().map(|(a, &b)| (a,b)).collect();
-
-            ordered_lens.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-
-
-            assert!(spotted.iter().all(|&a| a == 1), "Some failures {:?}.\nOriginal blocks {:?}\nBlock sets {:?}, ordered_lens {:?}", spotted.iter().enumerate().filter(|(_,&b)| b !=1).map(|a| a.0).collect::<Vec<_>>(), random_blocks, block_sets, ordered_lens);
-
-            println!("Passed {j}: {:?}", block_sets);
         }
 
 

@@ -1454,6 +1454,7 @@ dependencies = [
  "spectrum-analyzer",
  "statrs",
  "thiserror",
+ "wyhash2",
 ]
 
 [[package]]
@@ -1524,6 +1525,12 @@ dependencies = [
  "num-traits",
  "rawpointer",
 ]
+
+[[package]]
+name = "no-std-compat"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
 
 [[package]]
 name = "normpath"
@@ -3123,6 +3130,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d129932f4644ac2396cb456385cbf9e63b5b30c6e8dc4820bdca4eb082037a5"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "wyhash2"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9433c7c86e328a8197038c9fc31f6e5c81f9c7bdc087d86e266680236af1af1b"
+dependencies = [
+ "no-std-compat",
 ]
 
 [[package]]
