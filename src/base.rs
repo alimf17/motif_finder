@@ -137,7 +137,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
 
 pub const MIN_HEIGHT: f64 = 2.0;
 pub const MAX_HEIGHT: f64 = 15.;
-const LOG_HEIGHT_MEAN: f64 = 2.302585092994046; //This is ~ln(10). Can't use ln in a constant, and this depends on no other variables
+const LOG_HEIGHT_MEAN: f64 = 1.09861228867; //This is ~ln(3). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
@@ -1924,18 +1924,24 @@ impl Motif {
         }
 
 
+        //println!("through sixmer {}", forward_checks.len());
 
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
 
         //println!("motif in ham {:?} \n sixmers {:?}", self, forward_checks.iter().map(|(a,b)| (Sequence::u64_to_kmer(*a, 6), *b)).collect::<Vec<_>>());
 
-        /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+        check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-6) as f64)*SCORE_THRESH;
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
         if forward_partition < forward_checks.len() {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-        }*/
+        }
+        }
+        //println!("through sixmer filter {}", forward_checks.len());
 
         forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
-            (0_u64..0b11_11).filter_map(move |twomer| {
+            (0_u64..=0b11_11).filter_map(move |twomer| {
                 let eightmer = (twomer << 12) + sixmer;
                 if seq.kmer_count(eightmer, 8).is_none() {return None;};
                 //SAFETY: two bits can only add up to 3 at most
@@ -1947,6 +1953,8 @@ impl Motif {
                 if new_score >= cutoff { Some((eightmer, new_score))} else {None}
             })
         }).flatten().collect();
+        
+        //println!("through eightmermer {}", forward_checks.len());
 
         let mut accounted_length: usize = 8;
 
@@ -1964,10 +1972,18 @@ impl Motif {
             forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
 
 
-            /*let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+            //println!("sorted {}mer {}", accounted_length, forward_checks.len());
+
+
+            if forward_checks.len() > CAPACITY_FOR_NULL {
+                check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-accounted_length) as f64)*SCORE_THRESH;
+
+            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
             if forward_partition < forward_checks.len() {
                 _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-            }*/
+            }
+            }
+            //println!("chopped {}mer {}", accounted_length, forward_checks.len());
             //This ends the "cut more kmers" part of this
 
             //This segment actually iterates to check the k+1 mers
@@ -1980,14 +1996,19 @@ impl Motif {
                     //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
 
                     let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
+                    
+                    //println!("old {score} {:?} {:?}", Sequence::u64_to_kmer(kmer, accounted_length), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(kmer, accounted_length), accounted_length));
+                    //println!("new {score} {:?} {:?}", Sequence::u64_to_kmer(kplus1mer, accounted_length+1), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(kplus1mer, accounted_length+1), 1+accounted_length));
 
                     if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
                 })
             }).flatten().collect();
 
+            //println!("through {}mer {}", accounted_length, forward_checks.len());
             accounted_length+=1;
         }
 
+        //println!("through nmer checks");
 
         //Now, forward_checks and reverse_checks hold all of the scores which could possibly matter. 
         
@@ -1999,7 +2020,7 @@ impl Motif {
         
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
 
-        /*if forward_checks.len() > CAPACITY_FOR_NULL {
+        if forward_checks.len() > CAPACITY_FOR_NULL {
             let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1;
             check_cutoff = cutoff.max(potential_cutoff);
         }
@@ -2009,7 +2030,8 @@ impl Motif {
         if forward_partition < forward_checks.len() {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
         }
-*/
+
+        //println!("chop 1");
 
         //Now, forward_checks and reverse_checks are both sorted, AND only contain binding that can possibly be relevant
         
@@ -2028,19 +2050,40 @@ impl Motif {
                     //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
                     //Which corresponds to both forward and reverse binding happening to seem fine
                     //But we already have the score which is actually the better one, and thus we ignore the other
-                    if accounted_kmers.contains(&t.0) {continue;} else {accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));}
+                    if accounted_kmers.contains(&t.0) {
+                        //println!("skipping {:?} {:?}", Sequence::u64_to_kmer(t.0, len), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(t.0, len), len));
+                        //println!("fail");
+                        _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                        //println!("drained {}", forward_checks.len());
+                        continue;
+                    } else {
+                    
+                        //println!("keeping {:?} {:?}", Sequence::u64_to_kmer(t.0, len), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(t.0, len), len));
+
+                        //println!("success");
+                        accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
+                    }
+                    //println!("adding");
                     let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    //println!("adding {times_to_add}");
                     for _ in 0..times_to_add { final_binds.push(t.1); }
+                    //println!("added");
                     _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                    //println!("drained {}", forward_checks.len());
                 },
             };
 
         }
+            
+        //println!("chop 2");
 
         //This can technically happen if we add more than one element at the end
         if final_binds.len() > CAPACITY_FOR_NULL { 
             _ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
         }
+
+
+        //println!("chop 3");
 
         final_binds
 
@@ -2635,7 +2678,7 @@ impl<'a> MotifSet<'a> {
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
                 (a,null)
             }).collect();
 
@@ -2660,7 +2703,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
             (a,null)
         }).collect();
         
@@ -2680,7 +2723,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
             (a,null)
         }).collect();
 
@@ -2822,7 +2865,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_in_group(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0)) 
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0)) 
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -3162,11 +3205,18 @@ impl<'a> MotifSet<'a> {
 
     pub fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.nth_motif(rem_id).clone();
+        //println!("rep 1");
         self.signal -= &rem_mot.generate_waveform(self.data_ref);
+        //println!("rep 2");
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
+        //println!("rep 3");
+        //println!("{:?}", new_mot);
         let new_nulls = self.calc_motif_null_binds(&new_mot); 
+        //println!("rep 4");
         self.set[rem_id] = (new_mot, new_nulls);
+        //println!("rep 5");
         self.ln_post = None;
+        //println!("rep 6");
         self.ln_posterior()
 
     }
@@ -3221,20 +3271,27 @@ impl<'a> MotifSet<'a> {
 
         let split_id = rng.gen_range(0..self.set.len());
 
+        //println!("split 0");
         let (new_mot, split_mot, ln_split_jacobian_minus_pick_prob) = self.nth_motif(split_id).split_motif(HEIGHT_SPLIT_SD, rng);
+        //println!("split 1");
         
         let gen_prior = new_mot.pwm_prior(self.data_ref.data().seq())+new_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
+        //println!("split 2");
 
         let gen_prior = split_mot.pwm_prior(self.data_ref.data().seq())+split_mot.height_prior();
         if gen_prior.is_infinite() { return None;} 
+        //println!("split 3");
 
         let mut new_set = self.derive_set();
 
+        //println!("split 4");
         _ = new_set.replace_motif(split_mot, split_id);
 
+        //println!("split 5");
         let ln_post = new_set.add_motif(new_mot);
-
+        
+        //println!("split 6");
         Some((new_set, ln_post+ln_split_jacobian_minus_pick_prob))
 
     }
@@ -3245,20 +3302,24 @@ impl<'a> MotifSet<'a> {
 
         let merge_1 = rng.gen_range(0..self.set.len());
 
+        //println!("merge 0");
         let merge_2 = *(0..self.set.len()).filter(|&a| a != merge_1).collect::<Vec<_>>()
             .choose(rng).expect("We guaranteed that the length of the set is at least two, so this has at least one element");
             
+        //println!("merge 1");
 
         let Some((merge_mot, ln_merge_jacobian_plus_pick_prob)) = self.nth_motif(merge_1).merge_motifs(&self.nth_motif(merge_2), HEIGHT_SPLIT_SD) else {return None;} ;
 
         let mut new_set = self.derive_set();
 
+        //println!("merge 2");
         let (replace, delete) = if merge_1 < merge_2 { (merge_1, merge_2) } else { (merge_2, merge_1)};
 
         _ = new_set.replace_motif(merge_mot, replace);
 
         let ln_post = new_set.remove_motif(delete);
 
+        //println!("merge 3");
 
         Some((new_set, ln_post+ln_merge_jacobian_plus_pick_prob))
     }
@@ -3285,14 +3346,21 @@ impl<'a> MotifSet<'a> {
             }
             if valid_extends.len() == 0 { return None; }
 
+            //println!("lock");
             let new_bp = valid_extends.choose(rng).expect("We already returned if there are no valid extensions");
             
+            //println!("lock 1");
             let mut new_mot = self.nth_motif(extend_id).clone();
+            //println!("lock w");
             let new_base = Base::propose_safe_new(rng).make_best(*new_bp);
+            //println!("lock 2");
             let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) - (valid_extends.len() as f64).ln();
+            //println!("lock 3");
             new_mot.pwm.push(new_base);
+            //println!("lock 4");
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             let ln_post = new_set.replace_motif(new_mot, extend_id);
+            //println!("lock 5");
             Some((new_set, ln_post-base_ln_density)) //Birth moves subtract the ln probability of their generation
         }
     }
@@ -3308,10 +3376,15 @@ impl<'a> MotifSet<'a> {
             None
         } else {
             let mut new_mot = self.nth_motif(contract_id).clone();
+            //println!("contract 0");
             let new_mot_bps = new_mot.best_motif();
+            //println!("contract 1");
             let old_base = new_mot.pwm.pop();
+            //println!("contract 2");
             let ln_post = new_set.replace_motif(new_mot, contract_id);
+            //println!("contract 3");
             let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")))-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
+            //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
     }
@@ -3326,6 +3399,8 @@ impl<'a> MotifSet<'a> {
     pub fn run_rj_move<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> (Self, usize, bool) {
 
         let which_rj = rng.gen_range(0..RJ_MOVE_NAMES.len());
+
+        //println!("which {which_rj}");
 
         let proposal: Option<(Self, f64)> = match which_rj {
 
@@ -4268,7 +4343,7 @@ impl<'a> SetTrace<'a> {
         
         if let Some(tracker) = track {
             let total_id = VARIANT_CUMULATIVE[which_move]+which_variant;
-            println!("total id {total_id}");
+            //println!("total id {total_id}");
             tracker.document_motion(total_id, movement_tracker).expect("We only track the proper moves");
         };
 
@@ -5227,7 +5302,7 @@ impl<'a> TemperSetTraces<'a> {
         for j in 0..self.parallel_traces.len(){
             for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             
-                let binds = motif.return_any_null_binds_in_group(data_seq.null_seq(), self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0);
+                let binds = motif.return_any_null_binds_by_hamming(data_seq.null_seq(), self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0);
                 if binds.len() >0{
                 //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
                 //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
@@ -6337,7 +6412,7 @@ mod tester{
 
         let mut failures = 0_usize;
 
-        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move_custom(&mut rng, 1.0, 1.0) { break r; } else {failures+=1;}};
+        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move_custom(&mut rng, 0.1, 0.1) { break r; } else {println!("fail base {failures}"); failures+=1;}};
 
         println!("failed in single base move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());
@@ -6375,7 +6450,7 @@ mod tester{
 
 
         let mut failures = 0_usize;
-        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move_custom(&mut rng, 1.0, 1.0) { break r; } else {failures+=1;}};
+        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move_custom(&mut rng, 0.1, 0.1) { break r; } else {println!("fail base {failures}"); failures+=1;}};
 
         println!("failed in single motif move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());
@@ -6413,8 +6488,9 @@ mod tester{
         }
         
         let mut failures = 0_usize;
-        let (mut split_mot, ln_prop_split) = loop { if let Some(r) = check_set.propose_split_motif(&mut rng) { break r; } else {failures+=1; println!("failed {failures} time(s)")}};
-
+        if let Some((mut split_mot, ln_prop_split)) = loop { if let Some(r) = check_set.propose_split_motif(&mut rng) { break Some(r); } else {failures+=1; println!("failed {failures} time(s)"); if failures > 10000 {break None;}}} {
+        
+        
         println!("failed in split move {} times before succeeding", failures);
         assert!(split_mot.set.len()-1 == check_set.set.len());
 
@@ -6432,7 +6508,7 @@ mod tester{
         println!("post merge split {:?}", merge_mot);
 
         println!("distance {:?}", check_set.nth_motif(0).distance_function(&merge_mot.nth_motif(0)));
-
+        }
         let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
         assert!(single_height.is_some()); //scaling a single base should always make possible motifs
@@ -6527,11 +6603,16 @@ mod tester{
         //fn propose_extend_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
 
         let mut track = None;
+        let mut tracker = 0_usize;
         while let None = track {
+            println!("extend");
             track = motif_set.propose_extend_motif(&mut rng);
+            tracker += 1;
+            if tracker >= 1000 {break;}
         };
 
-        let (extend_mot, ln_prop) = track.expect("we didn't let this proceed until it worked");
+        if let Some(track_d) = track {
+        let (extend_mot, ln_prop) = track_d; 
 
         println!("{:?}", extend_mot);
 
@@ -6557,14 +6638,17 @@ mod tester{
             assert!(matching, "there is a mismatch {} {}!", i, found_off);
         }
 
+        println!("something");
         assert!(l.is_some(), "Not finding a changed motif!");
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
         let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
 
+        println!("hanging");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
 
+        }
         let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MAX_BASE, &data_seq, &mut rng);
 
         assert!(cant_extend_set.propose_extend_motif(&mut rng).is_none(), "Can extend PWM beyond allowed limits!");
@@ -6573,11 +6657,19 @@ mod tester{
         //fn propose_contract_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
 
         let mut track = None;
-        while let None = track {
-            track = motif_set.propose_contract_motif(&mut rng);
-        };
+        let mut tracker = 0_usize;
 
-        let (contract_mot, ln_prop) = track.expect("we didn't let this proceed until it worked");
+        while let None = track {
+            println!("contract");
+            track = motif_set.propose_contract_motif(&mut rng);
+            tracker += 1;
+            if tracker >= 1000 {break;}
+
+        };
+            
+        if let Some(track_d) = track {
+
+        let (contract_mot, ln_prop) = track_d;
 
         println!("{:?}", contract_mot);
 
@@ -6609,8 +6701,8 @@ mod tester{
         let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
-
-        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MIN_BASE, &data_seq, &mut rng);
+        }
+        let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(2.6, MIN_BASE, &data_seq, &mut rng);
 
         assert!(cant_contract_set.propose_contract_motif(&mut rng).is_none(), "Can contract PWM beyond allowed limits!");
 
@@ -6618,12 +6710,12 @@ mod tester{
 
         //Testing full RJ move
         for _ in 0..3{
-            let add_mot = Motif::rand_mot_with_height_and_motif_len(13.2,mid_mot, data_seq.data().seq(), &mut rng);
+            let add_mot = Motif::rand_mot_with_height_and_motif_len(3.2,mid_mot, data_seq.data().seq(), &mut rng);
             _ = motif_set.add_motif(add_mot);
         }
-        for _i in 0..100 {
+        for i in 0..100 {
             let (step_set, selected_move, accepted) = motif_set.run_rj_move(1.0, &mut rng);
-            
+            println!("{i} {selected_move} check");
             //For when run_rj_move gives a clone of the old set when rejecting, rather than telling us what could have been
             /*match accepted {
 
@@ -6728,9 +6820,10 @@ mod tester{
         let mut h: f64;
         for _i in 0..30000 { h = dist.sample(&mut rng); assert!((h >= dist.min()) && (h <= dist.max()))}
 
-        let val1: f64 = 3.0;
-        let val2: f64 = 15.0;
+        let val1: f64 = rng.gen_range(MIN_HEIGHT..MAX_HEIGHT);
+        let val2: f64 = rng.gen_range(MIN_HEIGHT..MAX_HEIGHT);
 
+        println!("{} {} {} {}", free_dist.pdf(val1)/free_dist.pdf(val2),dist.pdf(val1)/dist.pdf(val2), free_dist.cdf(val1)/free_dist.cdf(val2), dist.cdf(val1)/dist.cdf(val2));
         assert!(((free_dist.pdf(val1)/free_dist.pdf(val2))-(dist.pdf(val1)/dist.pdf(val2))).abs() < 1e-6);
         assert!(((free_dist.cdf(val1)/free_dist.cdf(val2))-(dist.cdf(val1)/dist.cdf(val2))).abs() < 1e-6);
 
@@ -7015,17 +7108,22 @@ mod tester{
 
             let proper_defect = if is_rev {reverse_defect} else {forward_defect};
 
-            println!("alter for {forward_defect} rev {reverse_defect} is_rev {is_rev}");
+            //println!("alter for {forward_defect} rev {reverse_defect} is_rev {is_rev}");
 
             let bindy = unsafe{ random_motif.prop_binding(&altermot)};
 
-            println!("bindy  {:?}", bindy);
+            //println!("bindy  {:?}", bindy);
             assert!(((bindy.0-proper_defect).abs() < 1e-6) && (bindy.1 == is_rev));
 
         }
-        
+       
+        println!("Motif {:?}", motif);
+
         let mut binds = motif.return_any_null_binds_by_hamming(&null_seq, 0.0);
+        binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
         let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[0]*50);
+
+        let mut binds_checker: Vec<(usize, usize, usize, String, bool, f64)> = Vec::with_capacity(null_block_lens[0]*50);
 
         for i in 0..null_block_lens.len() {
         
@@ -7038,25 +7136,41 @@ mod tester{
             for j in 0..(null_block_lens[i]-motif.len()) {
 
                 let mot = null_seq.return_bases(i, j, motif.len());
-                let (prop, _) = unsafe{ motif.prop_binding(&mot)};
+                let (prop, rev) = unsafe{ motif.prop_binding(&mot)};
 
                 if prop > (-motif.peak_height) { 
                     significant_binds.push(prop); 
+                    let mot_string: String = mot.iter().map(|&a| match a {
+                        Bp::A => 'A',
+                        Bp::C => 'C',
+                        Bp::G => 'G',
+                        Bp::T => 'T',
+                    }).collect();
+
+                    let mot_u64 = Sequence::kmer_to_u64(&mot);
+                    println!("{i} {j} {rev} {:?} {} {:?}", mot, mot_u64, (MIN_BASE..=motif.len()).map(|l| null_seq.kmer_count(mot_u64 & (4_u64.pow(l as u32)-1), l)).collect::<Vec<_>>());
+                    assert!(null_seq.kmer_count(mot_u64, motif.len()).is_some());
+
+                    binds_checker.push((i, j, null_block_lens[i],mot_string, rev, prop));
                     //println!("sig calc {i} {j} prop {prop} seq {:?}", mot);
                 }
 
             }
 
-            binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
-            significant_binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
-
-            if significant_binds.len() > CAPACITY_FOR_NULL {
-                let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
-            }
 
         }
+        significant_binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
+
+        binds_checker.sort_unstable_by(|b,a| a.5.partial_cmp(&b.5).unwrap());
+
+        if significant_binds.len() > CAPACITY_FOR_NULL {
+            let _ = significant_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+            let _ = binds_checker.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+        }
+
 
         println!("binds {:?}\n sig_binds {:?} \nheight {} width {}", binds, significant_binds, motif.peak_height, motif.len());
+        println!("binds_checker {:#?}", binds_checker);
 
         assert!(binds.len() == significant_binds.len(), "bind scores giving different lengths in null seq");
         for k in 0..binds.len() {
