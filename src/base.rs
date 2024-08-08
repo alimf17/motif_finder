@@ -135,7 +135,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 2.0;
+pub const MIN_HEIGHT: f64 = 1.5;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.09861228867; //This is ~ln(3). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -221,7 +221,7 @@ pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
-pub const SCORE_THRESH: f64 = -MIN_HEIGHT;
+pub const SCORE_THRESH: f64 = -1.0;
 const BARRIER: f64 = -SCORE_THRESH*2.0;
 
 const SPLIT_SD: f64 = 0.05;
@@ -2865,7 +2865,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0)) 
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0)).into_iter().map(|a| a+mot.peak_height).collect() 
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
