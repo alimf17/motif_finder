@@ -324,7 +324,7 @@ impl Sequence {
 
 
     
-    pub fn kmer_to_u64(bases: &Vec<Bp>) -> u64 {
+    pub fn kmer_to_u64(bases: &[Bp]) -> u64 {
 
         /*
         let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (2u64.pow((a*BITS_PER_BP) as u32)) as u64).collect();

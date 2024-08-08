@@ -2,7 +2,7 @@
 
 use std::{f64, fmt, fs};
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque, HashMap};
 
 use std::ops::{Index, IndexMut};
 
@@ -58,6 +58,7 @@ use regex::Regex;
 
 use serde::{Serialize, Deserialize};
 
+use wyhash2::WyHash;
 
 pub const SQRT_2: f64 = 1.41421356237;
 pub const SQRT_3: f64 = 1.73205080757;
@@ -128,6 +129,9 @@ static SIMPLEX_CONFINING_NORMALS: Lazy<[[[f64; BASE_L-1]; BASE_L-1]; BASE_L]> = 
 
 const CLOSE: f64 = 1e-5;
 
+//SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
+//There are several safety guarentees that rely upon it being 8
+//NOTE AND WARNING: YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
 pub const MIN_BASE: usize = 8;
 pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit here is 32. 
                                 //To make sure this runs before the heat death of the universe
@@ -238,7 +242,7 @@ const EXPONENT_WEIGHT_CONST: f64 = 1.4;
 
 //BEGIN BASE
 #[repr(usize)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Bp {
     A = 0,
     C = 1, 
@@ -1849,7 +1853,8 @@ impl Motif {
 
     }
 
-    pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+    pub fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
+    //pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -1857,7 +1862,7 @@ impl Motif {
 
 
         let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
-        let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
+        //let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
         let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
@@ -1889,7 +1894,7 @@ impl Motif {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
-                    (bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) };
+                    (bind_scores[ind], _) = unsafe {self.prop_binding(binding_borrow) };
 
                 }
 
@@ -1898,12 +1903,68 @@ impl Motif {
 
 
 
-        (bind_scores, rev_comp)
+        bind_scores
 
 
 
     }
-   
+  
+    pub fn return_bind_score_alt(&self, seq: &Sequence, distribution_cutoff: f64) -> Vec<(f64,bool)> {
+
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
+
+
+        let mut pre_bind_scores: Vec<(f64, f64)>= vec![(0.0, 0.0); BP_PER_U8*coded_sequence.len()];
+        //let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
+        //let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
+
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+
+        let mut ind: usize;
+
+        let mut store: [Bp; BP_PER_U8];
+
+
+        for (b, base) in self.pwm.iter().enumerate() {
+            
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..=((block_lens[i])-self.len()) {
+
+                    ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+                    unsafe{
+                    pre_bind_scores[ind].0 += base[*uncoded_seq.get_unchecked(j+b)];
+                    pre_bind_scores[ind].1 += base[uncoded_seq.get_unchecked(j+self.len()-1-b).complement()];
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    //let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+                    //(bind_scores[ind], rev_comp[ind]) = unsafe {self.prop_binding(binding_borrow) };
+
+                    }
+                }
+
+            }
+        }
+
+        pre_bind_scores.into_iter().map(|(a,b)| if a >= b { (a, false) } else {(b,true)}).collect()
+
+    }
+
     pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
 
         let cutoff = -(self.peak_height-distribution_cutoff);
@@ -1917,7 +1978,7 @@ impl Motif {
         
         let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
 
-        for sixmer in 0_u64..0b11_11_11_11_11_11 {
+        for sixmer in 0_u64..=0b11_11_11_11_11_11 {
 
             let forward_score = self.calc_6mer_prefix_binding(sixmer);
             if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
@@ -2244,7 +2305,7 @@ impl Motif {
 
     }
 
-
+/*
     pub fn gen_single_mot_binding_report(&self, data_seq: &AllDataUse) -> Vec<(usize, bool, f64)> {
 
         let data = data_seq.data();
@@ -2296,7 +2357,7 @@ impl Motif {
 
     }
 
-
+*/
 
 
     pub fn generate_waveform<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
@@ -2313,7 +2374,8 @@ impl Motif {
 
         let lens = data.seq().block_lens();
 
-        let (bind_score_floats, _) = self.return_bind_score(data.seq());
+        let bind_score_floats = self.return_bind_score(data.seq());
+        //let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
         let thresh = -self.peak_height;
 
@@ -2342,6 +2404,50 @@ impl Motif {
 
     }
 
+    pub fn generate_waveform_alt<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
+
+        let data = data_ref.data();
+        
+        let unit_kernel = data_ref.unit_kernel_ref();
+
+        let mut occupancy_trace: Waveform = data.derive_zero();
+
+        let mut actual_kernel: Kernel;
+
+        let starts = data.seq().block_u8_starts();
+
+        let lens = data.seq().block_lens();
+
+        let bind_score_vec = self.return_bind_score_alt(data.seq(), 0.0);
+
+        let thresh = -self.peak_height;
+
+
+        for i in 0..starts.len() { //Iterating over each block
+            for j in 0..(lens[i]-self.len()) {
+                //if bind_score_floats[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") {i //}
+                //SAFETY:
+                //  -block = i, which is always less than the number of sequence blocks
+                //  -center = j, which is always less than the number of bps in the Sequence by at least the motif length if Sequence is correctly constructed
+                //SAFETY: THRESH is never modified at this point
+
+                let bind = unsafe{bind_score_vec.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j).0};
+                if bind > thresh {
+                    actual_kernel = unit_kernel*(bind+self.peak_height) ;
+
+                    unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);}
+
+                }
+            }
+        }
+
+
+        //println!("num peaks {}", count);
+
+
+        occupancy_trace
+
+    }
 
     //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
     //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
@@ -2887,7 +2993,7 @@ impl<'a> MotifSet<'a> {
         }
 
     }
-
+/*
     //I deliberately chose not to scale anything by peak heights here
     pub fn generate_set_binding_report(&self, data_ref:&AllDataUse) -> Vec<(usize, usize, usize, f64)> {
 
@@ -3066,7 +3172,7 @@ impl<'a> MotifSet<'a> {
 
 
     }*/
-
+*/
     //Note: It is technically allowed to have a negative thermodynamic beta
     //      This will invert your mechanics to find your LOWEST likelihood region
     //      Which is bad for most use cases! So be warned. 
@@ -3475,11 +3581,11 @@ impl<'a> MotifSet<'a> {
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
         let mut ids: Vec<usize> = (0..self.set.len()).collect();
-        ids.shuffle(rng);
+        let id = *ids.choose(rng).unwrap();
 
         let mut current_set = self.clone();
 
-        for id in ids {
+        //for id in ids {
 
             let current_mot = current_set.nth_motif(id).clone();
 
@@ -3534,7 +3640,7 @@ impl<'a> MotifSet<'a> {
             };
 
             current_set = likes_and_mots[dist.sample(rng)].1.clone();
-        }
+        //}
 
         current_set
 
@@ -3545,11 +3651,14 @@ impl<'a> MotifSet<'a> {
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
         let mut ids: Vec<usize> = (0..self.set.len()).collect();
-        ids.shuffle(rng);
+        //ids.shuffle(rng);
+
+        let id = *ids.choose(rng).unwrap();
+
 
         let mut current_set = self.clone();
 
-        for id in ids {
+        //for id in ids {
 
             let current_mot = current_set.get_nth_motif(id).clone();
 
@@ -3590,7 +3699,7 @@ impl<'a> MotifSet<'a> {
             };
 
             current_set = likes_and_mots[dist.sample(rng)].1.clone();
-        }
+        //}
 
         current_set
 
@@ -3602,11 +3711,13 @@ impl<'a> MotifSet<'a> {
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
         let mut ids: Vec<usize> = (0..self.set.len()).collect();
-        ids.shuffle(rng);
+        //ids.shuffle(rng);
+
+        let id = *ids.choose(rng).unwrap();
 
         let mut current_set = self.clone();
 
-        for id in ids {
+        //for id in ids {
 
             let current_mot = current_set.get_nth_motif(id).clone();
 
@@ -3654,7 +3765,7 @@ impl<'a> MotifSet<'a> {
             };
 
             current_set = likes_and_mots[dist.sample(rng)].1.clone();
-        }
+        //}
 
         current_set
 
@@ -4581,7 +4692,7 @@ impl<'a> SetTrace<'a> {
         outfile_handle.write(&buffer).expect("buffer should write");
     }
 
-
+/*
     pub fn save_current_bedgraph(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error>> { 
 
         //generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str)
@@ -4591,7 +4702,7 @@ impl<'a> SetTrace<'a> {
             mot.generate_bedgraph(self.data_ref, None, &bedgraph_file)
         }).collect::<Result<_,_>>()
     }
-
+*/
     //We don't need to worry about saving any state in trace, since inference works on the ACTIVE state
     fn drop_history(&mut self) {
         self.trace.clear();
@@ -6895,6 +7006,12 @@ mod tester{
         let waveform = motif.generate_waveform(&data_seq);
         let duration = start.elapsed();
 
+        let start = Instant::now();
+        let waveform_alt = motif.generate_waveform_alt(&data_seq);
+        let duration_alt = start.elapsed();
+
+        println!("previous gen wave {:?} alt gen wave {:?}", duration, duration_alt);
+
         let waveform2 = &waveform + &(motif2.generate_waveform(&data_seq));
 
         let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
@@ -6962,19 +7079,19 @@ mod tester{
         }
 
         motif.peak_height = old_height;
-        let start_b = Instant::now();
-        let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
-        let duration_b = start_b.elapsed();
+        //let start_b = Instant::now();
+        //let unsafe_waveform = unsafe{ motif.generate_waveform_from_binds(&binds, &data_seq) };
+        //let duration_b = start_b.elapsed();
 
 
 
-        let unsafe_raw = unsafe_waveform.raw_wave();
+       // let unsafe_raw = unsafe_waveform.raw_wave();
 
-        assert!(unsafe_raw.len() == waveform_raw.len());
-        assert!((unsafe_raw.iter().zip(&waveform_raw).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
+       // assert!(unsafe_raw.len() == waveform_raw.len());
+        //assert!((unsafe_raw.iter().zip(&waveform_raw).map(|(a, &b)| (a-b).powf(2.0)).sum::<f64>()).powf(0.5) < 1e-6);
 
         println!("Time elapsed in generate_waveform() is: {:?}", duration);
-        println!("Time elapsed in the unsafe generate_waveform() is: {:?}", duration_b);
+      //  println!("Time elapsed in the unsafe generate_waveform() is: {:?}", duration_b);
 
         println!("{}", motif);
 
@@ -7275,8 +7392,9 @@ mod tester{
                 //SAFETY: sequence.return_bases is called with motif.len() as its length
                 //        and always called so that we have that many bps left available
                 let test_against = unsafe{ motif.prop_binding(&(sequence.return_bases(i, j, motif.len())))};
-                assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
-                assert!(binds.1[i*bp_per_block+j] == test_against.1);
+                assert!((binds[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
+                //assert!((binds.0[i*bp_per_block+j]-test_against.0).abs() < 1e-6);
+                //assert!(binds.1[i*bp_per_block+j] == test_against.1);
 
             }
         }
@@ -7321,7 +7439,8 @@ mod tester{
                 let cut_high = if j*space+kernel_mid <= ((start_bases[i+1]+half_len)-start_bases[i]) {space*j+start_bases[i]+kernel_mid+1-half_len} else {start_bases[i+1]};
                 let relevant_binds = (cut_low..cut_high).filter(|&a| {
                     //println!("{a} bindslen {}", binds.0.len());
-                    binds.0[a] > (-motif.peak_height()) 
+                    //binds.0[a] > (-motif.peak_height()) 
+                    binds[a] > (-motif.peak_height()) 
                 }).collect::<Vec<_>>();
 
 
@@ -7329,7 +7448,8 @@ mod tester{
 
                     let mut score: f64 = 0.0;
                     for k in 0..relevant_binds.len() {
-                        let to_add = (motif.peak_height()+binds.0[relevant_binds[k]])*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        let to_add = (motif.peak_height()+binds[relevant_binds[k]])*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
+                        //let to_add = (motif.peak_height()+binds.0[relevant_binds[k]])*kernel_check[(kernel_mid+(start_bases[i]+space*j))-(relevant_binds[k]+half_len)];
                         //println!("to_add {to_add}");
                         score+=to_add;
                     }

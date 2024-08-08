@@ -131,7 +131,7 @@ fn main() {
     //reg_trace.save_trace("/expanse/lustre/scratch/alimf/temp_project/motif_runs/", "reg_set_mod", 0);
     reg_trace.save_initial_state("/Users/afarhat/Downloads/", "reg_set_ln");
     reg_trace.save_trace("/Users/afarhat/Downloads/", "reg_set_ln", 0);
-    reg_trace.save_current_bedgraph("/Users/afarhat/Downloads/", "reg_set_ln", 0).unwrap();
+    //reg_trace.save_current_bedgraph("/Users/afarhat/Downloads/", "reg_set_ln", 0).unwrap();
   /*  let swi_mot: Motif = Motif::raw_pwm(vec![
                                        Base::new([0.2, 0.1, 0.1, 1.0]),
                                        Base::new([0.1, 0.2, 0.1, 1.0]),
