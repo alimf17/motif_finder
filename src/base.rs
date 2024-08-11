@@ -6962,7 +6962,6 @@ mod tester{
 
         std::env::set_var("RUST_BACKTRACE", "1");
 
-        rayon::ThreadPoolBuilder::new().num_threads(10).build_global().unwrap();
         println!("rayon {:?}", rayon::current_num_threads());
 
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
