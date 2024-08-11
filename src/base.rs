@@ -176,8 +176,8 @@ const SCALE_SDS: [f64; 3] = [1.0, 10.0, 50.0];
 
 const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+9;
-const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+7;
+const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
 static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 5, 5, 20, 20, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
@@ -201,7 +201,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
 //This controls how much shuffling we do for the secondary base shuffling move
 //Faster if SHUFFLE_BASES <= MIN_BASE. Also, each base shuffle calculates 
 //4^SHUFFLE_BASES PWMs
-const SHUFFLE_BASES: usize = 4;
+const SHUFFLE_BASES: usize = 3;
 
 //const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
@@ -221,7 +221,7 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 
 pub static BASE_PRIOR: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap());
 
-pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "Split Motif", "Merge Motif"];
+pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];//, "Split Motif", "Merge Motif"];
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
@@ -1861,10 +1861,10 @@ impl Motif {
         let block_starts = seq.block_u8_starts(); //stored index space
 
 
-        let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
+        //let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
         //let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
-        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+        //let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
 
         let mut ind: usize;
@@ -1872,7 +1872,7 @@ impl Motif {
         let mut store: [Bp; BP_PER_U8];
 
 
-        {
+        /*{
             let uncoded_seq = uncoded_seq.as_mut_slice();
             for i in 0..(block_starts.len()) {
 
@@ -1900,8 +1900,18 @@ impl Motif {
 
             }
         }
+*/
 
 
+        let max_ind = BP_PER_U8*coded_sequence.len();
+        let bind_scores: Vec<f64> = (0..block_starts.len()).into_par_iter().map(|i| {
+
+            let uncoded_seq = seq.return_bases(i, 0, block_lens[i]);
+            //println!("should hit {} hits {}", block_lens[i], uncoded_seq.len());
+            let mut collector = uncoded_seq.windows(self.len()).map(|binding_borrow| unsafe{self.prop_binding(binding_borrow).0}).collect::<Vec<_>>();
+            collector.append(&mut vec![-f64::INFINITY;self.len()-1]);
+            collector
+        }).flatten().collect();
 
         bind_scores
 
@@ -3514,8 +3524,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
-            4 => self.propose_split_motif(rng),
-            5 => self.propose_merge_motif(rng),
+            //4 => self.propose_split_motif(rng),
+            //5 => self.propose_merge_motif(rng),
             _ => unreachable!("How you managed to get here, I do not know. You're somehow trying to make a move run when it doesn't exist.
                               \n There's a REASON that I coded my number of moves as a magic number that I use only once. 
                               \n Namely, there's just no good way to change that number and expect everything to work correctly.
@@ -3554,8 +3564,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
-            4 => self.propose_split_motif(rng),
-            5 => self.propose_merge_motif(rng),
+            //4 => self.propose_split_motif(rng),
+            //5 => self.propose_merge_motif(rng),
             _ => panic!("You're trying to make a move run when it doesn't exist.")
         };
 
@@ -3724,7 +3734,7 @@ impl<'a> MotifSet<'a> {
             let mut base_set = current_set.clone();
             base_set.remove_motif_void(id);
 
-            let mut kmer_ids = self.data_ref.data().seq().n_random_valid_motifs(current_mot.len(), 200, rng);
+            let mut kmer_ids = self.data_ref.data().seq().n_random_valid_motifs(current_mot.len(), 50, rng);
 
             let mut likes_and_mots: Vec<(f64, Self)> = kmer_ids.into_par_iter().map(|a| {
                 let mut to_add = base_set.clone();
@@ -5085,7 +5095,7 @@ impl MoveTracker {
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
 
-            ind += 1;
+            /*ind += 1;
             println!("Split motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
@@ -5093,6 +5103,7 @@ impl MoveTracker {
             println!("Merge motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            */
             ind += 1;
             println!("Base leap move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
@@ -6951,6 +6962,9 @@ mod tester{
 
         std::env::set_var("RUST_BACKTRACE", "1");
 
+        rayon::ThreadPoolBuilder::new().num_threads(10).build_global().unwrap();
+        println!("rayon {:?}", rayon::current_num_threads());
+
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
         let spacing_dist = rand::distributions::Uniform::from(500..5000);
         let block_n: usize = 20;
@@ -7385,8 +7399,9 @@ mod tester{
 
         //TESTING return_bind_score()
 
+        //println!("binds {:?}", binds);
         for i in 0..block_n {
-            for j in 0..(bp_per_block-motif.len()) {
+            for j in 0..(bp_per_block-(motif.len()-1)) {
 
                 //let test_against = motif.prop_binding(&VecDeque::from(sequence.return_bases(i, j, motif.len())));
                 //SAFETY: sequence.return_bases is called with motif.len() as its length
