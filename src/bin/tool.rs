@@ -134,6 +134,7 @@ fn main() {
 
     println!("Args parsed");
 
+    println!("rayon {:?}", rayon::current_num_threads());
 
     let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
 
