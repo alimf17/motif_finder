@@ -1750,7 +1750,30 @@ impl Motif {
         return (bind, reverse)
 
     }
-    
+/*
+    fn prop_binding_u64(&self, kmer: u64) -> (f64, bool) {
+
+        let mut bind_forward: f64 = 0.0;
+        let mut bind_reverse: f64 = 0.0;
+
+        for i in 0..l {
+
+            let bf: Bp = unsafe{ Bp::usize_to_bp(((kmer & (3 << 2*i)) >> (2*i)) as usize) };
+            let brc: Bp = unsafe{ Bp::usize_to_bp(((kmer ^ (3 << (2*(l-1-i)))) >> (2*(l-1-i))) as usize)};
+            bind_forward += self.pwm[i][bf];
+            bind_reverse += self.pwm[i][brc];
+
+        }
+
+        let reverse: bool = bind_reverse > bind_forward;
+
+        let bind: f64 = if reverse {bind_reverse} else {bind_forward};
+
+        return (bind, reverse)
+
+
+    }
+  */  
     unsafe fn cut_prop_binding(&self, kmer: &[Bp], max_compensation: f64) -> Option<f64> { 
     //unsafe fn cut_prop_binding(&self, kmer: *const Bp, max_compensation: f64) -> Option<f64> { 
 
@@ -3584,7 +3607,50 @@ impl<'a> MotifSet<'a> {
     }
 
 
+    pub fn propose_base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> { 
 
+        let mut new_set = self.derive_set();
+
+        let id = rng.gen_range(0..self.set.len());
+
+        let threshold = if self.nth_motif(id).len() < 10 {2} else { self.nth_motif(id).len()/2-2};
+
+        let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold+1);
+
+        //If we don't have any new kmers within the hamming distance, we immediately fail
+        if kmer_ids.len() < 2 {return None;}
+
+        let new_kmer_id = unsafe { kmer_ids.choose(rng).unwrap_unchecked() };
+
+        let add_mot = self.nth_motif(id).scramble_by_id_to_valid(*new_kmer_id, false, self.data_ref.data().seq());
+
+        let num_alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1).len() as f64;
+
+        let ln_post = new_set.replace_motif(add_mot, id);
+
+        Some((new_set, ln_post+(num_alter_kmers.ln() - ((kmer_ids.len() as f64).ln()))))
+
+
+    }
+
+    pub fn propose_secondary_shuffle<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let id = rng.gen_range(0..self.set.len());
+
+        let pick_elements = (0..self.nth_motif(id).len()).choose_multiple(rng, SHUFFLE_BASES);
+
+        let mut mots = self.nth_motif(id).scramble_secondaries(&pick_elements);
+
+        let add_mot = mots.swap_remove(rng.gen_range(0..mots.len()));
+
+        let ln_post = new_set.replace_motif(add_mot, id);
+
+
+        Some((new_set, ln_post))
+
+    }
     //MOVE TO CALL
     pub fn base_leap<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
@@ -4424,8 +4490,20 @@ impl<'a> SetTrace<'a> {
                 })
             },
             3 => self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng),
-            4 => Some((self.active_set.base_leap(self.thermo_beta, rng), true)),
-            5 => Some((self.active_set.secondary_shuffle(self.thermo_beta, rng), true)),
+            //4 => Some((self.active_set.base_leap(self.thermo_beta, rng), true)),
+            //5 => Some((self.active_set.secondary_shuffle(self.thermo_beta, rng), true)),
+            4 => {
+                self.active_set.propose_base_leap(rng).map(|(new_mot, modded_ln_like)| {
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
+                    (new_mot, accepted)
+                })
+            },
+            5 => {
+                self.active_set.propose_secondary_shuffle(rng).map(|(new_mot, modded_ln_like)| {
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
+                    (new_mot, accepted)
+                })
+            },
             6 => {
                 let scale_s = SCALE_SDS[which_variant];
                 self.active_set.propose_scale_base_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| { 
@@ -6224,7 +6302,11 @@ mod tester{
         let mot_scram = mot.scramble_by_id_to_valid(id, false, &sequence);
         assert!(mot_scram.peak_height() == mot.peak_height(), "peak height isn't preserved when it should be");
 
-        let leaped = motif_set.base_leap(1.0, &mut rng);
+        let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
+        let ln_num_hammings = |x: &Motif| ((sequence.all_kmers_within_hamming(&x.best_motif(), hamming_fn(x.len())+1).len()) as f64).ln() ;
+        println!(" motif 0 neighbors {} motif 1 neighbors {}", ln_num_hammings(motif_set.nth_motif(0)).exp(), ln_num_hammings(motif_set.nth_motif(1)).exp());
+        //This should usually be Some
+        let (leaped, leap_score) = motif_set.propose_base_leap(&mut rng).unwrap();
 
         let leap = leaped.get_nth_motif(0);
         let leap1 = leaped.get_nth_motif(1);
@@ -6235,6 +6317,13 @@ mod tester{
         let leap_kmer = leap.best_motif();
         let leap1_kmer = leap1.best_motif();
 
+        let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
+
+        
+        let kmer_num_ln_rat = ln_num_hammings(&leap)+ln_num_hammings(&leap1)-(ln_num_hammings(&motif_set.get_nth_motif(0))+ln_num_hammings(&motif_set.get_nth_motif(1)));
+
+        println!("shuff check {} {:?} {}", leap_score, leaped.ln_post, kmer_num_ln_rat);
+        assert!((leap_score-(leaped.ln_post.unwrap()+kmer_num_ln_rat)).abs() < 1e-6);
 
         let mut all_scramble_correct = true;
         for base in 0..mot.len() {
@@ -6294,7 +6383,10 @@ mod tester{
         assert!(any_diffs.len() == 0, "waves not lining up"); 
         
 
-        let shuffed = motif_set.secondary_shuffle(1.0, &mut rng);
+        //let shuffed = motif_set.secondary_shuffle(1.0, &mut rng);
+
+        //This should never be None
+        let (shuffed, shuffed_score) = motif_set.propose_secondary_shuffle( &mut rng).unwrap();
 
         let shuff = shuffed.get_nth_motif(0);
         let shuff1 = shuffed.get_nth_motif(1);
