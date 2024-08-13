@@ -10,7 +10,8 @@ use motif_finder::data_struct::{AllData, AllDataUse};
 
 use log::warn;
 
-
+use std::sync::Arc;
+use rustfft::{FftPlanner, num_complex::Complex};
 
 use ndarray::prelude::*;
 
@@ -24,7 +25,7 @@ use poloto::Croppable;
 use plotters::prelude::*;
 use plotters::prelude::full_palette::*;
 
-//use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 
 
 const INTERVAL_CELL_LENGTH: f64 = 0.01;
@@ -328,15 +329,34 @@ pub fn main() {
         let mid = (ordered_tracey[maxind]+ordered_tracey[minind])/2.0;
         let min_y = mid-(mid-ordered_tracey[minind])*1.5;
         let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
-        //let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
-        //let samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
-        /*let res = samples_fft_to_spectrum(
-        &samples[0..16384],
+        let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
+        let samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
+        let len = samples.len().next_power_of_two()/2;
+
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(len);
+        let inv_fft = planner.plan_fft_inverse(len);
+
+        let mut fft_buffer: Vec<Complex<f32>> = samples.iter().map(|&a| Complex{ re: a, im: 0.0 }).collect();
+
+        fft.process(&mut fft_buffer);
+
+        let mut conj: Vec<_> = fft_buffer.iter().map(|a| Complex{ re: a.norm_sqr(), im: 0.0}).collect();
+
+        inv_fft.process(&mut conj);
+
+        /*        let res = samples_fft_to_spectrum(
+        &samples[0..len],
         samples.len() as u32,
         FrequencyLimit::All,
         None,).unwrap();
-        let daaa = res.data().iter().map(|(a, b)| (a.val(), b.val().powi(2)/(4.0*16384.))).collect::<Vec<_>>();
-        //println!("FFT {:?}", daaa.iter().map(|(b,a)| (b, a/(daaa[0].1))).collect::<Vec<_>>());*/
+       
+
+        
+        */
+        println!("FFT autos {:?}", conj); 
+       
+
         plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
         let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&vec![tracey.clone()], 1000);
 

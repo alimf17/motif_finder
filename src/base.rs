@@ -179,7 +179,7 @@ const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+7;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 5, 5, 20, 20, 5]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -1926,17 +1926,53 @@ impl Motif {
 */
 
 
-        let max_ind = BP_PER_U8*coded_sequence.len();
-        let bind_scores: Vec<f64> = (0..block_starts.len()).into_par_iter().map(|i| {
+        /*let max_ind = BP_PER_U8*coded_sequence.len();
+        if block_starts.len() >= rayon::max_num_threads() {
+        (0..block_starts.len()).into_par_iter().map(|i| {
 
             let uncoded_seq = seq.return_bases(i, 0, block_lens[i]);
             //println!("should hit {} hits {}", block_lens[i], uncoded_seq.len());
             let mut collector = uncoded_seq.windows(self.len()).map(|binding_borrow| unsafe{self.prop_binding(binding_borrow).0}).collect::<Vec<_>>();
             collector.append(&mut vec![-f64::INFINITY;self.len()-1]);
             collector
-        }).flatten().collect();
+        }).flatten().collect()
+        } else {
+*/
+            let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
+            let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
-        bind_scores
+            let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+            {
+                let uncoded_seq = uncoded_seq.as_mut_slice();
+                for i in 0..(block_starts.len()) {
+
+
+                    for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                        store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                        for k in 0..BP_PER_U8 {
+                            uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                        }
+
+                    }
+
+
+                    for j in 0..=((block_lens[i])-self.len()) {
+
+                        ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+
+                        //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                        let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+                        (bind_scores[ind], _) = unsafe {self.prop_binding(binding_borrow) };
+
+                    }
+
+                }
+            }
+
+            bind_scores
 
 
 
@@ -5409,13 +5445,15 @@ impl<'a> TemperSetTraces<'a> {
        // for i in 0..num_null_blocks { null_block_groups[i % (num_intermediate_traces+2)].push(i); }
 
 
-        let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
+        //let thermo_step = (1_f64-min_thermo_beta)/((thermos.len()-1) as f64);
+
+        let thermo_step = -(min_thermo_beta.log2())/((thermos.len()-1) as f64);
 
         *thermos.last_mut().expect("thermos always has elements") = min_thermo_beta;
 
         //TODO: check that this DOES produce a linear decrease in thermodynamic beta
         for i in 1..(num_traces-1) {
-            thermos[i] = 1_f64-(i as f64)*thermo_step
+            thermos[i] = (-(i as f64)*thermo_step).exp2();
         }
 
 
@@ -5507,7 +5545,7 @@ impl<'a> TemperSetTraces<'a> {
 
 
         
-        for j in 0..self.parallel_traces.len(){
+        /*for j in 0..self.parallel_traces.len(){
             for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
             
                 let binds = motif.return_any_null_binds_by_hamming(data_seq.null_seq(), self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0);
@@ -5519,7 +5557,7 @@ impl<'a> TemperSetTraces<'a> {
                 //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
                 }else {println!("{j} {i} no extraneous");}
             }
-        }
+        }*/
 
         //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
         //Yes, we deliberately skip the first possible even swap: I want the beta = 1 chain to always pay attention to 
