@@ -115,7 +115,7 @@ pub fn main() {
 
 
         if skip_some { 
-            for _ in 1..(chain_files.len().min(5)){
+            for _ in 0..(chain_files.len().min(20)){
             _ = iter_files.next(); 
             }
         }
@@ -330,20 +330,9 @@ pub fn main() {
         let min_y = mid-(mid-ordered_tracey[minind])*1.5;
         let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
         let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
-        let samples: Vec<f32> = tracey.iter().map(|a| (a-trace_mean) as f32).collect();
-        let len = samples.len().next_power_of_two()/2;
 
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(len);
-        let inv_fft = planner.plan_fft_inverse(len);
 
-        let mut fft_buffer: Vec<Complex<f32>> = samples.iter().map(|&a| Complex{ re: a, im: 0.0 }).collect();
-
-        fft.process(&mut fft_buffer);
-
-        let mut conj: Vec<_> = fft_buffer.iter().map(|a| Complex{ re: a.norm_sqr(), im: 0.0}).collect();
-
-        inv_fft.process(&mut conj);
+        //println!("conj {} {:?}", conj.len(), conj);
 
         /*        let res = samples_fft_to_spectrum(
         &samples[0..len],
@@ -354,7 +343,6 @@ pub fn main() {
 
         
         */
-        println!("FFT autos {:?}", conj); 
        
 
         plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
