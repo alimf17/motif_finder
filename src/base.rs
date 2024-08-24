@@ -139,7 +139,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 2.0;
+pub const MIN_HEIGHT: f64 = 3.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.09861228867; //This is ~ln(3). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -3047,16 +3047,16 @@ impl<'a> MotifSet<'a> {
 
         let signal = self.recalced_signal();
 
-        let signal_directory: String = format!("{}/{}_occupancy",output_dir,file_name);
+        let signal_directory: String = format!("{}/{}_new_occupancy",output_dir,file_name);
 
-        signal.save_waveform_to_directory(data_ref, &signal_directory, &BLUE);
+        signal.save_waveform_to_directory(data_ref, &signal_directory, &BLUE, false);
 
         if self.set.len() > 1 {
             for (i, _mot) in self.set.iter().enumerate() {
 
                 let sub_directory = format!("{}/Motif_{}", signal_directory, i);
                 let sub_signal = self.nth_motif(i).generate_waveform(data_ref);
-                sub_signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN);
+                sub_signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN, true);
 
             }
         }

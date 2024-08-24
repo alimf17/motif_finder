@@ -490,11 +490,14 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, trace_color: &RGBColor) {
+    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, trace_color: &RGBColor, only_sig: bool) {
 
         let current_resid = data_ref.data()-&self;
 
+        let zero_locs = data_ref.zero_locs();
         
+        let block_lens = data_ref.data().seq().block_lens();
+
         let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
 
         let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
@@ -507,6 +510,10 @@ impl<'a> Waveform<'a> {
         };
 
         for i in 0..blocked_locs_and_signal.len() {
+
+            if only_sig {
+                if blocked_locs_and_signal[i].1.iter().all(|&x| x == 0.0) { continue; }
+            }
 
             let loc_block = &blocked_locs_and_signal[i].0;
             let sig_block = &blocked_locs_and_signal[i].1;
@@ -524,7 +531,7 @@ impl<'a> Waveform<'a> {
             let max = max_signal.max(*max_data_o)+1.0;
 
 
-            let signal_file = format!("{}/{i}.png", signal_directory);
+            let signal_file = format!("{}/from_{:011}_to_{:011}.png", signal_directory, zero_locs[i], zero_locs[i]+block_lens[i]);
 
             let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
 

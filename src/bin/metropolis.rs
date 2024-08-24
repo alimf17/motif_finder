@@ -223,7 +223,7 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
-    for step in 0..1 {
+    for step in 0..50 {
     
         //trace.serially_temper(min_thermo_beta, &mut track, steps_per_exchange_attempt, burn_in_after_swap, &mut rng);
 

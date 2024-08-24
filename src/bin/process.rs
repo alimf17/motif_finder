@@ -192,6 +192,11 @@ pub fn main() {
 
     let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
 
+    best_single_motif_set.set_iter().enumerate().for_each(|(i,m)| {
+        let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| b.seqlogo_heights()).collect();
+        draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
+    });
+
     buffer.clear();
 
     let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
@@ -645,13 +650,13 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>,
 
         
  
-        let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| {
+        /*let prep_pwm: Vec<[(usize, f64); BASE_L]> = cis.iter().map(|(_, tetrahedral_mean)| {
             let b = Base::vect_to_base(tetrahedral_mean);
             println!("{:?}", b);
             b.seqlogo_heights()
         }).collect();
 
-        draw_pwm(&prep_pwm, &format!("{}_pwm.png", file_name));
+        draw_pwm(&prep_pwm, &format!("{}_pwm.png", file_name));*/
         //This draws the credible region
        
         //let ci_color = &ORANGE.mix(0.1);
