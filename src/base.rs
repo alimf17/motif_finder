@@ -2036,7 +2036,7 @@ impl Motif {
 
     pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
 
-        let cutoff = -(self.peak_height-distribution_cutoff);
+        let cutoff = -(MIN_HEIGHT-distribution_cutoff);
 
         let mut check_cutoff = cutoff;
 
