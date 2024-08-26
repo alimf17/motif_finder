@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Read;
 
 use motif_finder::base::*;
-use motif_finder::base::{SQRT_2, SQRT_3};
+use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
 
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT};
 
@@ -193,7 +193,7 @@ pub fn main() {
     let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
 
     best_single_motif_set.set_iter().enumerate().for_each(|(i,m)| {
-        let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| b.seqlogo_heights()).collect();
+        let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
         draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
     });
 
@@ -677,31 +677,44 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>,
 
 fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
 
+    //energy in units of kcal/mol
+    const RT: f64 = 0.592_186_869_074_967_85;
+    let max_energy = SCORE_THRESH*RT*LN_2;
     let len = map_heights.len();
     let plot = BitMapBackend::new(file_name, (120*(len as u32), 600)).into_drawing_area();
 
     plot.fill(&full_palette::WHITE).unwrap();
 
     let mut chart = ChartBuilder::on(&plot)
-            .set_label_area_size(LabelAreaPosition::Left, 40)
-            .set_label_area_size(LabelAreaPosition::Bottom, 40)
+            .set_label_area_size(LabelAreaPosition::Left, 70)
+            .set_label_area_size(LabelAreaPosition::Bottom, 70)
+            .margin(5)
             .caption("PWM", ("sans-serif", 40))
-            .build_cartesian_2d(0..(len+1), (0_f64)..2_f64).unwrap();
+            .build_cartesian_2d(0..(len+1), max_energy..0_f64).unwrap();
 
 
-    chart.configure_mesh().draw().unwrap();
+
+    chart.configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .y_desc("-ΔΔG (kcal/mol)")
+        .axis_desc_style(("serif", 40))
+        .draw().unwrap();
+
+    chart.configure_series_labels()
+        .margin(40)
+        .label_font(("serif", 50))
+        .draw().unwrap();
+
 
     chart.draw_series(map_heights.iter().enumerate().map(|(i, hs)| {
 
         println!("hs {:?}", hs);
-        let mut end_heights: [f64; BASE_L] = [0.0; BASE_L];
-
-        for j in 0..(BASE_L-1) { end_heights[j] = hs[j+1].1; }
 
         let pos = i;
-        end_heights.into_iter().zip(hs.iter()).enumerate().map(move |(j, (e, h))| {
-            println!("{} {} {:?}", j, e, h);
-            Rectangle::new([(pos, h.1), (pos+1, e)],BASE_COLORS[h.0].filled())
+        hs.iter().enumerate().map(move |(e, h)| {
+            let height = h.1*RT*LN_2;
+            Text::new(format!("{}", BPS[h.0]), (pos, height), ("serif", 20).into_font().color(BASE_COLORS[h.0]))
         }) 
     }).flatten()).unwrap();
 
@@ -842,8 +855,11 @@ mod tests {
 
     #[test]
     fn draw_test() {
-        let fake_pwm = vec![[0.1_f64, -0.1, -0.1], [-0.1, 0.1, -0.1], SIMPLEX_VERTICES_POINTS[2], [SQRT_2/3., 0., 1./3.], [0., 0., 0.]]; 
-        let prep_pwm: Vec<[(usize, f64); BASE_L]> = fake_pwm.iter().map(|tetrahedral_mean| Base::simplex_to_base(tetrahedral_mean).seqlogo_heights()).collect();
+        let fake_pwm = vec![[0.1_f64, -0.6, -0.6], [-0.6, 0.1, -0.5], SIMPLEX_VERTICES_POINTS[2], [SQRT_2/3., 0., 1./3.], [0., 0., 0.]]; 
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = fake_pwm.iter().map(|tetrahedral_mean| {
+            let scores = Base::simplex_to_base(tetrahedral_mean).scores();
+            core::array::from_fn(|a| (a, scores[a]))
+        }).collect();
         draw_pwm(&prep_pwm,"fake_pwm.png");
     }
 
