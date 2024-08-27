@@ -362,7 +362,7 @@ impl<'a> Waveform<'a> {
     pub fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
-        let caring_threshold = 4.0*background.noise_spread_par();
+        let caring_threshold = f64::EPSILON;//4.0*background.noise_spread_par();
 
         let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
 
@@ -383,11 +383,11 @@ impl<'a> Waveform<'a> {
 
         let size_hint: usize = generate_size_kernel(*scaled_heights[0]);
 
-        let mut output_vec: Vec<f64> = Vec::with_capacity(size_hint*scaled_heights.len());
+        let mut output_vec: Vec<f64> = Vec::with_capacity(background.kernel_ref().len());
 
         for height in scaled_heights {
 
-            let kernel_size = generate_size_kernel(*height);
+            let kernel_size = generate_size_kernel(*height);;
 
             //If the size of your kernel is genuinely overflowing integers after filtering out by spacer
             //You have such massive problems that this should really be the least of your concerns
@@ -1468,7 +1468,7 @@ mod tests{
 
 
         //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer. Also, moved threshold to 4*spread
-        let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356]; //, 0.90979599, 0.90979599];
+        let fake_extraneous: Vec<f64> = vec![1.5, 1.47029800996013, 1.47029800996013, 1.38467451957995, 1.38467451957995, 1.25290531711691, 1.25290531711691, 1.08922355561054, 1.08922355561054, 0.90979598956895, 0.90979598956895, 0.730128383939957, 0.730128383939957, 0.562966648277099, 0.562966648277099, 0.417055950679791, 0.417055950679791, 0.296848048625422, 0.296848048625422, 0.203002924854919, 0.203002924854919, 0.13338242618908, 0.13338242618908, 0.0842021442512006, 0.0842021442512006, 0.051071182101899, 0.051071182101899, 0.0297616421165554, 0.0297616421165554, 0.0166634948073635, 0.0166634948073635, 0.00896403434250891, 0.00896403434250891, 0.00463307311235515, 0.00463307311235515, 0.00230071601898669, 0.00230071601898669, 0.00109770362832071, 0.00109770362832071, 0.000503193941853768, 0.000503193941853768, 0.00022162254034805, 0.00022162254034805, 9.37822556622304e-05, 9.37822556622304e-05, 3.81290197742989e-05, 3.81290197742989e-05, 1.48942564587766e-05, 1.48942564587766e-05, 5.58997975811801e-06, 5.58997975811801e-06, 2.01571841644728e-06, 2.01571841644728e-06, 6.98357357367463e-07, 6.98357357367463e-07, 2.32462970355435e-07, 2.32462970355435e-07, 7.43460797875875e-08, 7.43460797875875e-08, 2.28449696170689e-08, 2.28449696170689e-08, 6.7445241934213e-09, 6.7445241934213e-09, 1.91311144428907e-09, 1.91311144428907e-09, 5.21383692185988e-10, 5.21383692185988e-10, 1.36522061467319e-10, 1.36522061467319e-10, 3.43460226846833e-11, 3.43460226846833e-11, 8.30191510755152e-12, 8.30191510755152e-12, 1.92800583770048e-12, 1.92800583770048e-12, 4.30196251333215e-13, 4.30196251333215e-13, 9.22259461905713e-14, 9.22259461905713e-14, 1.89962483236413e-14, 1.89962483236413e-14, 3.75933283071791e-15, 3.75933283071791e-15, 7.14795710294863e-16, 7.14795710294863e-16];
 
         let generated_extraneous = Waveform::generate_extraneous_binding(data_seq.background_ref(),5, &[1.5]);
 

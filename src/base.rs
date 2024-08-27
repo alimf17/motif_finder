@@ -139,9 +139,9 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 3.0;
+pub const MIN_HEIGHT: f64 = 2.5;
 pub const MAX_HEIGHT: f64 = 15.;
-const LOG_HEIGHT_MEAN: f64 = 1.09861228867; //This is ~ln(3). Can't use ln in a constant, and this depends on no other variables
+const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
 
 static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
@@ -2036,7 +2036,7 @@ impl Motif {
 
     pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
 
-        let cutoff = -(MIN_HEIGHT-distribution_cutoff);
+        let cutoff = -MIN_HEIGHT;
 
         let mut check_cutoff = cutoff;
 
@@ -7406,7 +7406,7 @@ mod tester{
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, rev) = unsafe{ motif.prop_binding(&mot)};
 
-                if prop > (-motif.peak_height) { 
+                if prop > (-motif.peak_height+MIN_HEIGHT) { 
                     significant_binds.push(prop); 
                     let mot_string: String = mot.iter().map(|&a| match a {
                         Bp::A => 'A',
