@@ -24,8 +24,11 @@ use poloto;
 use poloto::Croppable;
 use plotters::prelude::*;
 use plotters::prelude::full_palette::*;
+use plotters::coord::ranged1d::{NoDefaultFormatting, KeyPointHint,ValueFormatter};
 
 use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+
+use core::ops::Range;
 
 
 const INTERVAL_CELL_LENGTH: f64 = 0.01;
@@ -690,13 +693,14 @@ fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
             .set_label_area_size(LabelAreaPosition::Bottom, 70)
             .margin(5)
             .caption("PWM", ("sans-serif", 40))
-            .build_cartesian_2d(0..(len+1), max_energy..0_f64).unwrap();
+            .build_cartesian_2d(0_f64..((len+1) as f64), max_energy..0_f64).unwrap();
 
 
 
     chart.configure_mesh()
         .disable_x_mesh()
         .disable_y_mesh()
+        .x_desc("Motif position (bp)")
         .y_desc("-ΔΔG (kcal/mol)")
         .axis_desc_style(("serif", 40))
         .draw().unwrap();
@@ -714,11 +718,44 @@ fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
         let pos = i;
         hs.iter().enumerate().map(move |(e, h)| {
             let height = h.1*RT*LN_2;
-            Text::new(format!("{}", BPS[h.0]), (pos, height), ("serif", 20).into_font().color(BASE_COLORS[h.0]))
+            Text::new(format!("{}", BPS[h.0]), ((pos as f64)+(0.0625*(h.0 as f64)), height), ("serif", 40).into_font().color(BASE_COLORS[h.0]))
         }) 
     }).flatten()).unwrap();
 
 }
+
+struct CustomizedRange(Range<f64>);
+
+impl Ranged for CustomizedRange {
+
+    type ValueType = f64;
+    type FormatOption = NoDefaultFormatting;
+
+    fn map(&self, value: &Self::ValueType, limit: (i32, i32)) -> i32 {
+        let size = limit.1 - limit.0;
+        (((*value as f64)-self.0.start) / (self.0.end -self.0.start) * size as f64) as i32 + limit.0
+    }
+
+    fn range(&self) -> std::ops::Range<Self::ValueType> {
+        self.0.start..self.0.end
+    }
+
+    fn key_points<Hint: KeyPointHint>(&self, hint: Hint) -> Vec<Self::ValueType> {
+        if hint.max_num_points() < (self.0.end as usize) {
+            return vec![];
+        }
+
+        ((self.0.start as usize)..(self.0.end as usize)).map(|a| a as f64).collect()
+    }
+
+}
+
+impl ValueFormatter<f64> for CustomizedRange {
+    fn format_ext(&self, value: &f64) -> String {
+        format!("{} ", *value as usize)
+    }
+}
+
 
 //We want to eat best_motifs so that we can save on memory
 //You'll notice that this entire function is designed to drop memory I don't
@@ -855,9 +892,24 @@ mod tests {
 
     #[test]
     fn draw_test() {
-        let fake_pwm = vec![[0.1_f64, -0.6, -0.6], [-0.6, 0.1, -0.5], SIMPLEX_VERTICES_POINTS[2], [SQRT_2/3., 0., 1./3.], [0., 0., 0.]]; 
-        let prep_pwm: Vec<[(usize, f64); BASE_L]> = fake_pwm.iter().map(|tetrahedral_mean| {
-            let scores = Base::simplex_to_base(tetrahedral_mean).scores();
+        let fake_pwm: Vec<[f64;BASE_L]> = vec![[0.0000000000_f64, -0.9373375710, -0.6575943318, -0.0449069248],
+ [0.0000000000, -0.2426674731, -0.8136657737, -0.0097526719],
+ [-0.7145200271, -0.0085354689, -0.6001008046, 0.0000000000],
+ [-0.3619683015, -0.2308579279, 0.0000000000, -0.2290570633],
+ [-0.9846391755, -0.9844559311, -0.9437771540, 0.0000000000],
+ [0.0000000000, -0.3639913736, -0.9134701136, -0.6012717625],
+ [-0.9561565201, 0.0000000000, -0.4270882632, -0.2608035802],
+ [-0.5780579340, -0.8384023401, -0.5976190870, 0.0000000000],
+ [0.0000000000, -0.8672219435, -0.5609217472, -0.6172965626],
+ [-0.9151729961, -0.6965618861, 0.0000000000, -0.9247262662],
+ [0.0000000000, -0.4985151214, -0.4206063934, -0.0591641271],
+ [-0.0225296773, -0.9302017094, 0.0000000000, -0.2334024800],
+ [0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000],
+ [0.0000000000, -0.3070905257, -0.1906124036, -0.3894854667],
+ [-0.7979453377, 0.0000000000, -0.8297522125, -0.2747172531],
+ [-0.7464523576, -0.5613249143, -0.3167131540, 0.0000000000],
+ [0.0000000000, -0.6643002659, -0.0788330898, -0.4313914962]];
+        let prep_pwm: Vec<[(usize, f64); BASE_L]> = fake_pwm.iter().map(|scores| {
             core::array::from_fn(|a| (a, scores[a]))
         }).collect();
         draw_pwm(&prep_pwm,"fake_pwm.png");
