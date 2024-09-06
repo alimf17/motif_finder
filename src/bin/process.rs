@@ -68,6 +68,7 @@ pub fn main() {
 
     let mut min_chain: usize = burn_in.unwrap_or(0);
 
+    println!("num ch {num_chains} max chain {max_chain}");
     let potential_prior_change: Option<f64> = args.get(7).map(|a| a.parse::<f64>().ok()).flatten();
 
     match potential_prior_change {
@@ -118,7 +119,7 @@ pub fn main() {
 
 
         if skip_some { 
-            for _ in 0..(chain_files.len().min(20)){
+            for _ in 0..(chain_files.len().min(10)){
             _ = iter_files.next(); 
             }
         }
@@ -213,7 +214,7 @@ pub fn main() {
     let activated = best_single_motif_set.reactivate_set(&data_ref);
     for i in 0..best_single_motif_set.num_motifs(){
         let mot = activated.get_nth_motif(i);
-        println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0));
+        println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0));
     }
     let save_file = format!("{}_best_trace", base_file);
 
