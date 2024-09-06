@@ -235,6 +235,8 @@ static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SP
 
 static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
 
+static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(100.0, 1.0).unwrap());
+
 //These were determined through numerical experiments and rough fits
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
 const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
@@ -453,7 +455,7 @@ impl Base {
         }*/
 
         let best = rng.gen_range(0..BASE_L);
-        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| rng.gen()); 
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_CHOOSE_DIST.sample(rng)); 
 
         let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
 
@@ -2048,8 +2050,10 @@ impl Motif {
 
     pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
 
-        let cutoff = -MIN_HEIGHT;
+        let cutoff = -MIN_HEIGHT-distribution_cutoff;
 
+        let standin_height = self.peak_height+distribution_cutoff;
+        
         let mut check_cutoff = cutoff;
 
         const CHECK_CUTOFF_INDEX: usize = CAPACITY_FOR_NULL-1;
@@ -2180,6 +2184,7 @@ impl Motif {
         let mut final_binds: Vec<f64> = Vec::with_capacity(CAPACITY_FOR_NULL);
         let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
 
+
         while final_binds.len() < CAPACITY_FOR_NULL {
 
             match forward_checks.get(0) {
@@ -2208,7 +2213,7 @@ impl Motif {
                     //println!("adding");
                     let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
                     //println!("adding {times_to_add}");
-                    for _ in 0..times_to_add { final_binds.push(t.1+self.peak_height); }
+                    for _ in 0..times_to_add { final_binds.push(t.1+standin_height); }
                     //println!("added");
                     _ = forward_checks.drain(0..1).collect::<Vec<_>>();
                     //println!("drained {}", forward_checks.len());
@@ -2236,7 +2241,9 @@ impl Motif {
     pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, penalty: f64) -> Vec<f64> {
 
         const SPAN: usize = (1+(MAX_BASE+2)/4);
+        let cutoff = -MIN_HEIGHT-penalty;
 
+        let standin_height = self.peak_height+penalty;
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -2250,7 +2257,7 @@ impl Motif {
 
         let num_blocks = block_lens.len();
 
-        let max_ignore_bind = -self.peak_height+penalty;
+        let max_ignore_bind = cutoff;
 
 
         {
@@ -2280,6 +2287,7 @@ impl Motif {
 
                 let mut prev_jd: usize = 0; 
 
+                
                 for j in 0..((block_lens[i])-(4*SPAN)) {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
@@ -2310,7 +2318,7 @@ impl Motif {
                         if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
                             //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) { //}
                             
-                            bind_scores.push(bind);
+                            bind_scores.push(bind+standin_height);
                   
                     
                         };
@@ -2343,7 +2351,7 @@ impl Motif {
 
 
                         if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
-                            bind_scores.push(bind);
+                            bind_scores.push(bind+standin_height);
                         };
                     }
 
@@ -2865,7 +2873,7 @@ impl<'a> MotifSet<'a> {
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
                 (a,null)
             }).collect();
 
@@ -2890,7 +2898,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
             (a,null)
         }).collect();
         
@@ -2910,7 +2918,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 4.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
             (a,null)
         }).collect();
 
@@ -3052,7 +3060,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 4.0))
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 5.0))
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -3426,7 +3434,9 @@ impl<'a> MotifSet<'a> {
 
         //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+        //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
         //let h_prior = new_mot.height_prior();
@@ -3446,7 +3456,12 @@ impl<'a> MotifSet<'a> {
             let mut new_set = self.derive_set();
             let rem_id = rng.gen_range(0..self.set.len());
 
-            let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+            let new_mot = self.nth_motif(rem_id);
+
+            //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
+
 
             let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());
 
@@ -6826,7 +6841,11 @@ mod tester{
 
         let remaining = motif_set.data_ref.data()-&motif_set.signal;
         let _propensities = remaining.kmer_propensities(birth_mot.nth_motif(l).len());
-        let pick_prob = (birth_mot.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+        //let pick_prob = (birth_mot.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+        let new_mot = birth_mot.nth_motif(l);
+
+        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.nth_motif(l).len()) as f64).ln());
 
@@ -6863,7 +6882,12 @@ mod tester{
 
         let remaining = motif_set.data_ref.data()-&death_mot.signal;
         let propensities = remaining.kmer_propensities(motif_set.nth_motif(l).len());
-        let pick_prob = (motif_set.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+        //let pick_prob = (motif_set.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+        let new_mot = motif_set.nth_motif(l);
+
+        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
+
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.nth_motif(l).len()) as f64).ln());
 
