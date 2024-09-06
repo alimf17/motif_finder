@@ -2873,7 +2873,7 @@ impl<'a> MotifSet<'a> {
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
                 (a,null)
             }).collect();
 
@@ -2898,7 +2898,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
             (a,null)
         }).collect();
         
@@ -2918,7 +2918,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
             (a,null)
         }).collect();
 
@@ -3060,7 +3060,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), (self.data_ref.background_ref().noise_spread_par() * 5.0))
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset())
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -5074,7 +5074,7 @@ impl SetTraceDef {
 
         let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
-        let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
+        let data_ref = AllDataUse::new(&data_reconstructed, 0.0).expect("AllData file must be valid!");
         let index_best = self.trace.iter().map(|mot_set| mot_set.ln_post).enumerate().fold((0, -f64::INFINITY), |a, b| std::cmp::max_by(a, b, |x,y| x.1.partial_cmp(&y.1).expect("No NaNs in valid traces"))).0;
 
         let current_active = self.trace[index_best].clone().reactivate_set(&data_ref);

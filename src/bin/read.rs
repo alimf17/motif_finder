@@ -22,7 +22,7 @@ fn main() {
     
     let prior_state: AllData = bincode::deserialize(&buffer).expect("Binarray file MUST be a valid motif set!");
 
-    let using: AllDataUse = AllDataUse::new(&prior_state).unwrap();
+    let using: AllDataUse = AllDataUse::new(&prior_state, 0.0).unwrap();
     println!("{} {}", using.size(), using.number_bp());
     println!("Back: {:?}", using.background_ref());
 }

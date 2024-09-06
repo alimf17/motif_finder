@@ -42,7 +42,7 @@ fn main() {
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
     let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
 
-    let data = AllDataUse::new(&pre_data).unwrap();
+    let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
     buffer.clear();
 

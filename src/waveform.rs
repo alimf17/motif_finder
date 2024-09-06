@@ -220,6 +220,10 @@ impl<'a> Waveform<'a> {
 
     }
 
+    pub fn subtact_self(&mut self, offset: f64) {
+        self.wave = self.wave.iter().map(|&a| a-offset).collect();
+    }
+
     //SAFETY: -block must be less than the number of blocks
     //        -center must be less than the number of bps in the blockth block
     //        -the length of peak MUST be strictly less than the number of base pairs represented in the smallest data block

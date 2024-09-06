@@ -92,7 +92,7 @@ fn main() {
 
     println!("Args set!");
 
-    let data_ref = AllDataUse::new(&total_data).unwrap();
+    let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
     let _data = data_ref.data();
 

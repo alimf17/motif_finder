@@ -26,7 +26,7 @@ fn main() {
     
     let full_dat: AllData = bincode::deserialize(&buffer).expect("Binarray file MUST be a valid motif set!");
 
-    let using: AllDataUse = AllDataUse::new(&full_dat).unwrap();
+    let using: AllDataUse = AllDataUse::new(&full_dat, 0.0).unwrap();
     println!("{} {}", using.size(), using.number_bp());
 /*
     let cho_mot: Motif = Motif::raw_pwm(vec![

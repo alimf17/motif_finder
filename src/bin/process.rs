@@ -208,7 +208,7 @@ pub fn main() {
 
     let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
-    let data_ref = AllDataUse::new(&data_reconstructed).expect("AllData file must be valid!");
+    let data_ref = AllDataUse::new(&data_reconstructed, 0.0).expect("AllData file must be valid!");
 
     println!("Best motif set: {:?}", best_single_motif_set);
     let activated = best_single_motif_set.reactivate_set(&data_ref);

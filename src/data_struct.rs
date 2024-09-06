@@ -63,6 +63,7 @@ pub struct AllDataUse<'a> {
     start_genome_coordinates: &'a Vec<usize>,
     start_nullbp_coordinates: &'a Vec<usize>,
     background: &'a Background,
+    offset: f64,
 }
 
 struct FitTDist<'a> {
@@ -134,7 +135,7 @@ impl AllData {
                 let attempted_data: bincode::Result<AllData> = bincode::deserialize(&buffer);
                 match attempted_data {
                     Err(_) => warn!("The file that your parameters point to does not produce a valid set of data for inference. Ignoring and overwriting the file contents."),
-                    Ok(data) => match AllDataUse::new(&data) {
+                    Ok(data) => match AllDataUse::new(&data, 0.0) {
                         Ok(_) => return Ok((data, file_out)),
                         Err(_) => warn!("The file that your parameters point to produce a parsable set of data for inference, but the set
                                          is not actually safe to do inference on. We are trying to redo this and overwrite, 
@@ -168,7 +169,7 @@ impl AllData {
         println!("synchronized fasta and data");
         let full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background};
 
-        let _ = AllDataUse::new(&full_data)?; //This won't be returned: it's just a validation check.
+        let _ = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
 
         println!("validated data");
         
@@ -1272,9 +1273,13 @@ impl AllData {
 
 impl<'a> AllDataUse<'a> {
 
-    pub fn new(reference_struct: &'a AllData) -> Result<Self, AllProcessingError> {
+    pub fn new(reference_struct: &'a AllData, offset: f64) -> Result<Self, AllProcessingError> {
        
         let background = reference_struct.background();
+
+        let mut data = reference_struct.validated_data()?;
+
+        data.subtact_self(offset);
 
         let kernel_width = background.kernel.len();
 
@@ -1287,11 +1292,12 @@ impl<'a> AllDataUse<'a> {
         }
 
         Ok( Self{ 
-               data: reference_struct.validated_data()?,
+               data: data,
                null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
                start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
                background: reference_struct.background(),
+               offset: offset,
         })
 
     }
@@ -1307,6 +1313,7 @@ impl<'a> AllDataUse<'a> {
             start_genome_coordinates: start_genome_coordinates,
             start_nullbp_coordinates: start_nullbp_coordinates,
             background: background,
+            offset: 0.0,
         }
     }
 
@@ -1339,6 +1346,9 @@ impl<'a> AllDataUse<'a> {
     }
     pub fn null_zero_locs(&self) -> &Vec<usize> {
         &self.start_nullbp_coordinates
+    }
+    pub fn offset(&self) -> f64 {
+        self.offset
     }
     
     pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {

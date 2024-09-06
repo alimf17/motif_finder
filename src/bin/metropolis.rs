@@ -139,7 +139,7 @@ fn main() {
 
     println!("have all data");
 
-    let data_ref = AllDataUse::new(&total_data).unwrap();
+    let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
     println!("alldata use");
 

@@ -91,15 +91,22 @@ fn main() {
     //SAFETY: This modification is made before any inference is done, preventing data races
     unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
 
+    let filter: f64 = match args.get(12) {
+        None => 0.0,
+        Some(arg) => arg.parse::<f64>().unwrap_or(0.0),
+    };
+
+
     let default_burn: usize = 10;
 
-    let (burn_in_after_swap,value): (usize, bool) = match args.get(12) {
+    let (burn_in_after_swap,value): (usize, bool) = match args.get(13) {
         None => (default_burn, false),
         Some(burn) => match burn.parse::<usize>(){
             Err(_) => (default_burn, false), 
             Ok(burning) => (burning, true),
         },
     };
+
 
 
     let base_check_index: usize = if value {13} else {12};
@@ -140,7 +147,7 @@ fn main() {
 
     println!("have all data");
 
-    let data_ref = AllDataUse::new(&total_data).unwrap();
+    let data_ref = AllDataUse::new(&total_data, filter).unwrap();
 
     println!("alldata use");
 
