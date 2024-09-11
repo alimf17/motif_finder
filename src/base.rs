@@ -138,8 +138,9 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //while also not taking more memory than every human brain combined,
                                 //We store many kmers as u64s. 
 
+pub const MAX_TF_NUM: usize = 10;
 
-pub const MIN_HEIGHT: f64 = 2.5;
+pub const MIN_HEIGHT: f64 = 1.5;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -3316,6 +3317,7 @@ impl<'a> MotifSet<'a> {
     //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     //for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
+        if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; }
         -((self.set.len()-1) as f64)* unsafe{ NECESSARY_MOTIF_IMPROVEMENT } 
     }
 
@@ -4153,6 +4155,7 @@ impl StrippedMotifSet {
     pub fn num_motifs(&self) -> usize { self.set.len() }
 
     pub fn motif_num_prior(&self) -> f64 {
+        if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; }
         -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
 

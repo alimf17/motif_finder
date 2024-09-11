@@ -109,7 +109,7 @@ fn main() {
 
 
 
-    let base_check_index: usize = if value {13} else {12};
+    let base_check_index: usize = if value {14} else {13};
     let mut init_check_index: usize = base_check_index+1;
 
 
@@ -136,6 +136,7 @@ fn main() {
             },
     };
 
+    println!("filt {} cut {:?}", filter, peak_cutoff);
     PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
