@@ -166,16 +166,16 @@ const HEIGHT_MOVE_SD: f64 = 1.0; */
 const PROB_POS_PEAK: f64 = 1.0;
 
 
-const BASE_RATIO_SDS: [f64; 3] = [0.1_f64, 0.5, 1.0];
-const BASE_LINEAR_SDS: [f64; 3] = [0.1_f64, 0.5, 1.0];
+const BASE_RATIO_SDS: [f64; 3] = [0.01_f64, 0.05, 0.1];
+const BASE_LINEAR_SDS: [f64; 3] = [0.01_f64, 0.05, 0.1];
  
 const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()]> = 
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const SCALE_SDS: [f64; 3] = [1.0, 10.0, 50.0];
+const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 
-const HEIGHT_SDS: [f64; 3] = [1_f64, 2.0, 10.0];
+const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+7;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
@@ -740,7 +740,7 @@ impl Base {
 
         let penalty_diffs: [f64; BASE_L-1] = core::array::from_fn(|i| largest_to_smallest[i+1].0-largest_to_smallest[i].0);
 
-        let ratios = [ratio_sd, ratio_sd, small_sd];
+        let ratios = [ratio_sd/(-SCORE_THRESH), ratio_sd/(-SCORE_THRESH), small_sd/(-SCORE_THRESH)];
 
         let new_penalties: [f64; BASE_L-1] = core::array::from_fn(|i| penalty_diffs[i]*(NORMAL_DIST.sample(rng)*ratios[i]).exp());
 
@@ -4057,7 +4057,7 @@ impl<'a> MotifSet<'a> {
 
         let mut replacement = new_set.nth_motif(c_id).clone();
 
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.25;
+        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.5;
 
         let Some(attempt_new) = replacement.pwm.iter().map(|a| a.scaled_base(scale_exponent_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
