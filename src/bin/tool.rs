@@ -113,6 +113,8 @@ fn main() {
     let mut init_check_index: usize = base_check_index+1;
 
 
+    println!("init {:?}", args.get(init_check_index));
+
     //By the end of this block, init_check_index holds the index where we check what type of
     //initial condition we have, if any. If this is larger than base_check_index, then we have arguments to parse
     //that change statics relevant for inference.
@@ -174,6 +176,9 @@ fn main() {
         },
         None => None,
     };
+    
+    println!("checker {:?}", check);
+
     let maybe_init = match check {
 
         Some(("meme", meme_file)) => {
@@ -205,6 +210,8 @@ fn main() {
         },
         _ => None,
     };
+
+
 
     //    pub fn new_parallel_traces<R: Rng+?Sized>(min_thermo_beta: f64, num_intermediate_traces: usize, capacity_per_trace: usize, step_num_estimate: usize, how_to_track: &TrackingOptions, data_ref: &'a AllDataUse<'a>, initial_condition: Option<MotifSet<'a>>, sparse: Option<usize>, rng: &mut R) -> Result<Self, InitializationError> {
 

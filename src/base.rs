@@ -2152,6 +2152,7 @@ impl Motif {
             }).flatten().collect();
 
             //println!("through {}mer {}", accounted_length, forward_checks.len());
+            //if forward_checks.len() > 0 {println!("forward checks {:?}", &forward_checks[0..CAPACITY_FOR_NULL.min(forward_checks.len())]);}
             accounted_length+=1;
         }
 
@@ -3322,10 +3323,12 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn ln_prior(&self) -> f64 {
+        //println!("motif num {} heights {:?} pwms {:?}",self.motif_num_prior(), self.set.iter().map(|a| a.0.height_prior()).collect::<Vec<_>>(), self.set.iter().map(|a| a.0.pwm_prior(self.data_ref.data().seq())).collect::<Vec<_>>());
         self.motif_num_prior() + self.set.iter().map(|a| a.0.height_prior()+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn ln_likelihood(&self) -> f64 {
+        //println!("nulls {:?} ad_calc {}", self.null_peak_scores(), Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer())));
         Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer()))
     }
 
@@ -3333,6 +3336,7 @@ impl<'a> MotifSet<'a> {
         match self.ln_post {
             None => {
                 let ln_prior = self.ln_prior();
+                //println!("prior {}", ln_prior);
                 //self.recalc_negatives();
                 if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                     self.ln_post = Some(ln_prior+self.ln_likelihood());
@@ -4136,9 +4140,15 @@ impl StrippedMotifSet {
     //Yes, self, not &self. I'm destroying the stripped motif set whenever I make the active motif set
     pub fn reactivate_set<'a>(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
 
+        let cutoff = data_ref.offset();
+
         let mut revived = MotifSet {
 
-            set: self.set.clone().into_iter().map(|a| (a, Vec::new())).collect(),
+            set: self.set.clone().into_iter().map(|a| {
+                let nulls = a.return_any_null_binds_by_hamming(data_ref.null_seq(), cutoff);
+                println!("set {:?}, nulls {:?}", a, nulls);
+                (a, nulls)
+            }).collect(),
             signal: data_ref.data().derive_zero(),
             ln_post: None,
             data_ref: data_ref,
@@ -4512,6 +4522,12 @@ impl<'a> SetTrace<'a> {
             None => MotifSet::rand_with_one(data_ref, rng),
         };
 
+        println!("initialized as {:?}", active_set);
+
+        let _ = active_set.ln_posterior();
+
+        println!("initialized with {:?}", active_set);
+        
         SetTrace{
             trace: Vec::<StrippedMotifSet>::with_capacity(capacity),
             active_set: active_set,
