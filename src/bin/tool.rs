@@ -156,7 +156,9 @@ fn main() {
 
     let _data = data_ref.data();
 
-    let _background = data_ref.background_ref();
+    let background = data_ref.background_ref();
+
+    println!("background: {:?}", background);
 
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
     let capacity: usize = save_step*(NUM_RJ_STEPS+2);

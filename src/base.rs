@@ -140,7 +140,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
 
 pub const MAX_TF_NUM: usize = 10;
 
-pub const MIN_HEIGHT: f64 = 1.5;
+pub const MIN_HEIGHT: f64 = 2.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -180,7 +180,7 @@ const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+7;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 20, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -2875,7 +2875,7 @@ impl<'a> MotifSet<'a> {
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
                 (a,null)
             }).collect();
 
@@ -2900,7 +2900,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
             (a,null)
         }).collect();
         
@@ -2920,7 +2920,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset());
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
             (a,null)
         }).collect();
 
@@ -3062,7 +3062,7 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset())
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
     }
 
     pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
@@ -4001,7 +4001,9 @@ impl<'a> MotifSet<'a> {
 
         let mut replacement = new_set.nth_motif(c_id).clone();
         
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.25;
+        //let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.25;
+
+        let scaler = (1.0/(self.nth_motif(c_id).len().pow(2) as f64))/4096.;
 
         let Some(attempt_new) = replacement.pwm.iter().map(|a| a.moved_base(ratio_sd*scaler, linear_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
 
@@ -4140,7 +4142,7 @@ impl StrippedMotifSet {
     //Yes, self, not &self. I'm destroying the stripped motif set whenever I make the active motif set
     pub fn reactivate_set<'a>(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
 
-        let cutoff = data_ref.offset();
+        let cutoff = data_ref.offset()*2.0;
 
         let mut revived = MotifSet {
 
