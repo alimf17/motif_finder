@@ -18,7 +18,7 @@ use std::process::*;
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
-use crate::waveform::{Kernel, Waveform, Noise};
+use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 
@@ -1244,6 +1244,8 @@ fn add_mult_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1], lambda: f64) -> [f64; B
 pub struct Motif {
 
     peak_height: f64,
+    kernel_width: KernelWidth,
+    kernel_variety: KernelVariety,
     pwm: Vec<Base>,
 
 }
@@ -1254,12 +1256,14 @@ impl Motif {
     //PANIC: if any proposed PWM is made with a capacity greater than MAX_BASE, the program will panic
     //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64) -> Motif {
+    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Motif {
 
         pwm.reserve_exact(MAX_BASE-pwm.len());
 
         let m = Motif {
             peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         };
 
@@ -1274,8 +1278,9 @@ impl Motif {
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
         let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
-
-        Self::raw_pwm(pwm, peak_height)
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+        Self::raw_pwm(pwm, peak_height, kernel_width, kernel_variety)
     }
 
 
@@ -1293,9 +1298,13 @@ impl Motif {
 
         let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
 
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
 
         Motif {
             peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         }
 
@@ -1307,10 +1316,14 @@ impl Motif {
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
 
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
         //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
 
         Motif {
             peak_height: height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         }
 
@@ -1331,9 +1344,13 @@ impl Motif {
 
         let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
 
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
 
         Motif {
             peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         }
 
@@ -1353,9 +1370,13 @@ impl Motif {
 
         let peak_height: f64 = sign*(HEIGHT_PROPOSAL_DIST.sample(rng)+MIN_HEIGHT);
 
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
 
         Motif {
             peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         }
 
@@ -1440,9 +1461,13 @@ impl Motif {
         let mut pwm: Vec<Base> = mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-pwm.len());
 
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
 
         Motif {
             peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
             pwm: pwm,
         }
 
@@ -1495,9 +1520,12 @@ impl Motif {
             a.sum_bases_and_lb_max(&splitting_base).0
         }).collect();
 
+        
         let splitter = Motif {
             peak_height: splitter_height,
             pwm: splitter_pwm,
+            kernel_width: self.kernel_width,
+            kernel_variety: self.kernel_variety,
         };
 
         (splitter, ln_dens_gen)
@@ -1525,7 +1553,7 @@ impl Motif {
         let height_b = self.peak_height-height_a;
 
 
-        (Motif::raw_pwm(pwm_a, height_a), Motif::raw_pwm(pwm_b, height_b), ln_jacob_minus_proposal)
+        (Motif::raw_pwm(pwm_a, height_a, self.kernel_width, self.kernel_variety), Motif::raw_pwm(pwm_b, height_b,self.kernel_width, self.kernel_variety), ln_jacob_minus_proposal)
 
     }
 
@@ -1535,6 +1563,9 @@ impl Motif {
     pub fn merge_motifs(&self, motif_b: &Motif, height_sd: f64) -> Option<(Motif, f64)> {
 
         if self.len() != motif_b.len() { return None;}
+
+        if self.kernel_width != motif_b.kernel_width { return None; } 
+        if self.kernel_variety != motif_b.kernel_variety { return None; } 
 
         let mut ln_jacob_plus_proposal = 0.0;
 
@@ -1555,7 +1586,7 @@ impl Motif {
         ln_jacob_plus_proposal += NORMAL_DIST.ln_pdf(rand_split_height/height_sd)-height_sd.ln();
       
 
-        let merged = Motif::raw_pwm(fused_pwm, new_height);
+        let merged = Motif::raw_pwm(fused_pwm, new_height, self.kernel_width, self.kernel_variety);
 
 
         Some((merged, ln_jacob_plus_proposal))
@@ -2455,7 +2486,7 @@ impl Motif {
 
         let data = data_ref.data();
         
-        let unit_kernel = data_ref.unit_kernel_ref();
+        let unit_kernel = data_ref.unit_kernel_ref(self.kernel_width, self.kernel_variety);
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -2499,7 +2530,7 @@ impl Motif {
 
         let data = data_ref.data();
         
-        let unit_kernel = data_ref.unit_kernel_ref();
+        let unit_kernel = data_ref.unit_kernel_ref(self.kernel_width, self.kernel_variety);
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -2546,7 +2577,7 @@ impl Motif {
     unsafe fn generate_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data_ref: &'a AllDataUse) -> Waveform<'a> {
 
         let data = data_ref.data();
-        let unit_kernel = data_ref.unit_kernel_ref();
+        let unit_kernel = data_ref.unit_kernel_ref(self.kernel_width, self.kernel_variety);
 
         let mut occupancy_trace: Waveform = data.derive_zero();
 
@@ -2661,7 +2692,7 @@ impl Motif {
         if distance > 0.0 { distance.sqrt() } else {0.0}
     }
 
-    fn sum_motifs(&self, other_mot: &Motif) -> (Self, f64) {
+    /* fn sum_motifs(&self, other_mot: &Motif) -> (Self, f64) {
 
         let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
 
@@ -2765,7 +2796,7 @@ impl Motif {
 
         (Motif::raw_pwm(new_pwm, new_height), correction)
 
-    }
+    }*/
 
     fn for_meme(&self) -> String {
 
@@ -3718,6 +3749,26 @@ impl<'a> MotifSet<'a> {
 
         let ln_post = new_set.replace_motif(add_mot, id);
 
+
+        Some((new_set, ln_post))
+
+    }
+    pub fn propose_kernel_swap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let id = rng.gen_range(0..self.set.len());
+
+
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+
+        let mut new_mot = self.get_nth_motif(id);
+
+        new_mot.kernel_width = kernel_width;
+        new_mot.kernel_variety = kernel_variety;
+
+        let ln_post = new_set.replace_motif(new_mot, id);
 
         Some((new_set, ln_post))
 

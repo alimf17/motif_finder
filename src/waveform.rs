@@ -6,7 +6,7 @@ use std::cmp::{max, min};
 use core::f64::consts::PI;
 use core::iter::zip;
 
-use crate::base::{Bp, LN_2};
+use crate::base::{Bp, LN_2, MAX_BASE};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
 use crate::data_struct::AllDataUse;
@@ -34,15 +34,56 @@ use assume::assume;
 
 use serde::{Serialize, Deserialize};
 
+use strum::{EnumCount, VariantArray as VariantArrayArr, IntoEnumIterator};
+use strum_macros::{EnumCount as EnumCountMacro, VariantArray, EnumIter};
+
 pub const WIDE: f64 = 3.0;
 
+use rand::Rng;
+use rand::distributions::{Distribution, Standard};
+use rand::seq::SliceRandom;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
+pub enum KernelWidth {
+    Narrow = 0,
+    Medium = 1,
+    Wide = 2,
+}
+
+impl Distribution<KernelWidth> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> KernelWidth {
+        //SAFETY: So long as KernelWidth can produce elements of its type, this is safe
+        unsafe {
+            *KernelWidth::VARIANTS.choose(rng).unwrap_unchecked()
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
+pub enum KernelVariety {
+    Gaussian = 0,
+    HalfLeft = 1,
+    HalfRight = 2,
+    AbsExponential = 3,
+    Footprint = 4,
+}
 
 
+impl Distribution<KernelVariety> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> KernelVariety {
+        //SAFETY: So long as KernelVariety can produce elements of its type, this is safe
+        unsafe {
+            *KernelVariety::VARIANTS.choose(rng).unwrap_unchecked()
+        }
+    }
+}
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Kernel{
 
     peak_height: f64,
     peak_width: f64,
+    kernel_type: KernelVariety,
+    kernel_width: KernelWidth,
     kernel: Vec<f64>,
 }
 
@@ -56,6 +97,8 @@ impl Mul<f64> for &Kernel {
         Kernel {
             peak_height: self.peak_height*rhs,
             peak_width: self.peak_width,
+            kernel_type: self.kernel_type,
+            kernel_width: self.kernel_width,
             kernel: self.kernel.iter().map(|a| a*rhs).collect(),
         }
 
@@ -66,17 +109,43 @@ impl Mul<f64> for &Kernel {
 
 impl Kernel {
     
-    pub fn new(peak_width: f64, peak_height: f64) -> Kernel {
+    pub fn new(peak_width: f64, peak_height: f64, kern_width: KernelWidth, variety: KernelVariety) -> Kernel {
 
         let span = (peak_width*WIDE) as isize;
 
         let domain: Vec<isize> = (-span..(span+1)).collect();
 
-        let range = domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*peak_width.powf(2.0))).exp()*peak_height).collect();
+        let true_width = match kern_width {
+            KernelWidth::Narrow => peak_width/3.0,
+            KernelWidth::Medium => peak_width*2.0/3.0,
+            KernelWidth::Wide => peak_width,
+        };
 
+        let range = match variety {
+
+            KernelVariety::Gaussian => domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()*peak_height).collect(),
+            KernelVariety::HalfRight => domain.iter().map(|a| { 
+                if *a >= 0 {
+                    (-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()*peak_height
+                } else {
+                     (-((*a as f64).powf(2.0))/(2.0*(span as f64).powi(4))).exp()*peak_height
+                }
+            }).collect(),
+            KernelVariety::HalfLeft => domain.iter().map(|a| { 
+                if *a <= 0 {
+                    (-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()*peak_height
+                } else {
+                     (-((*a as f64).powf(2.0))/(2.0*(span as f64).powi(4))).exp()*peak_height
+                }
+            }).collect(),
+            KernelVariety::AbsExponential => domain.iter().map(|a| ( (-((*a as f64).abs())/(2.0*true_width.abs())).exp()*peak_height)).collect(),
+            KernelVariety::Footprint => domain.iter().map(|a| ((-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()-(-((*a as f64).powf(2.0))/(2.0*(MAX_BASE as f64))).exp())*peak_height).collect(),
+        };
         Kernel{
             peak_height: peak_height,
             peak_width: peak_width,
+            kernel_width: kern_width,
+            kernel_type: variety,
             kernel: range,
         }
 
@@ -84,6 +153,13 @@ impl Kernel {
 
     pub fn get_sd(&self) -> f64 {
         self.peak_width
+    }
+    pub fn get_true_width(&self) -> f64 {
+        match self.kernel_width {
+            KernelWidth::Narrow => self.peak_width/3.0,
+            KernelWidth::Medium => self.peak_width*2.0/3.0,
+            KernelWidth::Wide => self.peak_width,
+        }
     }
 
     pub fn get_curve(&self) -> &Vec<f64> {
@@ -375,7 +451,7 @@ impl<'a> Waveform<'a> {
 
         let scaled_heights = extraneous_bindings;
 
-        let sd_over_spacer = background.kernel.get_sd()/(spacer as f64);
+        let sd_over_spacer = background.kernel[0].get_sd()/(spacer as f64);
 
         let ln_caring_threshold = caring_threshold.ln();
 
@@ -387,7 +463,7 @@ impl<'a> Waveform<'a> {
 
         let size_hint: usize = generate_size_kernel(*scaled_heights[0]);
 
-        let mut output_vec: Vec<f64> = Vec::with_capacity(background.kernel_ref().len());
+        let mut output_vec: Vec<f64> = Vec::with_capacity(background.kernel_ref(KernelWidth::Wide, KernelVariety::Gaussian).len());
 
         for height in scaled_heights {
 
@@ -808,17 +884,20 @@ impl From<StudentsTDef> for StudentsT {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Background {
     pub dist: BackgroundDist,
-    pub kernel: Kernel,
+    pub kernel: [Kernel; KernelWidth::COUNT * KernelVariety::COUNT],
 }
 
 impl Background {
 
-    pub fn new(sigma_background : f64, df : f64, peak_width: f64) -> Background {
+    pub fn new(sigma_background : f64, df : f64, fragment_length: f64) -> Background {
 
         let dist = BackgroundDist::new(sigma_background, df);
         
-        let kernel = Kernel::new(peak_width, 1.0);
-
+        let kernel: [Kernel; KernelWidth::COUNT * KernelVariety::COUNT] = core::array::from_fn(|a| {
+            let var = KernelVariety::VARIANTS[a/KernelWidth::COUNT];
+            let wid = KernelWidth::VARIANTS[a % KernelWidth::COUNT];
+            Kernel::new(fragment_length, 1.0, wid, var)
+        });
         Background{dist: dist, kernel: kernel}
     }
 
@@ -891,8 +970,8 @@ impl Background {
         self.dist.get_spread_par()
     }
 
-    pub fn kernel_ref(&self) -> &Kernel {
-        &self.kernel
+    pub fn kernel_ref(&self, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> &Kernel {
+        &self.kernel[(kernel_width as usize)+KernelWidth::COUNT*(kernel_variety as usize)]
     }
 
     pub fn bp_span(&self) -> usize{
@@ -900,7 +979,7 @@ impl Background {
     }
 
     pub fn kernel_sd(&self) -> f64 {
-        self.kernel.peak_width
+        self.kernel[0].peak_width
     }
 
     

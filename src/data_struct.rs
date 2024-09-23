@@ -7,7 +7,7 @@ use std::rc::Rc;
 use core::f64::consts::PI;
 use std::error::Error;
 
-use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel};
+use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
 use crate::base::{BPS, BASE_L, MAX_BASE};
 
@@ -1335,8 +1335,8 @@ impl<'a> AllDataUse<'a> {
         &self.background
     }
 
-    pub fn unit_kernel_ref(&self) -> &Kernel {
-        self.background.kernel_ref()
+    pub fn unit_kernel_ref(&self, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> &Kernel {
+        self.background.kernel_ref(kernel_width, kernel_variety)
     }
 
     pub fn number_bp(&self) -> usize {
