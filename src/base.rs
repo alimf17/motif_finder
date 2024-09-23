@@ -177,10 +177,10 @@ const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+7;
+const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -195,6 +195,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    "_motif_contract.png".to_owned(), "_motif_split.png".to_owned(), "_motif_merge.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_base_sd_{a}.png")));
                                                    let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_mot_sd_{a}.png")));
+                                                   let m = m.chain(["_kernel_move.png".to_owned()]);
                                                    let m = m.chain(["_random_motif.png".to_owned()]);
                                                    m.collect::<Vec<_>>().try_into().unwrap()
 });
@@ -1708,6 +1709,12 @@ impl Motif {
         self.peak_height
     }
 
+    pub fn kernel_width(&self) -> KernelWidth {
+        self.kernel_width
+    }
+    pub fn kernel_variety(&self) -> KernelVariety {
+        self.kernel_variety
+    }
 
     pub fn len(&self) -> usize {
         self.pwm.len()
@@ -2623,14 +2630,14 @@ impl Motif {
     /// let dself = m.distance_function(&m);
     /// assert!(dself.0.abs() < 1e-16);
     /// assert!(!dself.1);
-    /// let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
+    /// let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height(), m.kernel_width(), m.kernel_variety())));
     /// assert!(drev.0.abs() < 1e-16);
     /// assert!(drev.1);
     /// let mut new_b_vec: Vec<Base> = Vec::with_capacity(m.len()+2);
     /// new_b_vec.append(&mut m.rev_complement());
     /// new_b_vec.push(Base::rand_new(&mut rng));
     /// new_b_vec.push(Base::rand_new(&mut rng));
-    /// let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
+    /// let newmot = Motif::raw_pwm(new_b_vec, m.peak_height(),m.kernel_width(), m.kernel_variety());
     /// println!("new {:?} old {:?}", newmot, m);
     /// ```
     pub fn distance_function(&self, other_mot: &Motif) -> (f64, bool) {
@@ -2855,8 +2862,7 @@ impl fmt::Debug for Motif {
         const DIGITS: usize = 10;
 
         //Writing the peak height (unitless) and the peak width (as defined by # base pairs from one end to another)
-        write!(f, "Peak height: {:.DIGITS$}.\n", self.peak_height)?;
-
+        write!(f, "Peak height: {:.DIGITS$}. Kernel type {:?}. Kernel width type {:?}.\n", self.peak_height, self.kernel_variety, self.kernel_width)?;
         //I want people to be free to define their own bases, if they like
         //But they will have to change it in the code for formatting: it's not my problem
         //The two extra spaces on either side let the output align in a pretty way
@@ -3763,6 +3769,10 @@ impl<'a> MotifSet<'a> {
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
 
+        if kernel_width == self.set[id].0.kernel_width && kernel_variety == self.set[id].0.kernel_variety {
+            return None;
+        }
+
         let mut new_mot = self.get_nth_motif(id);
 
         new_mot.kernel_width = kernel_width;
@@ -4657,6 +4667,12 @@ impl<'a> SetTrace<'a> {
                 })
             },
             8 => {
+                self.active_set.propose_kernel_swap(rng).map(|(new_mot, modded_ln_like)| {
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
+                    (new_mot, accepted)
+                })
+            },
+            9 => {
                 Some((self.active_set.randomize_motifs(self.thermo_beta, rng), true))
             },
             _ => unreachable!(),
@@ -5344,6 +5360,8 @@ impl MoveTracker {
                          (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
                 ind += 1;
             }
+            println!("Randomize kernel. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],(self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
             println!("Randomize move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
     }
@@ -6088,9 +6106,9 @@ mod tester{
         println!("{:?} dself", dself);
         assert!(dself.0.abs() < 1e-8);
         assert!(!dself.1);
-        let revved = Motif::raw_pwm(m.rev_complement(), m.peak_height());
+        let revved = Motif::raw_pwm(m.rev_complement(), m.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);
         println!("forward {:?} revved {:?}", m, revved);
-        let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height())));
+        let drev = m.distance_function(&(Motif::raw_pwm(m.rev_complement(), m.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian)));
         println!("{:?} drev", drev);
         assert!(drev.0.abs() < 1e-8);
         assert!(drev.1);
@@ -6099,7 +6117,7 @@ mod tester{
         let mut m_star_pwm = m.pwm.clone();
         m_star_pwm.insert(0,zero_base.clone());
         m_star_pwm.push(zero_base);
-        let unaltered_check = Motif::raw_pwm(m_star_pwm.clone(), m.peak_height());
+        let unaltered_check = Motif::raw_pwm(m_star_pwm.clone(), m.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);
         let d_unalt = m.distance_function(&unaltered_check);
         println!("m {:?} \n m_star {:?} {:?}", m, unaltered_check, m_star_pwm);
         println!("unalt {:?}", d_unalt);
@@ -6109,7 +6127,7 @@ mod tester{
         new_b_vec.push(Base::rand_new(&mut rng));
         new_b_vec.append(&mut m.rev_complement());
         new_b_vec.push(Base::rand_new(&mut rng));
-        let newmot = Motif::raw_pwm(new_b_vec, m.peak_height());
+        let newmot = Motif::raw_pwm(new_b_vec, m.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);
         let d_unalt_rev = m.distance_function(&newmot);
         println!("new_b_vec {:?} {:?} {}", newmot, d_unalt_rev, (newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt());
         assert!(d_unalt_rev.0.abs()-(newmot.pwm[0].dist_sq(None)+newmot.pwm[newmot.len()-1].dist_sq(None)).sqrt() < 1e-9);
@@ -6453,6 +6471,7 @@ mod tester{
         let ln_num_hammings = |x: &Motif| ((sequence.all_kmers_within_hamming(&x.best_motif(), hamming_fn(x.len())+1).len()) as f64).ln() ;
         println!(" motif 0 neighbors {} motif 1 neighbors {}", ln_num_hammings(motif_set.nth_motif(0)).exp(), ln_num_hammings(motif_set.nth_motif(1)).exp());
         //This should usually be Some
+        //TODO: make this output Some significantly more often: it tends to make false positives on giving errors because it doesn't always Some
         let (leaped, leap_score) = motif_set.propose_base_leap(&mut rng).unwrap();
 
         let leap = leaped.get_nth_motif(0);
@@ -6575,6 +6594,8 @@ mod tester{
         alt_shuffed.ln_post = None;
         let ln_post = alt_shuffed.ln_posterior();
 
+        println!("{:?} {:?}", motif_set, shuffed);
+
         println!("{ln_post}, {}", shuffed.ln_post.unwrap());
         println!("diff ln_post {}", ln_post-shuffed.ln_post.unwrap());
 
@@ -6605,6 +6626,52 @@ mod tester{
         println!("unforgiven {:?}", no_forgive_diffs);
 
         assert!(no_forgive_diffs.len() == 0, "waves not lining up"); 
+        
+        let mut swap = motif_set.propose_kernel_swap( &mut rng );
+
+        while swap.is_none() {
+            swap = motif_set.propose_kernel_swap( &mut rng );
+        }
+
+        let (swapped, swapped_score) = swap.unwrap();
+
+        let swapp = swapped.get_nth_motif(0);
+        let swapp1 = swapped.get_nth_motif(1);
+
+        let zero_swap = !(swapp.kernel_width == mot.kernel_width && swapp.kernel_variety == mot.kernel_variety);
+        let one_swap = !(swapp1.kernel_width == mot1.kernel_width && swapp1.kernel_variety == mot1.kernel_variety);
+
+        assert!(zero_swap != one_swap, "Not swapping correctly {} {}", zero_swap, one_swap);
+
+        assert!(mot.peak_height() == swapp.peak_height(), "zeroth motif height is wrong");
+        assert!(mot1.peak_height() == swapp1.peak_height(), "first motif height is wrong");
+
+        let swapp_kmer = swapp.best_motif();
+        let swapp1_kmer = swapp1.best_motif();
+
+
+        let mut all_swap_correct = true;
+        for base in 0..mot.len() {
+            for bp in BP_ARRAY {
+                all_swap_correct &= swapp.pwm[base][bp] == mot.pwm[base][bp]
+            }
+
+        }
+
+        assert!(all_swap_correct, "zeroth motif not correctly swapped");
+
+        let mut all_swap_correct = true;
+        for base in 0..mot1.len() {
+            for bp in BP_ARRAY {
+                    all_swap_correct &= swapp1.pwm[base][bp] == mot1.pwm[base][bp];
+            }
+
+        }
+
+        assert!(all_swap_correct, "first motif not correctly swapped");
+        let mut alt_swapped = swapped.clone();
+        alt_swapped.ln_post = None;
+        let ln_post = alt_swapped.ln_posterior();
     }
 
     #[test]
@@ -7358,9 +7425,9 @@ mod tester{
 
         println!("Random motif\n{}", random_motif);
 
-        println!("Kernel length {}", background.kernel_ref().len());
+        println!("Kernel length {}", background.kernel_ref(KernelWidth::Wide, KernelVariety::Gaussian).len());
 
-        assert!(background.kernel_ref().len() == 121);
+        assert!(background.kernel_ref(KernelWidth::Wide, KernelVariety::Gaussian).len() == 121);
 
         assert!((random_motif.peak_height.abs() >= MIN_HEIGHT) && (random_motif.peak_height.abs() <= MAX_HEIGHT));
 
@@ -7586,7 +7653,7 @@ mod tester{
 
 
         println!("DF");
-        let little_motif: Motif = Motif::raw_pwm(mat, 10.0); //wave_seq
+        let little_motif: Motif = Motif::raw_pwm(mat, 10.0, KernelWidth::Wide, KernelVariety::Gaussian); //wave_seq
 
         print!("{}", little_motif);
         println!("{:?}",little_motif.generate_waveform(&wave_data_seq).raw_wave());
@@ -7598,7 +7665,7 @@ mod tester{
         let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
-        let wave_motif: Motif = Motif::raw_pwm(mat, 10.0); //small
+        let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, KernelWidth::Wide, KernelVariety::Gaussian); //small
 
         let rev_comp: Vec<bool> = (0..48).map(|_| rng.gen::<bool>()).collect();
 
@@ -7680,7 +7747,7 @@ mod tester{
 
         let half_len: usize = (motif.len()-1)/2;
 
-        let kernel_check = (background.kernel_ref()*1.0).get_curve().clone();
+        let kernel_check = (background.kernel_ref(motif.kernel_width, motif.kernel_variety)*1.0).get_curve().clone();
 
         let kernel_mid = (kernel_check.len()-1)/2;
 

@@ -1,6 +1,7 @@
 use motif_finder::sequence::Sequence;
 use motif_finder::data_struct::{AllData, AllDataUse};
 use motif_finder::base::{Base, Motif, MotifSet, SetTrace};
+use motif_finder::waveform::{KernelWidth, KernelVariety};
 
 use std::io::{Read};
 use std::{fs};
@@ -106,7 +107,7 @@ fn main() {
                                        //Base::new([0.25, 1.0, 0.125, 0.375]),
                                        //Base::new([1./7., 1./7., 5./7., 1.0]),
                                        //Base::new([0.75, 0.99, 1.0, 0.75]) */
-    ].into_iter().collect::<Result<Vec<_>, _>>().unwrap(), 10.0);
+    ].into_iter().collect::<Result<Vec<_>, _>>().unwrap(), 10.0, KernelWidth::Wide, KernelVariety::Gaussian);
 
 
 

@@ -1451,7 +1451,7 @@ mod tests{
         let sd = 5;
         let height = 2.0;
         let _spacer = 5;
-        let k = Kernel::new(sd as f64, height);
+        let k = Kernel::new(sd as f64, height, KernelWidth::Wide, KernelVariety::Gaussian);
 
         let kern = k.get_curve();
         let kernb = &k*4.0;
@@ -1467,7 +1467,7 @@ mod tests{
 
     #[test]
     fn real_wave_check(){
-        let k = Kernel::new(5.0, 2.0);
+        let k = Kernel::new(5.0, 2.0, KernelWidth::Wide, KernelVariety::Gaussian);
         //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
         let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
         let mut signal = Waveform::create_zero(&seq, 5);
