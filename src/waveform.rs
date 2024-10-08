@@ -45,9 +45,9 @@ use rand::seq::SliceRandom;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelWidth {
-    Narrow = 0,
-    Medium = 1,
-    Wide = 2,
+//    Narrow = 0,
+//    Medium = 1,
+    Wide// = 2,
 }
 
 impl Distribution<KernelWidth> for Standard {
@@ -62,10 +62,10 @@ impl Distribution<KernelWidth> for Standard {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelVariety {
     Gaussian = 0,
-    HalfLeft = 1,
-    HalfRight = 2,
-    AbsExponential = 3,
-    Footprint = 4,
+  //  HalfLeft = 1,
+  //  HalfRight = 2,
+  //  AbsExponential = 3,
+  //  Footprint = 4,
 }
 
 
@@ -116,15 +116,15 @@ impl Kernel {
         let domain: Vec<isize> = (-span..(span+1)).collect();
 
         let true_width = match kern_width {
-            KernelWidth::Narrow => peak_width/3.0,
-            KernelWidth::Medium => peak_width*2.0/3.0,
+           // KernelWidth::Narrow => peak_width/3.0,
+           // KernelWidth::Medium => peak_width*2.0/3.0,
             KernelWidth::Wide => peak_width,
         };
 
         let range = match variety {
 
             KernelVariety::Gaussian => domain.iter().map(|a| (-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()*peak_height).collect(),
-            KernelVariety::HalfRight => domain.iter().map(|a| { 
+            /*KernelVariety::HalfRight => domain.iter().map(|a| { 
                 if *a >= 0 {
                     (-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()*peak_height
                 } else {
@@ -139,7 +139,7 @@ impl Kernel {
                 }
             }).collect(),
             KernelVariety::AbsExponential => domain.iter().map(|a| ( (-((*a as f64).abs())/(2.0*true_width.abs())).exp()*peak_height)).collect(),
-            KernelVariety::Footprint => domain.iter().map(|a| ((-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()-(-((*a as f64).powf(2.0))/(2.0*(MAX_BASE as f64))).exp())*peak_height).collect(),
+            KernelVariety::Footprint => domain.iter().map(|a| ((-((*a as f64).powf(2.0))/(2.0*true_width.powf(2.0))).exp()-(-((*a as f64).powf(2.0))/(2.0*(MAX_BASE as f64))).exp())*peak_height).collect(), */
         };
         Kernel{
             peak_height: peak_height,
@@ -156,8 +156,8 @@ impl Kernel {
     }
     pub fn get_true_width(&self) -> f64 {
         match self.kernel_width {
-            KernelWidth::Narrow => self.peak_width/3.0,
-            KernelWidth::Medium => self.peak_width*2.0/3.0,
+            //KernelWidth::Narrow => self.peak_width/3.0,
+            //KernelWidth::Medium => self.peak_width*2.0/3.0,
             KernelWidth::Wide => self.peak_width,
         }
     }
@@ -975,7 +975,7 @@ impl Background {
     }
 
     pub fn bp_span(&self) -> usize{
-        self.kernel.len()
+        self.kernel[0].len()
     }
 
     pub fn kernel_sd(&self) -> f64 {

@@ -180,7 +180,7 @@ const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
 const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 20, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -739,6 +739,35 @@ impl Base {
 
         largest_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
 
+        let old_second = largest_to_smallest[1].0;
+
+        let space = (old_second-SCORE_THRESH).max(0.01);
+
+        let ratios: [f64; BASE_L-2] = [(largest_to_smallest[2].0-SCORE_THRESH)/space, (largest_to_smallest[3].0-SCORE_THRESH)/space];
+
+        let second_place = rng.gen::<f64>()*SCORE_THRESH;
+
+        new_base[largest_to_smallest[1].1] = second_place;
+
+        let mut new_ratios = [ratios[0]+NORMAL_DIST.sample(rng)*ratio_sd, ratios[1]+NORMAL_DIST.sample(rng)*ratio_sd];
+
+        if new_ratios[0] > 1.0 || new_ratios[0] < 0.0 { 
+            let f = new_ratios[0].floor();
+            new_ratios[0] = if ((f as i8) & 1) == 1 { 1.0+f-new_ratios[0] } else {new_ratios[0] - f}
+        }
+        if new_ratios[1] > 1.0 || new_ratios[1] < 0.0 { 
+            let f = new_ratios[1].floor();
+            new_ratios[1] = if ((f as i8) & 1) == 1 { 1.0+f-new_ratios[1] } else {new_ratios[1] - f}
+        }
+        new_base[largest_to_smallest[2].1] = new_ratios[0]*(second_place-SCORE_THRESH)+SCORE_THRESH;
+        new_base[largest_to_smallest[3].1] = new_ratios[1]*(second_place-SCORE_THRESH)+SCORE_THRESH;
+
+        //new_base[largest_to_smallest[2].1] = rng.gen::<f64>()*(SCORE_THRESH-new_base[largest_to_smallest[1].1])+new_base[largest_to_smallest[1].1];
+        //new_base[largest_to_smallest[3].1] = rng.gen::<f64>()*(SCORE_THRESH-new_base[largest_to_smallest[1].1])+new_base[largest_to_smallest[1].1];
+
+
+
+        /*
         let penalty_diffs: [f64; BASE_L-1] = core::array::from_fn(|i| largest_to_smallest[i+1].0-largest_to_smallest[i].0);
 
         let ratios = [ratio_sd/(-SCORE_THRESH), ratio_sd/(-SCORE_THRESH), small_sd/(-SCORE_THRESH)];
@@ -755,7 +784,8 @@ impl Base {
         }
 
         Some(Base::new_by_reflections(new_base))
-
+*/
+        Some(Base { scores: new_base})
     }
 
     pub fn scaled_base<R: Rng + ?Sized>(&self, scale_sd: f64, rng: &mut R) -> Option<Base> {
@@ -2495,6 +2525,8 @@ impl Motif {
         
         let unit_kernel = data_ref.unit_kernel_ref(self.kernel_width, self.kernel_variety);
 
+        let unit_gaussian = data_ref.unit_kernel_ref(self.kernel_width, KernelVariety::Gaussian);
+
         let mut occupancy_trace: Waveform = data.derive_zero();
 
         let mut actual_kernel: Kernel;
@@ -2518,7 +2550,8 @@ impl Motif {
 
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
                 if bind > thresh {
-                    actual_kernel = unit_kernel*(bind+self.peak_height) ;
+                    let actual_height = bind+self.peak_height;
+                    actual_kernel = if actual_height/self.peak_height > 0.9 {unit_kernel*(actual_height) } else {unit_gaussian*(actual_height)};
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -6094,6 +6127,21 @@ mod tester{
             let dist_1 = base_a.dist_sq(Some(&base_b));
             let dist_2 = base_b.dist_sq(Some(&base_a));
             println!("{base_a:?} {base_b:?} {dist_1} {dist_2}");
+
+            let scores: [f64; BASE_L] = [0.0, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH];
+            let mut base_true_rand = Base { scores: scores};
+
+            for _ in 0..100 {
+                let moved_base = base_true_rand.moved_base(0.01,0.01, &mut rng).unwrap();
+                assert!(base_true_rand.scores.iter().all(|&a| a <= 0.0 && a >= SCORE_THRESH), "failure gen: {:?}", base_true_rand);
+                assert!(moved_base.scores.iter().all(|&a| a <= 0.0 && a >= SCORE_THRESH), "failure gen: {:?}", moved_base);
+                println!("try {:?} base {:?}", base_true_rand, moved_base);
+                base_true_rand = moved_base;
+            }
+
+            let base_e = Base { scores: [0.0, SCORE_THRESH, SCORE_THRESH, SCORE_THRESH]};
+
+            println!("move bad {:?}", base_e.moved_base(0.01,0.01, &mut rng).unwrap());
         }
 
     }
