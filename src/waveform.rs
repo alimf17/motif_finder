@@ -1060,9 +1060,7 @@ impl<'a> Noise<'a> {
     pub fn ad_calc(&self, spacer: usize) -> f64 {
 
         //let time = Instant::now();
-        //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
-        //breaking if we have an EXACT zero coincidentally. 
-        let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect();
+        let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()).collect();
 
         //I don't need to take the absolute value here because I always generate the positive
         //values
@@ -1074,17 +1072,17 @@ impl<'a> Noise<'a> {
         forward.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap()); //Tried having par sort, something is playing nastily with rayon
 
         let n = forward.len();
-        let mut a_d = -(n as f64);
+        let mut a_d = (n as f64)/2.0;
         for (i, &f) in forward.iter().enumerate() {
 
             //We rely on the fact that x >= 0 => cdf(x) >= sf(x)
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
             let pre_sf = self.background.dist.sf(f);
-            let ln_cdf = (-2.0*pre_sf).ln_1p(); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
-            let ln_sf = pre_sf.ln()+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
-            let coeff = ((2*i+1) as f64)/(n as f64);
+            let cdf = self.background.dist.cdf(f); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
+            let ln_sf = pre_sf.ln(); //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
+            let coeff = ((2*n+1-2*i) as f64)/(n as f64);
 
-            a_d -= (ln_cdf * coeff)+(ln_sf * (2.0-coeff));
+            a_d -= coeff*ln_sf+2.0*cdf;
         }
         a_d
     }
@@ -1117,15 +1115,14 @@ impl<'a> Noise<'a> {
 
     }*/
 
-    //My low approximation is screwed up. It's derived from the low tail approximation of the
-    //marsaglia (2004) paper
+    //Note: this is kinda bad for some of the main body, but it's Fine(tm)
     fn low_val(la: f64) -> f64 {
 
-        const C: f64 = PI*PI/8.0;
-        -C/la-2.5*la.ln()+Self::polynomial_sqrt_la(la).ln()
+        //1.5*ln(3/2)-lngamma(1.5) is this magic constant
+        1.7687006706374098+la.ln()/2.0-3.0*la
     }
 
-    fn deriv_low_val(la: f64) -> f64 {
+    /*fn deriv_low_val(la: f64) -> f64 {
 
         const C: f64 = PI*PI/8.0;
         C/(la*la)- 2.5/la + Self::deriv_polynomial_sqrt_la(la)/Self::polynomial_sqrt_la(la)
@@ -1159,30 +1156,23 @@ impl<'a> Noise<'a> {
 
         return p
 
-    }
+    }*/
 
     fn high_val(ha: f64) -> f64 {
 
-        (3.0/(ha*PI)).ln()/2.0-ha
+        -(ha).ln()/2.0-1.835246330265487*ha+0.18593237745127472
 
     }
 
-    fn deriv_high_val(ha: f64) -> f64 {
-        -0.5/ha-1.
-    }
 
     fn weight_fn(a: f64) -> f64 {
-        const A0: f64 = 2.0;
+        //This is about the point of equality for the two functions at the higher end
+        const A0: f64 = 1.4115109709069046;
+
         const K: f64 = 16.0;
         1.0/(1.0+(a/A0).powf(K))
     }
 
-    fn deriv_weight_fn(a: f64) -> f64 {
-        const A0: f64 = 2.0;
-        const K: f64 = 16.0;
-        let aa = a/A0;
-        -(K/A0)*(aa.powf(K-1.)/(1.+aa.powf(K)).powi(2))
-    }
 
     pub fn ad_like(a: f64) -> f64 {
 
@@ -1199,6 +1189,7 @@ impl<'a> Noise<'a> {
         w*lo+(1.0-w)*hi
     }
 
+    /*
     pub fn ad_diff(a: f64) -> f64 {
 
         const H: f64 = 0.0000001;
@@ -1224,7 +1215,7 @@ impl<'a> Noise<'a> {
           //  +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
         w*dl+(1.-w)*dh + dw*(lv-hv)
        
-    }
+    }*/
 
 
 }
