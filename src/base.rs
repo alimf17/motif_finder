@@ -404,7 +404,7 @@ impl Base {
         let max = Self::max(&scores);
 
         for i in 0..scores.len() {
-                scores[i] = base_ceil(scores[i]-max);
+                scores[i] = scores[i]-max;
         }
 
         scores.iter_mut().for_each(|pos| {
@@ -412,6 +412,7 @@ impl Base {
                 *pos = *pos - 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
                 if *pos > 0.0 { *pos = -*pos;}
             }
+            *pos = base_ceil(pos)
         });
 
         Base { scores }
