@@ -29,8 +29,8 @@ fn main() {
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
 
-    let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639826_ArgR_Arg_ln_ratio_1_25_data.bin";
-    let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639826_ArgR_Arg_ln_ratio_1_D_1_trace_from_step_0533999.bin";
+    let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_smooth_normal_bandwidth_1000_25_data.bin";
+    let trace_file =  "/Users/afarhat/Downloads/newLikelihood_20241008_filt_0.00_ArgR_Arg_D_0_trace_from_step_0004140.bin";
 
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
@@ -52,12 +52,53 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     let trace = pre_trace.get_set_trace(&data, &mut rng, None);
-
-
+    println!("{:?}", trace.loan_active());
     mod_save_trace(&trace, &data);
 
-    println!("{:?}", trace.loan_active());
+    let numnull = trace.loan_active().null_peak_scores().len() as isize;
 
+    for id in 0..trace.loan_active().len() {
+        for base_id in 0..trace.loan_active().nth_motif(id).len() {
+            for base_pair in trace.loan_active().nth_motif(id).pwm()[base_id].all_non_best() {
+                for i in 0..2 {
+
+                    println!("PWM {id} Base position {base_id} Bp {:?} sign {}", base_pair, (-1_i32).pow(i));
+    let mut active_set = trace.loan_active().clone();
+
+    let pre_post = active_set.ln_posterior();
+
+    let E = -0.5_f64 + 0.49 * ((-1_i32).pow(i) as f64);
+
+    let (new_set, ln_post) = active_set.manual_change_energy(E , id, base_id, base_pair);
+
+    let num_new_null = new_set.null_peak_scores().len() as isize;
+
+    let weights: [f64; 16] = core::array::from_fn(|a| (a as f64)/16_f64);
+
+    let mut beta: f64 = -f64::INFINITY;
+
+    /*
+    for weight in weights {
+
+        let (_, like) = active_set.manual_change_energy(-weight, id, base_id, base_pair);
+
+        let try_beta = weight*pre_post+(1.0-weight)*ln_post-like;
+
+        beta = beta.max(try_beta);
+    }*/
+
+    println!("old");
+    println!("{:?}", trace.loan_active().nth_motif(id).pwm()[base_id]);
+    println!("new");
+    println!("{:?}", new_set.nth_motif(id).pwm()[base_id]);
+
+    let diff_post = ln_post-pre_post;
+
+    println!("{pre_post} {ln_post} nullnum diff{} like diff {} post diff {} height {} alpha {} beta {} ratio {}", numnull-num_new_null,diff_post+(trace.loan_active().ln_prior()-new_set.ln_prior()), -trace.loan_active().ln_prior()+new_set.ln_prior(), trace.loan_active().nth_motif(id).peak_height(), diff_post, beta, (diff_post)/beta);
+                }
+            }
+        }
+    }
 }
 
 pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
@@ -66,7 +107,7 @@ pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
 
         let locs = data_ref.data().generate_all_locs();
 
-        let signal_file = "/Users/afarhat/Downloads/traceTrialDiff.png";
+        let signal_file = "/Users/afarhat/Downloads/traceTrialDiff20.png";
 
         let plot = BitMapBackend::new(signal_file, (3300, 1500)).into_drawing_area();
         

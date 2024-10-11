@@ -788,6 +788,33 @@ impl Base {
         Some(Base { scores: new_base})
     }
 
+    pub fn move_manual<R: Rng + ?Sized>(&self, add: f64,  rng: &mut R) -> (Base, Bp) {
+
+        let mut new_base = self.clone();
+
+        let change_base = *(self.all_non_best().choose(rng).unwrap());
+
+        println!("changed base: {:?}", change_base);
+
+        new_base[change_base] += add;
+
+        new_base = Base::new_by_reflections(new_base.scores);
+
+
+        (new_base, change_base)
+    }
+    
+    pub fn move_manual_bp(&self, add: f64,  change_base: Bp) -> Base {
+
+        let mut new_base = self.clone();
+
+        new_base[change_base] = add;
+
+        new_base = Base::new_by_reflections(new_base.scores);
+
+        new_base
+    }
+
     pub fn scaled_base<R: Rng + ?Sized>(&self, scale_sd: f64, rng: &mut R) -> Option<Base> {
 
         let mut new_base = self.scores;
@@ -3379,6 +3406,10 @@ impl<'a> MotifSet<'a> {
         self.set.iter().map(|a| a.1.iter().map(|&b| b)).flatten().collect()
     }
 
+    pub fn len(&self) -> usize {
+        self.set.len()
+    }
+
     //This is our prior on the number of motifs
     //We do not justify this with a maximum entropy prior
     //Instead, we only want to consider an additional motif if 
@@ -3500,7 +3531,49 @@ impl<'a> MotifSet<'a> {
         };
     }
 
+    //NOT a monte carlo move
+    pub fn change_energy<R: Rng + ?Sized>(&self, energy: f64, rng: &mut R ) -> (Self, f64, usize, usize, Bp) {
 
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.nth_motif(c_id).clone();
+
+        let base_change = rng.gen_range(0..replacement.pwm.len());
+
+        println!("changed {:?} base {:?}", c_id, base_change);
+
+        let (attempt_new, base_pair) = replacement.pwm[base_change].move_manual(energy, rng);
+
+        replacement.pwm[base_change] = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        (new_set, ln_post, c_id, base_change,base_pair)
+
+
+    }
+    
+    pub fn manual_change_energy(&self, energy: f64, c_id: usize, pos: usize, bp: Bp ) -> (Self, f64) {
+
+        let mut new_set = self.derive_set();
+
+        let mut replacement = new_set.nth_motif(c_id).clone();
+
+        let base_change = pos;
+
+        let attempt_new  = replacement.pwm[base_change].move_manual_bp(energy, bp);
+
+        replacement.pwm[base_change] = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        (new_set, ln_post)
+
+
+    }
 
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
