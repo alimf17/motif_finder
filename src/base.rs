@@ -412,7 +412,7 @@ impl Base {
                 *pos = *pos - 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
                 if *pos > 0.0 { *pos = -*pos;}
             }
-            *pos = base_ceil(pos)
+            *pos = base_ceil(*pos)
         });
 
         Base { scores }
