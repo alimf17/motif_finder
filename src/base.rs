@@ -98,6 +98,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
                                                                  [ -0.25          ,  -0.25           ,  -0.25            ,   0.75          ],
                                                                  [  0.25          ,   0.25           ,   0.25            ,   0.25          ]];
 
+
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
 pub const CAPACITY_FOR_NULL: usize = 200;
@@ -178,9 +179,10 @@ const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
 const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
-const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
+//const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
+const VARIANT_NUMS: [usize; 9] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![20_u32, 0, 20, 20, 20, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 20, 20, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -188,7 +190,8 @@ static VARIANT_CUMULATIVE: Lazy<[usize; 9]> = Lazy::new(|| core::array::from_fn(
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
-                                                   let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
+                                                   //let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
+                                                   let m = (0..1).map(|_| format!("_rook_move.png"));
                                                    let m = m.chain(b.iter().map(|&[a,b]| format!("_motif_scale_ratio_sd_{a}_linear_sd_{b}.png"))); 
                                                    let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
                                                    let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
@@ -243,6 +246,12 @@ static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(100.0, 1.0).unwrap(
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
 const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
 const EXPONENT_WEIGHT_CONST: f64 = 1.4;
+
+//SAFETY: this is 2^(-15), but blah blah Rust doesn't like from_bits or exponents in const contexts
+pub const BASE_RESOLUTION: f64 = unsafe { std::mem::transmute::<u64, f64>(0x3F00000000000000)};
+
+//This is 1/BASE_RESOLUTION
+pub const NUM_BASE_VALUES: usize = 1 << 15;
 
 //BEGIN BASE
 #[repr(usize)]
@@ -313,6 +322,11 @@ impl fmt::Display for Bp {
     }
 }
 
+//This felt like a lot of operations, but because it relies exclusively on constants
+//(a binary power and -1 at that), it's about as fast as a single addition
+pub fn base_ceil(num: f64) -> f64 {
+    SCORE_THRESH*BASE_RESOLUTION*(num/(SCORE_THRESH*BASE_RESOLUTION)).ceil()
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Base {
@@ -376,7 +390,7 @@ impl Base {
         let max = Self::max(&scores);
 
         for i in 0..scores.len() {
-                scores[i] = scores[i]-max;
+                scores[i] = base_ceil(scores[i]-max);
                 if scores[i] < SCORE_THRESH { scores[i] = SCORE_THRESH;}
         }
 
@@ -390,7 +404,7 @@ impl Base {
         let max = Self::max(&scores);
 
         for i in 0..scores.len() {
-                scores[i] = scores[i]-max;
+                scores[i] = base_ceil(scores[i]-max);
         }
 
         scores.iter_mut().for_each(|pos| {
@@ -426,7 +440,7 @@ impl Base {
             for p in props.iter_mut() {*p = (*p/sum)*counts+pseudo;}
         }
 
-        let scores: [f64; BASE_L] = core::array::from_fn(|a| props[a].log2());
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| base_ceil(props[a].log2()));
 
         Ok(Base::new(scores))
     }
@@ -457,7 +471,7 @@ impl Base {
         }*/
 
         let best = rng.gen_range(0..BASE_L);
-        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_CHOOSE_DIST.sample(rng)); 
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_DIST.sample(rng))); 
 
         let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
 
@@ -470,12 +484,16 @@ impl Base {
     }
 
     pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
-        DIRICHLET_PWM.get().expect("no writes expected now").sample(rng)
-    }
+        let mut scores = DIRICHLET_PWM.get().expect("no writes expected now").sample(rng).scores;
+        scores = core::array::from_fn(|a| base_ceil(scores[a]));
+        Base { scores: scores }
+    } 
 
     pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
-        PROPOSE_EXTEND.get().expect("no writes expected now").sample(rng)
+        let mut scores = PROPOSE_EXTEND.get().expect("no writes expected now").sample(rng).scores;
+        scores = core::array::from_fn(|a| base_ceil(scores[a]));
+        Base { scores: scores }
 
     }
 
@@ -828,6 +846,20 @@ impl Base {
 
     }
 
+    pub fn rook_move<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
+
+        let mut new_base = self.clone();
+        //SAFETY: all_non_best() never returns an empty value
+        let change_bp = unsafe { *(self.all_non_best().choose(rng).unwrap_unchecked())};
+
+        let energy: f64 = (rng.gen_range(1..=NUM_BASE_VALUES) as f64)*(SCORE_THRESH*BASE_RESOLUTION);
+
+        new_base[change_bp] = energy;
+
+        new_base
+
+    }
+
     //Panic: if given a point outside of the base terahedron, this function will panic 
     pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
 
@@ -848,7 +880,7 @@ impl Base {
 
         let max = probs[Base::argmax(&probs)];
 
-        let b_form: [f64; BASE_L]  = core::array::from_fn(|a| probs[a]/max); //probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
+        let b_form: [f64; BASE_L]  = core::array::from_fn(|a| base_ceil(probs[a]/max)); //probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
 
         Base{scores : b_form}
 
@@ -4140,6 +4172,27 @@ impl<'a> MotifSet<'a> {
 
     }*/
 
+    fn propose_rook_move<R: Rng + ?Sized>(&self, rng: &mut R)  -> Option<(Self, f64)> {
+
+        let mut new_set = self.derive_set();
+
+        let c_id = rng.gen_range(0..self.set.len());
+
+        let mut replacement = new_set.nth_motif(c_id).clone();
+
+        let base_change = rng.gen_range(0..replacement.pwm.len());
+
+        let attempt_new = replacement.pwm[base_change].rook_move(rng);
+
+        replacement.pwm[base_change] = attempt_new;
+
+        let ln_post = new_set.replace_motif(replacement, c_id);
+
+        Some((new_set, ln_post))
+
+
+    }
+
     fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -4721,13 +4774,20 @@ impl<'a> SetTrace<'a> {
         
         let potential_set_and_accept = match which_move {
         
-            0 =>  {
+            /*0 =>  {
                 let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
                 self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
                 })
-            }, 
+            },*/
+
+            0 =>  {
+                self.active_set.propose_rook_move(rng).map(|(new_mot, modded_ln_like)| { 
+                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
+                    (new_mot, accepted)
+                })  
+            },
             1 =>  {
                 let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
                 self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
@@ -6961,7 +7021,8 @@ mod tester{
 
         let mut failures = 0_usize;
 
-        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move_custom(&mut rng, 0.1, 0.1) { break r; } else {println!("fail base {failures}"); failures+=1;}};
+        //let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_base_move_custom(&mut rng, 0.1, 0.1) { break r; } else {println!("fail base {failures}"); failures+=1;}};
+        let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_rook_move(&mut rng) { break r; } else {println!("fail base {failures}"); failures+=1;}};
 
         println!("failed in single base move {} times before succeeding", failures);
         assert!(single_mot.set.len() == motif_set.set.len());

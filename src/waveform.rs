@@ -43,10 +43,23 @@ use rand::Rng;
 use rand::distributions::{Distribution, Standard};
 use rand::seq::SliceRandom;
 
+//This is about the first point of equality for the fit functions
+//Technically, they cross again later, but based on visual inspection,
+//this is a nothingburger: the low tail just happens to osscilate and
+//the high tail is more accurate throughout that range
+const A0: f64 = 1.545;
+
+
+//This is just a constant which determines how sharp the transition between the low and high tail are while still being analytic
+const K: f64 = 16.0;
+
+//This is a constant that tells us when to stop computing the high tail because it literally doesn't matter, since it would be 2^(-53) times its value at most added to the function
+//It is equal to a round number greater than 2^(53/K). Since I chose K = 16, the cutoff is 10.0
+const HIGH_CUT: f64 = 10.0;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelWidth {
-//    Narrow = 0,
-//    Medium = 1,
+    //    Narrow = 0,
+    //    Medium = 1,
     Wide// = 2,
 }
 
@@ -1077,9 +1090,8 @@ impl<'a> Noise<'a> {
 
             //We rely on the fact that x >= 0 => cdf(x) >= sf(x)
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
-            let pre_sf = self.background.dist.sf(f);
             let cdf = self.background.dist.cdf(f); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
-            let ln_sf = pre_sf.ln(); //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
+            let ln_sf = self.background.dist.ln_sf(f); //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
             let coeff = ((2*n+1-2*i) as f64)/(n as f64);
 
             a_d -= coeff*ln_sf+2.0*cdf;
@@ -1166,10 +1178,6 @@ impl<'a> Noise<'a> {
 
 
     fn weight_fn(a: f64) -> f64 {
-        //This is about the point of equality for the two functions at the higher end
-        const A0: f64 = 1.4115109709069046;
-
-        const K: f64 = 16.0;
         1.0/(1.0+(a/A0).powf(K))
     }
 
@@ -1181,9 +1189,11 @@ impl<'a> Noise<'a> {
         //This is basically caused by cdf implementations that return 0.0.
         //My FastT implementation can't, but the statrs normal DOES. 
         if a == f64::INFINITY { return -f64::INFINITY;} 
+        
+        let hi = Self::high_val(a);
+        if a >= HIGH_CUT {return hi;}
 
         let lo = Self::low_val(a);
-        let hi = Self::high_val(a);
         let w = Self::weight_fn(a);
 
         w*lo+(1.0-w)*hi
