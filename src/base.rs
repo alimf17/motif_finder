@@ -178,15 +178,16 @@ const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
-const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
+//const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
+const NUM_MOVES: usize = 1+BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
 //const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
-const VARIANT_NUMS: [usize; 9] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
+const VARIANT_NUMS: [usize; 10] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 20, 20, 20, 20, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
-static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 9]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
+static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 10]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
-static VARIANT_CUMULATIVE: Lazy<[usize; 9]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+static VARIANT_CUMULATIVE: Lazy<[usize; 10]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
@@ -3860,7 +3861,7 @@ impl<'a> MotifSet<'a> {
 
         let id = rng.gen_range(0..self.set.len());
 
-        let threshold = if self.nth_motif(id).len() < 10 {2} else { self.nth_motif(id).len()/2-2};
+        let threshold = if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
 
         let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold+1);
 
@@ -4784,6 +4785,7 @@ impl<'a> SetTrace<'a> {
             },*/
 
             0 =>  {
+           
                 self.active_set.propose_rook_move(rng).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
@@ -4803,7 +4805,10 @@ impl<'a> SetTrace<'a> {
                         (new_mot, accepted)
                 })
             },
-            3 => self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng),
+            
+            3 => {
+                self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng)
+            },
             //4 => Some((self.active_set.base_leap(self.thermo_beta, rng), true)),
             //5 => Some((self.active_set.secondary_shuffle(self.thermo_beta, rng), true)),
             4 => {
@@ -5452,14 +5457,20 @@ impl MoveTracker {
 
     pub fn give_status(&self) {
         let mut ind: usize = 0;
-            for i in 0..BASE_RATIO_SDS.len(){
+            /*for i in 0..BASE_RATIO_SDS.len(){
                 for j in 0..BASE_LINEAR_SDS.len() {
                     println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                              BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                              (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
                     ind += 1;
                 }
-            }
+            }*/
+
+            println!("Single base sample. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind], 
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
+
             for i in 0..BASE_RATIO_SDS.len(){
                 for j in 0..BASE_LINEAR_SDS.len() {
                     println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
