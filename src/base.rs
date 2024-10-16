@@ -139,7 +139,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //while also not taking more memory than every human brain combined,
                                 //We store many kmers as u64s. 
 
-pub const MAX_TF_NUM: usize = 10;
+pub const MAX_TF_NUM: usize = 11;
 
 pub const MIN_HEIGHT: f64 = 2.0;
 pub const MAX_HEIGHT: f64 = 15.;
@@ -150,7 +150,7 @@ static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::
 
 static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 
-static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
+pub static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
 
 //static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(20.0).unwrap());
 
@@ -241,7 +241,7 @@ static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SP
 
 static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
 
-static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(100.0, 1.0).unwrap());
+static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(5.0, 1.0).unwrap());
 
 //These were determined through numerical experiments and rough fits
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
@@ -474,6 +474,11 @@ impl Base {
 
         let best = rng.gen_range(0..BASE_L);
         let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_DIST.sample(rng))); 
+
+        /*let samps: [f64; BASE_L-1] = core::array::from_fn(|_| {
+            let which = rng.gen::<f64>()+f64::EPSILON;
+            (-0.5*BASE_RESOLUTION+(BASE_RESOLUTION.powi(2)/4.0+(1.0+BASE_RESOLUTION)*which).sqrt())*SCORE_THRESH
+        });*/
 
         let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
 
@@ -3610,7 +3615,7 @@ impl<'a> MotifSet<'a> {
     }
 
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
-    fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+    pub fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
 
         let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng); //There may not always be a place with decent propensities
@@ -3619,7 +3624,7 @@ impl<'a> MotifSet<'a> {
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
         //let h_prior = new_mot.height_prior();
@@ -3631,7 +3636,7 @@ impl<'a> MotifSet<'a> {
 
     //This proposes removing an old motif for the next motif set
     //It does no testing save for checking if removing a motif would produce a possible set
-    fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+    pub fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
         if self.set.len() <= 1 { //We never want to propose a set with no motifs, ever
             None
@@ -3643,7 +3648,11 @@ impl<'a> MotifSet<'a> {
 
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
+            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
+                BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
+            } 
+            else {0.0}).sum::<f64>()).sum::<f64>();
+
 
 
             let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());

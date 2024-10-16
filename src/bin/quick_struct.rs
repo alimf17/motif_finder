@@ -9,6 +9,8 @@ use motif_finder::base::*;
 
 use motif_finder::data_struct::{AllData, AllDataUse};
 
+use statrs::distribution::Continuous;
+
 
 
 
@@ -57,22 +59,39 @@ fn main() {
 
     let numnull = trace.loan_active().null_peak_scores().len() as isize;
 
-    for id in 0..trace.loan_active().len() {
-        for base_id in 0..trace.loan_active().nth_motif(id).len() {
+    let cap = 1000_usize;
+
+    let mut posterior_ratios: Vec<f64> = Vec::with_capacity(cap);
+    let mut evaluated_ratios: Vec<f64> = Vec::with_capacity(cap);
+
+    for _ in 0..cap {
+    //for id in 0..trace.loan_active().len() {
+        /*for base_id in 0..trace.loan_active().nth_motif(id).len() {
             for base_pair in trace.loan_active().nth_motif(id).pwm()[base_id].all_non_best() {
                 for i in 0..2 {
-
-                    println!("PWM {id} Base position {base_id} Bp {:?} sign {}", base_pair, (-1_i32).pow(i));
+*/
+ //                   println!("PWM {id} Base position {base_id} Bp {:?} sign {}", base_pair, (-1_i32).pow(i));
     let mut active_set = trace.loan_active().clone();
 
     let pre_post = active_set.ln_posterior();
 
-    let E = -0.5_f64 + 0.49 * ((-1_i32).pow(i) as f64);
+    //let E = -0.5_f64 + 0.49 * ((-1_i32).pow(i) as f64);
 
-    let (new_set, ln_post) = active_set.manual_change_energy(E , id, base_id, base_pair);
+    //let (new_set, ln_post) = active_set.manual_change_energy(E , id, base_id, base_pair);
+
+    let (mut new_set, scaled_ln_post) = active_set.propose_kill_motif(&mut rng).unwrap();
+
 
     let num_new_null = new_set.null_peak_scores().len() as isize;
 
+    let ln_post = new_set.ln_posterior();
+
+    let heights = vec![0.0001, 0.01, 0.1, 1.0, 2.0, 3_f64, 4_f64];
+
+    let props: Vec<f64> = heights.iter().map(|&a| HEIGHT_PROPOSAL_DIST.ln_pdf(a)).collect();
+
+    println!("{:?}", props);
+    
     let weights: [f64; 16] = core::array::from_fn(|a| (a as f64)/16_f64);
 
     let mut beta: f64 = -f64::INFINITY;
@@ -87,18 +106,25 @@ fn main() {
         beta = beta.max(try_beta);
     }*/
 
-    println!("old");
+    /*println!("old");
     println!("{:?}", trace.loan_active().nth_motif(id).pwm()[base_id]);
     println!("new");
     println!("{:?}", new_set.nth_motif(id).pwm()[base_id]);
+*/
+    posterior_ratios.push(ln_post-pre_post);
+    let diff_post = scaled_ln_post-pre_post;
 
-    let diff_post = ln_post-pre_post;
+    evaluated_ratios.push(diff_post);
 
-    println!("{pre_post} {ln_post} nullnum diff{} like diff {} post diff {} height {} alpha {} beta {} ratio {}", numnull-num_new_null,diff_post+(trace.loan_active().ln_prior()-new_set.ln_prior()), -trace.loan_active().ln_prior()+new_set.ln_prior(), trace.loan_active().nth_motif(id).peak_height(), diff_post, beta, (diff_post)/beta);
-                }
+    println!("{pre_post} {ln_post} {} nullnum diff{} like diff {} post diff {} height {} alpha {} beta {} ratio {}", scaled_ln_post-ln_post, numnull-num_new_null,diff_post+(trace.loan_active().ln_prior()-new_set.ln_prior()), -trace.loan_active().ln_prior()+new_set.ln_prior(), trace.loan_active().nth_motif(0).peak_height(), diff_post, beta, (diff_post)/beta);
+        /*        }
             }
         }
+    }*/
     }
+
+    println!("posterior ratios: \n {:?}", posterior_ratios);
+    println!("evaluated ratios: \n {:?}", evaluated_ratios);
 }
 
 pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
