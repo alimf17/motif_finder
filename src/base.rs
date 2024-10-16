@@ -3750,7 +3750,7 @@ impl<'a> MotifSet<'a> {
             //println!("lock w");
             let new_base = Base::propose_safe_new(rng).make_best(*new_bp);
             //println!("lock 2");
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) - (valid_extends.len() as f64).ln();
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) + ((BASE_L-1) as f64)* BASE_RESOLUTION.ln() - (valid_extends.len() as f64).ln();
             //println!("lock 3");
             new_mot.pwm.push(new_base);
             //println!("lock 4");
@@ -3779,7 +3779,7 @@ impl<'a> MotifSet<'a> {
             //println!("contract 2");
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             //println!("contract 3");
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")))-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
+            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")))+((BASE_L-1) as f64)* BASE_RESOLUTION.ln()-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
