@@ -157,6 +157,18 @@ impl Max<f64> for BackgroundDist {
     }
 }
 
+impl ::rand::distributions::Distribution<f64> for BackgroundDist {
+    fn sample<R: ::rand::Rng + ?Sized>(&self, r: &mut R) -> f64 {
+
+        match self {
+            BackgroundDist::Normal(norm) => norm.sample(r),
+            BackgroundDist::FastT(fast) => fast.sample(r),
+        }
+    }
+}
+
+
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FastT {
     scale: f64,
@@ -240,6 +252,21 @@ pub trait ContinuousLnCDF<K: Float, T: Float>: Min<K> + Max<K> {
     fn ln_sf(&self, x: K) -> T;
 
 
+}
+
+
+//copied from statrs crate
+impl ::rand::distributions::Distribution<f64> for FastT {
+    fn sample<R: ::rand::Rng + ?Sized>(&self, r: &mut R) -> f64 {
+        // based on method 2, section 5 in chapter 9 of L. Devroye's
+        // "Non-Uniform Random Variate Generation"
+        let gamma_dist = statrs::distribution::Gamma::new(0.5 * self.freedom, 0.5).unwrap();
+        let gamma = gamma_dist.sample(r);
+
+        let norm_dist = statrs::distribution::Normal::new(0.0, self.scale * (self.freedom / gamma).sqrt()).unwrap();
+    
+        norm_dist.sample(r)
+    }
 }
 
 impl FastT {

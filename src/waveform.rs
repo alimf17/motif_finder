@@ -60,7 +60,7 @@ const HIGH_CUT: f64 = 10.0;
 pub enum KernelWidth {
     //    Narrow = 0,
     //    Medium = 1,
-    Wide// = 2,
+     Wide// = 2,
 }
 
 impl Distribution<KernelWidth> for Standard {
@@ -995,7 +995,10 @@ impl Background {
         self.kernel[0].peak_width
     }
 
-    
+
+    pub fn sample<R: Rng+?Sized>(&self, rng: &mut R) -> f64 {
+        self.dist.sample(rng)
+    }
 
 }
 
@@ -1090,8 +1093,8 @@ impl<'a> Noise<'a> {
 
             //We rely on the fact that x >= 0 => cdf(x) >= sf(x)
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
-            let cdf = self.background.dist.cdf(f); //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
-            let ln_sf = self.background.dist.ln_sf(f); //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
+            let cdf = 2.0*self.background.dist.cdf(f)-1.0; //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
+            let ln_sf = self.background.dist.ln_sf(f)+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
             let coeff = ((2*n+1-2*i) as f64)/(n as f64);
 
             a_d -= coeff*ln_sf+2.0*cdf;

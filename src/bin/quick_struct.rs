@@ -3,6 +3,7 @@ use std::fs;
 use std::io::Read;
 
 use motif_finder::base::*;
+use motif_finder::waveform::*;
 
 
 
@@ -59,7 +60,7 @@ fn main() {
 
     let numnull = trace.loan_active().null_peak_scores().len() as isize;
 
-    let cap = 1000_usize;
+    let cap = 1_usize;
 
     let mut posterior_ratios: Vec<f64> = Vec::with_capacity(cap);
     let mut evaluated_ratios: Vec<f64> = Vec::with_capacity(cap);
@@ -125,6 +126,29 @@ fn main() {
 
     println!("posterior ratios: \n {:?}", posterior_ratios);
     println!("evaluated ratios: \n {:?}", evaluated_ratios);
+
+    let copy_wave = data.data().clone();
+
+    let copy_noise = copy_wave.produce_noise(&data);
+
+    let mut noise_vec = copy_noise.resids();
+
+    for i in 0..noise_vec.len() { noise_vec[i] = data.background_ref().sample(&mut rng) }
+
+    let new_noise = Noise::new(noise_vec, Vec::new(), data.background_ref());
+
+    println!("noise {:?}", new_noise.resids());
+
+    let parameter = copy_noise.ad_calc(copy_wave.spacer());
+
+    println!("par {parameter}");
+    
+    let parameter = new_noise.ad_calc(copy_wave.spacer());
+
+    println!("par {parameter}");
+
+    println!("like {}", Noise::ad_like(parameter));
+
 }
 
 pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
