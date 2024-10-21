@@ -179,11 +179,11 @@ const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
 //const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
-const NUM_MOVES: usize = 1+BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
+const NUM_MOVES: usize = 1+BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+10;
 //const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
-const VARIANT_NUMS: [usize; 10] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
+const VARIANT_NUMS: [usize; 10] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 5, 20, 40, 40, 20, 10, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 10]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -227,7 +227,7 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 
 pub static BASE_PRIOR: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap());
 
-pub const RJ_MOVE_NAMES: [&str; 4] = ["New motif", "Delete motif", "Extend motif", "Contract Motif"];//, "Split Motif", "Merge Motif"];
+pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "New Motif Alt", "Kill Motif Alt"];//, "Split Motif", "Merge Motif"];
 
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
@@ -242,6 +242,8 @@ static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SP
 static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
 
 static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(5.0, 1.0).unwrap());
+
+static BASE_CHOOSE_ALT: Lazy<Beta> = Lazy::new(|| Beta::new(1.0, 1.0).unwrap());
 
 //These were determined through numerical experiments and rough fits
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
@@ -489,6 +491,21 @@ impl Base {
 
         Base { scores: att}
     }
+    
+    pub fn rand_new_alt<R: Rng + ?Sized>(rng: &mut R) -> Base {
+
+        let best = rng.gen_range(0..BASE_L);
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_ALT.sample(rng))); 
+
+        let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut att =  [0.0_f64; BASE_L];
+
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i]*SCORE_THRESH;});
+
+
+        Base { scores: att}
+    }
 
     pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
         let mut scores = DIRICHLET_PWM.get().expect("no writes expected now").sample(rng).scores;
@@ -507,6 +524,12 @@ impl Base {
     pub fn from_bp<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
         Base::rand_new(rng).make_best(best)
+
+    }
+
+    pub fn from_bp_alt<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
+
+        Base::rand_new_alt(rng).make_best(best)
 
     }
 
@@ -1407,6 +1430,33 @@ impl Motif {
 
 
     }
+    
+    //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
+    pub fn from_motif_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
+        pwm.reserve_exact(MAX_BASE-best_bases.len());
+
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+
+        let sign: f64 = rng.gen();
+        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
+
+        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
+
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+
+        Motif {
+            peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm,
+        }
+
+
+    }
 
     pub fn from_motif_with_height<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
 
@@ -1491,6 +1541,19 @@ impl Motif {
 
 
         Self::from_motif(mot,  rng)
+
+
+    }
+    
+    pub fn rand_mot_alt<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
+
+
+        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+        let mot = seq.random_valid_motif(num_bases, rng);
+
+
+        Self::from_motif_alt(mot,  rng)
 
 
     }
@@ -3616,6 +3679,9 @@ impl<'a> MotifSet<'a> {
 
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     pub fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+        
+        if self.set.len() == MAX_TF_NUM { return None;}
+
         let mut new_set = self.derive_set();
 
         let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng); //There may not always be a place with decent propensities
@@ -3662,6 +3728,58 @@ impl<'a> MotifSet<'a> {
             Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
         }
     }
+    
+    pub fn propose_new_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
+        
+        if self.set.len() == MAX_TF_NUM { return None;}
+
+        let mut new_set = self.derive_set();
+
+        let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng); //There may not always be a place with decent propensities
+
+        //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
+
+        //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
+        //let h_prior = new_mot.height_prior();
+
+        let ln_post = new_set.add_motif(new_mot);
+        //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+        Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
+    }
+
+    //This proposes removing an old motif for the next motif set
+    //It does no testing save for checking if removing a motif would produce a possible set
+    pub fn propose_kill_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+        if self.set.len() <= 1 { //We never want to propose a set with no motifs, ever
+            None
+        } else {
+            let mut new_set = self.derive_set();
+            let rem_id = rng.gen_range(0..self.set.len());
+
+            let new_mot = self.nth_motif(rem_id);
+
+            //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
+
+            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
+                BASE_CHOOSE_ALT.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
+            } 
+            else {0.0}).sum::<f64>()).sum::<f64>();
+
+
+
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());
+
+            let ln_post = new_set.remove_motif(rem_id);
+            //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
+            Some((new_set, ln_post+ln_gen_prob)) //Death moves add the probability of the generation of their deleted variable(s)
+        }
+    }
+    
     
     fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
@@ -3804,6 +3922,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
+            4 => self.propose_new_motif_alt(rng),
+            5 => self.propose_kill_motif_alt(rng),
             //4 => self.propose_split_motif(rng),
             //5 => self.propose_merge_motif(rng),
             _ => unreachable!("How you managed to get here, I do not know. You're somehow trying to make a move run when it doesn't exist.
@@ -3844,6 +3964,8 @@ impl<'a> MotifSet<'a> {
             1 => self.propose_kill_motif(rng),
             2 => self.propose_extend_motif(rng),
             3 => self.propose_contract_motif(rng),
+            4 => self.propose_new_motif_alt(rng),
+            5 => self.propose_kill_motif_alt(rng),
             //4 => self.propose_split_motif(rng),
             //5 => self.propose_merge_motif(rng),
             _ => panic!("You're trying to make a move run when it doesn't exist.")

@@ -60,7 +60,7 @@ fn main() {
 
     let numnull = trace.loan_active().null_peak_scores().len() as isize;
 
-    let cap = 1_usize;
+    let cap = 100_usize;
 
     let mut posterior_ratios: Vec<f64> = Vec::with_capacity(cap);
     let mut evaluated_ratios: Vec<f64> = Vec::with_capacity(cap);

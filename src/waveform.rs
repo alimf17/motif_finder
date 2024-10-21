@@ -58,9 +58,9 @@ const K: f64 = 16.0;
 const HIGH_CUT: f64 = 10.0;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelWidth {
-    //    Narrow = 0,
-    //    Medium = 1,
-     Wide// = 2,
+     Narrow = 0,
+     Medium = 1,
+     Wide = 2,
 }
 
 impl Distribution<KernelWidth> for Standard {
@@ -129,8 +129,8 @@ impl Kernel {
         let domain: Vec<isize> = (-span..(span+1)).collect();
 
         let true_width = match kern_width {
-           // KernelWidth::Narrow => peak_width/3.0,
-           // KernelWidth::Medium => peak_width*2.0/3.0,
+            KernelWidth::Narrow => peak_width/3.0,
+            KernelWidth::Medium => peak_width*2.0/3.0,
             KernelWidth::Wide => peak_width,
         };
 
@@ -169,8 +169,8 @@ impl Kernel {
     }
     pub fn get_true_width(&self) -> f64 {
         match self.kernel_width {
-            //KernelWidth::Narrow => self.peak_width/3.0,
-            //KernelWidth::Medium => self.peak_width*2.0/3.0,
+            KernelWidth::Narrow => self.peak_width/3.0,
+            KernelWidth::Medium => self.peak_width*2.0/3.0,
             KernelWidth::Wide => self.peak_width,
         }
     }
