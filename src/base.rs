@@ -5634,6 +5634,16 @@ impl MoveTracker {
             println!("Contract motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            println!("New motif move alt. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
+
+            println!("Kill motif move alt. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+
+            ind += 1;
 
             /*ind += 1;
             println!("Split motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
