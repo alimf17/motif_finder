@@ -18,6 +18,7 @@ use std::process::*;
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
+use crate::MAX_TF_NUM;
 use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
@@ -139,7 +140,6 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //while also not taking more memory than every human brain combined,
                                 //We store many kmers as u64s. 
 
-pub const MAX_TF_NUM: usize = 11;
 
 pub const MIN_HEIGHT: f64 = 2.0;
 pub const MAX_HEIGHT: f64 = 15.;
@@ -3521,7 +3521,7 @@ impl<'a> MotifSet<'a> {
     //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     //for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
-        if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; }
+        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
         -((self.set.len()-1) as f64)* unsafe{ NECESSARY_MOTIF_IMPROVEMENT } 
     }
 
@@ -3680,7 +3680,9 @@ impl<'a> MotifSet<'a> {
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
     pub fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
-        if self.set.len() == MAX_TF_NUM { return None;}
+
+        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return None; } };
+
 
         let mut new_set = self.derive_set();
 
@@ -3731,7 +3733,7 @@ impl<'a> MotifSet<'a> {
     
     pub fn propose_new_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
-        if self.set.len() == MAX_TF_NUM { return None;}
+        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return None; } };
 
         let mut new_set = self.derive_set();
 
@@ -4520,7 +4522,7 @@ impl StrippedMotifSet {
     pub fn num_motifs(&self) -> usize { self.set.len() }
 
     pub fn motif_num_prior(&self) -> f64 {
-        if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; }
+        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
         -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
 
@@ -4888,7 +4890,7 @@ impl<'a> SetTrace<'a> {
             active_set: active_set,
             all_data_file: all_data_file,
             data_ref: data_ref, 
-            sparse: sparse.unwrap_or(10),
+            sparse: sparse.unwrap_or(30),
             sparse_count: 0_usize,
             thermo_beta: thermo_beta,
         }
@@ -6034,7 +6036,10 @@ impl<'a> TemperSetTraces<'a> {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            //NOTE: yes, I need to add the ln_prior again to the total ln posterior. This accounts for reversible jump discrepancies by accounting for different dimensionalities and the like
+            //      This effect will cancel out for motif sets with the same number of motifs with the same number of BPs per TF and the same heights.
+            //      The Jacobian matrix is just the identity matrix, basically, so I don't care
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior()+a.0.active_set.ln_prior(), b.0.active_set.ln_posterior()+b.0.active_set.ln_prior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
@@ -6051,7 +6056,10 @@ impl<'a> TemperSetTraces<'a> {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            //NOTE: yes, I need to add the ln_prior again to the total ln posterior. This accounts for reversible jump discrepancies by accounting for different dimensionalities and the like
+            //      This effect will cancel out for motif sets with the same number of motifs with the same number of BPs per TF and the same heights.
+            //      The Jacobian matrix is just the identity matrix, basically, so I don't care
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior()+a.0.active_set.ln_prior(), b.0.active_set.ln_posterior()+b.0.active_set.ln_prior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;

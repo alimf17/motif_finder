@@ -1,6 +1,6 @@
 
 
-use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL};
+use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL, MAX_TF_NUM};
 use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use motif_finder::base::*;
 
@@ -96,10 +96,13 @@ fn main() {
         Some(arg) => arg.parse::<f64>().unwrap_or(0.0),
     };
 
+    let max_tf: usize = args.get(13).map(|a| a.parse().ok()).flatten().unwrap_or(5);
+
+    MAX_TF_NUM.set(max_tf).unwrap();
 
     let default_burn: usize = 10;
 
-    let (burn_in_after_swap,value): (usize, bool) = match args.get(13) {
+    let (burn_in_after_swap,value): (usize, bool) = match args.get(14) {
         None => (default_burn, false),
         Some(burn) => match burn.parse::<usize>(){
             Err(_) => (default_burn, false), 
@@ -109,7 +112,7 @@ fn main() {
 
 
 
-    let base_check_index: usize = if value {14} else {13};
+    let base_check_index: usize = if value {15} else {14};
     let mut init_check_index: usize = base_check_index+1;
 
 
