@@ -141,7 +141,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 2.0;
+pub const MIN_HEIGHT: f64 = 2.5;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
