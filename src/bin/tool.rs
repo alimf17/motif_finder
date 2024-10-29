@@ -100,6 +100,9 @@ fn main() {
 
     MAX_TF_NUM.set(max_tf).unwrap();
 
+
+    println!("Max TF num {:?}", MAX_TF_NUM);
+
     let default_burn: usize = 10;
 
     let (burn_in_after_swap,value): (usize, bool) = match args.get(14) {
