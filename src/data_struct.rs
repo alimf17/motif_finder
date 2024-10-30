@@ -563,7 +563,7 @@ impl AllData {
 
         };
         
-        println!("Cut out invalid data");
+        println!("Cut out invalid data {}", start_gaps.len());
 
         if start_gaps.len() > 1 {
             for i in 0..(start_gaps.len()-1) {
@@ -572,6 +572,7 @@ impl AllData {
         }
 
         if remaining && !is_circular {
+            println!("rem");
             first_blocks[num_blocks] = refined_locs_data[start_gaps[start_gaps.len()]..].to_vec(); 
         }
 
@@ -584,6 +585,7 @@ impl AllData {
             lerped_blocks.push(Self::lerp(&block, spacing));
         }
 
+        println!("length cut up {}", lerped_blocks.len());
         //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer, amd are non-empty where they exist
         //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
         //Keep data that has peaks in preparation for being synced with the sequence
