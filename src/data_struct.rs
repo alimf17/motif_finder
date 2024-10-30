@@ -57,12 +57,13 @@ pub struct AllData {
 
 }
 
+#[derive(Clone)]
 pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
     null_seq: &'a NullSequence, 
     start_genome_coordinates: &'a Vec<usize>,
     start_nullbp_coordinates: &'a Vec<usize>,
-    background: &'a Background,
+    background: Background,
     offset: f64,
 }
 
@@ -815,7 +816,7 @@ impl AllData {
         //points, which doesn't happen with the way we defined data_zone
         let background_dist = { 
             let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
-            Background::new(sd, df, (fragment_length as f64)/(2.0*WIDE))
+            Background::new(sd, df, (fragment_length as f64)/(WIDE))//Based on analysis, sd of the kernel is about 1/3 the high fragment length
         } ;
         println!("inferred background dist");
 
@@ -1298,7 +1299,7 @@ impl<'a> AllDataUse<'a> {
                null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
                start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
-               background: reference_struct.background(),
+               background: reference_struct.background().clone(),
                offset: offset,
         })
 
@@ -1314,10 +1315,25 @@ impl<'a> AllDataUse<'a> {
             null_seq: null_seq,
             start_genome_coordinates: start_genome_coordinates,
             start_nullbp_coordinates: start_nullbp_coordinates,
-            background: background,
+            background: background.clone(),
             offset: 0.0,
         }
     }
+
+    //SAFETY: This must uphold the safety invariant that the kernel length
+    //        is SHORTER than the number of bps in any sequence block in 
+    //        the sequence data points to. So in general, REDUCING fragment 
+    //        length is fine, but increasing it can result in UB
+    pub unsafe fn with_new_fragment_length(&self, fragment_length: f64) -> Self {
+
+        let mut new_data = self.clone();
+        let backround_pars = self.background.dist.get_sd_df();
+        let new_background = Background::new(backround_pars.0, backround_pars.1, fragment_length);
+        new_data.background = new_background;
+
+        new_data
+    }
+
 
     pub fn data(&self) -> &Waveform {
         &self.data

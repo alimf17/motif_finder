@@ -3063,6 +3063,24 @@ pub struct MotifSet<'a> {
 
 impl<'a> MotifSet<'a> {
 
+    pub fn manual_set(data_ref: &'a AllDataUse<'a>, mot: Motif) -> Self {
+
+        let signal = mot.generate_waveform(data_ref);
+
+        let nulls = mot.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
+
+        let mut mot_set = MotifSet {
+            set: vec![(mot, nulls)],
+            signal: signal, 
+            ln_post: None,
+            data_ref: data_ref
+        };
+
+        _ = mot_set.ln_posterior();
+
+        mot_set
+    }
+
     pub fn rand_with_one<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
         let mut valid: bool;
@@ -3264,20 +3282,20 @@ impl<'a> MotifSet<'a> {
         mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
     }
 
-    pub fn save_set_trace_and_sub_traces(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
+    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) {
 
         let signal = self.recalced_signal();
 
         let signal_directory: String = format!("{}/{}_new_occupancy",output_dir,file_name);
 
-        signal.save_waveform_to_directory(data_ref, &signal_directory, &BLUE, false);
+        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false);
 
         if self.set.len() > 1 {
             for (i, _mot) in self.set.iter().enumerate() {
 
-                let sub_directory = format!("{}/Motif_{}", signal_directory, i);
-                let sub_signal = self.nth_motif(i).generate_waveform(data_ref);
-                sub_signal.save_waveform_to_directory(data_ref, &sub_directory, &GREEN, true);
+                let signal_name = format!("Motif_{}",i);
+                let sub_signal = self.nth_motif(i).generate_waveform(self.data_ref);
+                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &GREEN, true);
 
             }
         }
@@ -3466,7 +3484,7 @@ impl<'a> MotifSet<'a> {
     //Note: It is technically allowed to have a negative thermodynamic beta
     //      This will invert your mechanics to find your LOWEST likelihood region
     //      Which is bad for most use cases! So be warned. 
-    fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, thermo_beta: f64, rng: &mut R) -> bool {
+    pub fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, thermo_beta: f64, rng: &mut R) -> bool {
 
         let diff_ln_like = (new-old)*thermo_beta;
 
@@ -4307,7 +4325,7 @@ impl<'a> MotifSet<'a> {
 
     }*/
 
-    fn propose_rook_move<R: Rng + ?Sized>(&self, rng: &mut R)  -> Option<(Self, f64)> {
+    pub fn propose_rook_move<R: Rng + ?Sized>(&self, rng: &mut R)  -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
 
@@ -4328,7 +4346,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
+    pub fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
 
@@ -4347,7 +4365,7 @@ impl<'a> MotifSet<'a> {
         Some((new_set, ln_post))
     }
 
-    fn propose_ordered_motif_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
+    pub fn propose_ordered_motif_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
 
         let mut new_set = self.derive_set();
@@ -4370,7 +4388,7 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    fn propose_height_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, height_sd: f64 ) -> Option<(Self, f64)> {
+    pub fn propose_height_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, height_sd: f64 ) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
 
@@ -4388,7 +4406,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    fn propose_scale_base_custom<R: Rng+?Sized>(&self, rng: &mut R, scale_exponent_sd: f64 ) -> Option<(Self, f64)> {
+    pub fn propose_scale_base_custom<R: Rng+?Sized>(&self, rng: &mut R, scale_exponent_sd: f64 ) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
 
@@ -4409,7 +4427,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    fn propose_ordered_scale_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, scale_exponent_sd: f64) -> Option<(Self, f64)> {
+    pub fn propose_ordered_scale_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, scale_exponent_sd: f64) -> Option<(Self, f64)> {
 
 
         let mut new_set = self.derive_set();
@@ -4703,7 +4721,7 @@ impl StrippedMotifSet {
 
         let current_active = &self.reactivate_set(data_ref);
 
-        current_active.save_set_trace_and_sub_traces(data_ref, output_dir, file_name);
+        current_active.save_set_trace_and_sub_traces(output_dir, file_name);
 
 
     }
@@ -5285,7 +5303,7 @@ impl<'a> SetTrace<'a> {
 
         let file_name = format!("{}/{:0>7}", run_name,zeroth_step);
 
-        current_active.save_set_trace_and_sub_traces(self.data_ref, output_dir, &file_name);
+        current_active.save_set_trace_and_sub_traces(output_dir, &file_name);
 
     }
 

@@ -93,6 +93,13 @@ impl BackgroundDist {
             BackgroundDist::FastT(fast) => fast.scale,
         }
     }
+
+    pub fn get_sd_df(&self) -> (f64, f64) {
+        match self {
+            BackgroundDist::Normal(norm) => (unsafe{ norm.std_dev().unwrap_unchecked()}, f64::INFINITY),
+            BackgroundDist::FastT(fast) => (fast.scale, fast.freedom)
+        }
+    }
 }
 
 impl ContinuousCDF<f64, f64> for BackgroundDist {

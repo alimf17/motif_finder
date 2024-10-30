@@ -32,7 +32,8 @@ fn main() {
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
 
-    let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_smooth_normal_bandwidth_1000_25_data.bin";
+    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_TrpR_Trp_lb_ratio_unstranded_minus_mean_25_data.bin";
+    let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_lb_ratio_unstranded_minus_mean_25_data.bin";
     let trace_file =  "/Users/afarhat/Downloads/newLikelihood_20241008_filt_0.00_ArgR_Arg_D_0_trace_from_step_0004140.bin";
 
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
@@ -46,6 +47,62 @@ fn main() {
     let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
 
     let data = AllDataUse::new(&pre_data, 0.0).unwrap();
+
+    let regulon_argR_raw: Vec<[f64; BASE_L]> = vec![
+                                                    //[0.065574, 0.180328, 0.065574, 0.688525],
+													[0.081967, 0.065574, 0.819672, 0.032787],
+													[0.491803, 0.360656, 0.147541, 0.000000],
+													[0.721311, 0.065574, 0.098361, 0.114754],
+													[0.098361, 0.049180, 0.016393, 0.836066],
+													[0.557377, 0.016393, 0.131148, 0.295082],
+													//[0.459016, 0.032787, 0.016393, 0.491803], //This is the official base in regulon for what's below
+													[0.491803, 0.032787, 0.016393, 0.459016],
+													[0.245902, 0.081967, 0.016393, 0.655738], //This is the official base in regulon for what's below
+													//[0.327869, 0.196721, 0.000000, 0.475410], //This is the official base in regulon for what's below
+                                                    [0.196721, 0.475410, 0.000000, 0.327869],
+													[0.901639, 0.000000, 0.016393, 0.081967],
+													[0.081967, 0.065574, 0.000000, 0.852459],
+													//[0.098361, 0.016393, 0.393443, 0.491803], //This is the official base in regulon for what's below
+                                                    [0.098361, 0.016393, 0.491803, 0.393443],
+													[0.016393, 0.885246, 0.016393, 0.081967],
+													[0.754098, 0.081967, 0.049180, 0.114754],
+    ];
+
+
+
+   /*let mut refine_argr: Vec<[f64; BASE_L]> = regulon_argR_raw.iter().map(|a| {
+       let max = *a.iter().max_by(|b,c| b.partial_cmp(c).unwrap()).unwrap();
+       core::array::from_fn(|i| 0.5_f64.max(a[i]/max))
+   }).collect();*/
+
+/*
+    let regulon_TrpR_raw: Vec<[f64; BASE_L]> = vec![
+                        [0.700000, 0.300000, 0.000000, 0.000000],
+						[0.000000, 0.000000, 0.600000, 0.400000],
+						//[0.200000, 0.100000, 0.000000, 0.700000], //This is the official base in regulon for what's below
+						[0.700000, 0.100000, 0.000000, 0.200000],
+						[0.000000, 0.000000, 0.700000, 0.300000],
+						[0.600000, 0.000000, 0.000000, 0.400000],
+						[0.900000, 0.000000, 0.100000, 0.000000],
+						[0.000000, 1.000000, 0.000000, 0.000000],
+						[0.000000, 0.000000, 0.100000, 0.900000],
+						[0.800000, 0.000000, 0.200000, 0.000000],
+						[0.000000, 0.000000, 1.000000, 0.000000],
+						[0.000000, 0.000000, 0.000000, 1.000000],
+						//[0.500000, 0.000000, 0.200000, 0.300000], //This is the official base in regulon for what's below
+						[0.200000, 0.000000, 0.500000, 0.300000],
+						[0.100000, 0.700000, 0.000000, 0.200000],
+						[0.600000, 0.000000, 0.400000, 0.000000],
+    ];*/
+   let mut refine_argr = Motif::raw_pwm(regulon_argR_raw.iter().map(|a| Base::new(core::array::from_fn(|i| a[i].log2()))).collect(), 2.5, KernelWidth::Wide, KernelVariety::Gaussian);
+   //let mut refine_trpr = Motif::raw_pwm(regulon_TrpR_raw.iter().map(|a| Base::new(core::array::from_fn(|i| a[i].log2()))).collect(), 4.0, KernelWidth::Wide, KernelVariety::Gaussian);
+
+//   refine_argr = Motif::raw_pwm(refine_argr.rev_complement(), refine_argr.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);
+
+
+   println!("ref {:?}", refine_argr);
+   //println!("ref {:?}", refine_trpr);
+
 
     buffer.clear();
 
@@ -65,7 +122,56 @@ fn main() {
     let mut posterior_ratios: Vec<f64> = Vec::with_capacity(cap);
     let mut evaluated_ratios: Vec<f64> = Vec::with_capacity(cap);
 
-    for _ in 0..cap {
+    let base_background = data.background_ref().get_sd_df();
+
+    let background_lens = vec![100_f64, 200., 300., 500., 800., 1000., 1500., 2000., 2500., 3000.];
+
+    //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
+    //let datas: Vec<AllDataUse> = background_lens.iter().map(|&a| unsafe{ data.with_new_fragment_length(a) }).collect();
+
+
+    for fragment in background_lens {
+
+        //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
+        let data_use = unsafe{ data.with_new_fragment_length(fragment/(2.0*WIDE)) };
+
+        let mut set = MotifSet::manual_set(&data_use, refine_argr.clone());
+        //let mut set = MotifSet::manual_set(&data_use, refine_trpr.clone());
+
+        let num_moves = 1000_usize;
+        let mut accep = 0_usize;
+
+        /*
+        for _ in 0..num_moves {
+
+    let mut rng = rand::thread_rng();
+            let (try_set, modded) = set.propose_height_move_custom(&mut rng, 0.1).unwrap();
+
+            let accept = MotifSet::accept_test(set.ln_posterior(), modded, 1.0, &mut rng);
+
+            if accept {
+                set = try_set;
+                accep += 1;
+            }
+
+        }
+
+*/
+        println!("Fragment length {fragment} ln LIKELIHOOD {} ln prior {} height {} height prop {}", set.ln_likelihood(), set.ln_prior(), set.nth_motif(0).peak_height(), (accep as f64)/(num_moves as f64));
+
+        //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("TrpR_Fragment_higher_{:04}", fragment).as_str());
+        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_{:04}", fragment).as_str());
+        //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_higher_{:04}", fragment).as_str());
+
+        let (new, _) = set.propose_new_motif(&mut rng).unwrap();
+
+        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_{:04}", fragment).as_str());
+
+   }
+
+
+
+    /*for _ in 0..cap {
     //for id in 0..trace.loan_active().len() {
         /*for base_id in 0..trace.loan_active().nth_motif(id).len() {
             for base_pair in trace.loan_active().nth_motif(id).pwm()[base_id].all_non_best() {
@@ -112,6 +218,7 @@ fn main() {
     println!("new");
     println!("{:?}", new_set.nth_motif(id).pwm()[base_id]);
 */
+    /*
     posterior_ratios.push(ln_post-pre_post);
     let diff_post = scaled_ln_post-pre_post;
 
@@ -121,7 +228,7 @@ fn main() {
         /*        }
             }
         }
-    }*/
+    }*/*/
     }
 
     println!("posterior ratios: \n {:?}", posterior_ratios);
@@ -148,7 +255,7 @@ fn main() {
     println!("par {parameter}");
 
     println!("like {}", Noise::ad_like(parameter));
-
+*/
 }
 
 pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
