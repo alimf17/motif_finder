@@ -225,11 +225,13 @@ impl<'a> Waveform<'a> {
 
         let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
        
-        if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
             println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
-            //println!("{:?} {:?}", &start_data[28910..28919], seq.block_lens());
+        if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
+           // println!("{:?} {:?}", &start_data[28910..28919], seq.block_lens());
             panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
         }
+ 
+        _ = seq.block_lens().iter().enumerate().map(|(i,a)| if(a/spacer < point_lens[i]) { panic!("failed");} else{ true}).collect::<Vec<_>>();
 
 
 
@@ -258,14 +260,14 @@ impl<'a> Waveform<'a> {
           converted to index easily by just dividing by spacer. A bp with a 
           non-integer part in its representation is dropped in the waveform.
          */
-        let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| 1+((a-1)/spacer)).collect();
+        let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| ((a-1)/spacer)).collect();
 
-        let mut size: usize = 0;
+        let mut size: usize = 1;
 
         let mut start_dats: Vec<usize> = Vec::new();
 
         for i in 0..point_lens.len(){
-            start_dats.push(size);
+            start_dats.push(size-1);
             size += point_lens[i];
         }
 
@@ -274,16 +276,8 @@ impl<'a> Waveform<'a> {
 
     pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
        
-        let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| 1+((a-1)/spacer)).collect();
 
-        let mut start_dats: Vec<usize> = Vec::new();
-
-        let mut size: usize = 0;
-
-        for i in 0..point_lens.len(){
-            start_dats.push(size);
-            size += point_lens[i];
-        }
+        let (point_lens, start_dats) = Self::make_dimension_arrays(seq,spacer);
 
         let tot_l: usize = point_lens.iter().sum();
 

@@ -129,6 +129,7 @@ impl AllData {
         let check_initialization = fs::File::open(file_out.as_str());
 
 
+        /*
         match check_initialization {
             Ok(mut try_bincode) => {
                 let mut buffer: Vec<u8> = Vec::new();
@@ -146,7 +147,7 @@ impl AllData {
                 };
             }
             Err(_) => (), //We just want the full preprocessing to try to continue if we get an error opening the file. No warning: it's likely that the caller intended a new file to be generated
-        };
+        };*/
 
         println!("checked if initialized and isn't");
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);
@@ -183,6 +184,7 @@ impl AllData {
             Err(error) => warn!("Something went wrong with the file creation (probably an incorrect file). We can still do inference, but the data set won't be saved. {}", error),
         };
 
+        //panic!("interrupt");
         Ok((full_data, file_out))
 
 
@@ -516,9 +518,9 @@ impl AllData {
         for i in 0..(refined_locs_data.len()-1){
 
             let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
-            println!("jump {} {} {} {} {}", i, refined_locs_data[i+1].0, refined_locs_data[i].0, jump, fragment_length);
             if jump >= 2*(fragment_length)+5 { //We need the times 2 because the ar correlations can be at least that big. We then add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
-                start_gaps.push(i);
+            println!("jump {} {} {} {} {}", i, refined_locs_data[i+1].0, refined_locs_data[i].0, jump, fragment_length);
+                start_gaps.push(i+1);
             } 
         }
 
@@ -547,18 +549,18 @@ impl AllData {
             (0, _) => {remaining = false; refined_locs_data.clone()}, //If there are no gaps, do not cut
             (1, true) => { //If there is only gap in a circle, cut at that gap
                 let (end, start) = refined_locs_data.split_at(start_gaps[0]);
-                let (rewrap, mut get_end) = (start.to_vec(), end.to_vec());
+                let (mut rewrap, mut get_end) = (start.to_vec(), end.to_vec());
                 get_end = get_end.into_iter().map(|(a,b)| (a+sequence_len, b)).collect(); //We want to treat this as overflow for interpolation purposes
-                rewrap.clone().append(&mut get_end);
+                rewrap.append(&mut get_end);
                 remaining = false;
                 rewrap},
             (_, false) => refined_locs_data[0..start_gaps[0]].to_vec(), //If there is a gap on a line, the first fragment should be the beginning to the gap
             (_, true) => { //If there are many gaps on a circle, glom together the beginning and the end fragments
 
-                let rewrap = refined_locs_data[(*start_gaps.last().unwrap())..].to_vec();
+                let mut rewrap = refined_locs_data[(*start_gaps.last().unwrap())..].to_vec();
                 let mut get_end = refined_locs_data[..start_gaps[0]].to_vec();
                 get_end = get_end.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();//We want to treat this as overflow for interpolation purposes
-                rewrap.clone().append(&mut get_end);
+                rewrap.append(&mut get_end);
                 rewrap},
 
         };
@@ -567,6 +569,7 @@ impl AllData {
 
         if start_gaps.len() > 1 {
             for i in 0..(start_gaps.len()-1) {
+                println!("{i} {} {} fb {:?} {:?} sp {}", start_gaps[i], start_gaps[i+1], first_blocks[i][0], (first_blocks[i].last().unwrap().0 % sequence_len, first_blocks[i].last().unwrap().1), first_blocks[i].last().unwrap().0-first_blocks[i][0].0);
                 first_blocks[i+1] = refined_locs_data[start_gaps[i]..start_gaps[i+1]].to_vec();
             }
         }
@@ -645,8 +648,7 @@ impl AllData {
                         }
                         check_ind += 1;
                     }
-
-
+                    
                     data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
                 } else {
                     check_ind += 1;
@@ -861,7 +863,10 @@ impl AllData {
 
             let mut bp_ind = pre_data[i][0].0;
             let bp_prior = bp_ind;
-            let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
+            let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
+            //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
+
+            let min_target_bp = bp_prior + (float_batch.len())*spacing + 1;
 
             //SAFETY: This line, in conjunction with the previous checks on pre_data
             //        necessary to call this function, upholds our safety invariants 
@@ -869,7 +874,6 @@ impl AllData {
             let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
 
             let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
-            let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
 
 
             
@@ -882,6 +886,7 @@ impl AllData {
             }
 
             if no_null_base {
+                println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/4, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                 sequence_blocks.push(bases_batch);
                 starting_coords.push(bp_prior);
                 start_data.append(&mut float_batch);
