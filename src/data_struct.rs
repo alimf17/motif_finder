@@ -332,6 +332,11 @@ impl AllData {
     //      location and set to the fragment length)
     fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background, Vec<Vec<(usize, f64)>>), AllProcessingError> {
        
+        if spacing == 0 {
+            let err = DataProcessError::BadSpacer(BadSpacerError);
+            return Err(err.collect_wrongdoing(possible_sequence_len));
+        }
+
         let att_file = fs::read_to_string(data_file_name);
 
         if att_file.is_err() {
@@ -642,13 +647,22 @@ impl AllData {
 
                     next_ar_ind = block.len().min(check_ind+data_zone+1);
 
+
+
                     while check_ind < next_ar_ind {
                         if poss_peak_vec[check_ind] {
                             next_ar_ind = block.len().min(check_ind+data_zone+1);
                         }
                         check_ind += 1;
                     }
+
+                    if spacing < BASE_L {
                     
+                        next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
+
+                    }
+
+
                     data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
                 } else {
                     check_ind += 1;
@@ -1214,7 +1228,8 @@ impl AllData {
     fn lerp(data: &Vec<(usize, f64)>, spacer: usize ) -> Vec<(usize, f64)> {
 
         let begins = data[0].0;
-        let ends = (*(data.last().unwrap())).0;
+        let mut ends = (*(data.last().unwrap())).0;
+        
 
         let capacity = 1+((ends-begins)/spacer);
 
@@ -1235,6 +1250,7 @@ impl AllData {
 
         for loc in locs_to_fill {
             let mut curr_ind = prev_ind+1; //This should never cause a problem because we constructed locs_to_fill to always fit inside the block
+            
             while data[curr_ind].0 < loc {
                 prev_ind = curr_ind;
                 curr_ind += 1;
@@ -1260,7 +1276,7 @@ impl AllData {
     //from a peak that it can be cut
     fn trim_data_to_fulfill_data_seq_compatibility(data:  &Vec<(usize, f64)>, spacer: usize) -> Vec<(usize, f64)> {
 
-        
+       /* 
         let mut trimmed_data = data.clone();
         if spacer >= BP_PER_U8 {
             return trimmed_data;
@@ -1277,6 +1293,9 @@ impl AllData {
 
         trimmed_data
 
+        */
+    
+        data.clone()
     }
 
 }
@@ -1547,6 +1566,8 @@ pub enum DataProcessError {
     #[error(transparent)]
     BlankFile(#[from] EmptyDataError),
     #[error(transparent)]
+    BadSpacer(#[from] BadSpacerError),
+    #[error(transparent)]
     BadDataFormat(#[from] DataFileBadFormat),
 }
 
@@ -1558,6 +1579,12 @@ impl DataProcessError {
             Err(e) => AllProcessingError::DataAndSequence((self, e))
         }
     }
+}
+
+#[derive(Error, Debug)]
+pub struct BadSpacerError;
+impl std::fmt::Display for BadSpacerError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Spacer must be positive!")}
 }
 
 #[derive(Error, Debug)]
