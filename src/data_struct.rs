@@ -129,7 +129,7 @@ impl AllData {
         let check_initialization = fs::File::open(file_out.as_str());
 
 
-        /*
+        
         match check_initialization {
             Ok(mut try_bincode) => {
                 let mut buffer: Vec<u8> = Vec::new();
@@ -147,7 +147,7 @@ impl AllData {
                 };
             }
             Err(_) => (), //We just want the full preprocessing to try to continue if we get an error opening the file. No warning: it's likely that the caller intended a new file to be generated
-        };*/
+        };
 
         println!("checked if initialized and isn't");
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);

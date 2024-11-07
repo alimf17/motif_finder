@@ -3157,7 +3157,7 @@ impl<'a> MotifSet<'a> {
 
         //This should be infallible, because it never changes and I already validated it once. 
         //If THIS is where you're breaking, this whole function is invalid and needs to be fixed. 
-        let re = Regex::new(r"letter-probability matrix: alength= (\d+)  w= (\d+) nsites= \d+ E= (\d+\.\de[-+]\d\d\d)")?;
+        let re = Regex::new(r"letter-probability matrix: alength= (\d+) w= (\d+)")?;
 
         let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
 
@@ -3175,11 +3175,11 @@ impl<'a> MotifSet<'a> {
             if (motif_len < MIN_BASE) || (motif_len > MAX_BASE) { return Err(Box::new(MemeParseError::InvalidMotifLength{ motif_num: mot_num, captured_length: motif_len })); }
 
 
-            let e_value: f64 = captures[3].parse().unwrap();
+            //let e_value: f64 = captures.get(3).map(|a| a.parse()).flatten().unwrap_or(0.0);
 
-            if (set.len() > 0) && (e_value > e_value_cutoff) {
-                break;
-            }
+            //if (set.len() > 0) && (e_value > e_value_cutoff) {
+            //    break;
+            //}
 
             let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
 
@@ -3189,13 +3189,13 @@ impl<'a> MotifSet<'a> {
                 for j in 0..BASE_L {
                     let Some(prop_str) = line_split.next() else { return Err(Box::new(MemeParseError::ColumnLengthFailure{line_num: line+i+1})); };
                     let Ok(prop)= prop_str.parse::<f64>() else { return Err(Box::new(MemeParseError::FloatParseFailure{line_num: line+i+1}));}; 
-                    scores[j] = prop;
+                    scores[j] = prop.log2();
                 }
 
-                base_vec.push(Base::new_with_pseudo(scores, 10.0, 0.1)?);
+                base_vec.push(Base::new(scores));
             }
 
-            let mut motif = Motif::rand_height_pwm(base_vec, rng);
+            let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
 
             let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
 
@@ -3204,6 +3204,7 @@ impl<'a> MotifSet<'a> {
                 None => (),
             };
 
+            println!("init motif {mot_num} {:?}", motif);
 
             set.push(motif);    
 

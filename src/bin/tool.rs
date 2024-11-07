@@ -129,7 +129,7 @@ fn main() {
     let mut peak_cutoff: Option<f64> = None;
 
     let run_name;
-    peak_cutoff = args[base_check_index].parse().ok();
+    peak_cutoff = args.get(base_check_index).map(|a| a.parse().ok()).flatten();
     run_name = match peak_cutoff{
         None => {
             peak_cutoff = None;
@@ -175,9 +175,9 @@ fn main() {
 
     let mut rng = rand::thread_rng();
 
-    let check: Option<(&str, &str)> = match args.get(init_check_index) { 
+    let check: Option<(&str, &str)> = match args.get(init_check_index-1) { 
         Some(x) => { 
-            match args.get(init_check_index+1) {
+            match args.get(init_check_index) {
                 Some(y) => Some((x.as_str(), y.as_str())), 
                 None => None,
             }
@@ -190,8 +190,10 @@ fn main() {
     let maybe_init = match check {
 
         Some(("meme", meme_file)) => {
+            println!("meme match");
             match MotifSet::set_from_meme(&meme_file , &data_ref, MAX_E_VAL, &mut rng) { 
-                Err(e) => { 
+                Err(e) => {
+                    println!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     eprintln!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None
                 },
@@ -199,6 +201,7 @@ fn main() {
             }
         },
         Some(("json", json_file)) => {
+            println!("json match");
             match MotifSet::set_from_json(&data_ref, json_file, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Json file did not parse. Using random initial condition instead. Reason:\n {}", e);
@@ -208,6 +211,7 @@ fn main() {
             }
         },
         Some(("bincode", bincode_file)) => {
+            println!("bin match");
             match MotifSet::set_from_bincode(&data_ref, bincode_file, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Bincode file did not parse. Using random initial condition instead. Reason:\n {}", e);
