@@ -447,6 +447,20 @@ impl Sequence {
 
     }
 
+    pub fn all_kmers_start_minmer(&self, minmer: u64, len: usize) -> Vec<usize> {
+
+        const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
+
+        self.kmer_dict[len-MIN_BASE].iter().enumerate()
+            .filter(|(_, &b)| ((b & MINMER_MASK) ^ minmer) == 0 ).map(|(a, _)| a).collect::<Vec<usize>>()
+                    
+    }
+
+    pub fn kmer_id_minmer_vec(&self, kmer_ids: &[usize], len: usize) -> Vec<u64> {
+        const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
+
+        kmer_ids.iter().map(|&a| self.kmer_dict[len-MIN_BASE][a] & MINMER_MASK).collect()
+    }
 
     fn u64_kmers_within_hamming(kmer_a: u64, kmer_b: u64, threshold: usize) -> bool {
 

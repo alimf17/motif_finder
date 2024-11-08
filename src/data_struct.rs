@@ -9,9 +9,11 @@ use std::error::Error;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, MAX_BASE};
+use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, MIN_HEIGHT,MotifSet, Motif};
 
 use thiserror::Error;
+
+use rayon::prelude::*;
 
 use statrs::distribution::{Continuous, StudentsT};
 
@@ -37,6 +39,8 @@ use regex::Regex;
 const DATA_SUFFIX: &str = "data.bin";
 const MAD_ADJUSTER: f64 = 1.4826;
 
+const MINMER_NUM: usize = BASE_L.pow(MIN_BASE as u32);
+
 static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
     let mut map: HashMap<char, usize> = HashMap::new();
     for i in 0..BASE_L {
@@ -49,6 +53,7 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
 pub struct AllData {
 
     seq: Sequence,
+    propensities: Vec<f64>,
     null_seq: NullSequence,
     data: WaveformDef,
     start_genome_coordinates: Vec<usize>,
@@ -60,6 +65,7 @@ pub struct AllData {
 #[derive(Clone)]
 pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
+    propensities: &'a Vec<f64>,
     null_seq: &'a NullSequence, 
     start_genome_coordinates: &'a Vec<usize>,
     start_nullbp_coordinates: &'a Vec<usize>,
@@ -168,13 +174,28 @@ impl AllData {
 
         let (seq, null_seq, data, starts, start_nulls) = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing); 
 
-        println!("synchronized fasta and data");
-        let full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background};
 
-        let _ = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
+        println!("synchronized fasta and data");
+        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background};
+
+        let use_data = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
 
         println!("validated data");
         
+        /*let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
+
+            let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian));
+
+            nullless_mot.ln_posterior()
+
+        }).collect();
+
+        let ln_sum_props = propensities.iter().map(|a| a.exp()).sum::<f64>().ln();
+ 
+        let _ = propensities.par_iter_mut().map(|a| *a = *a-ln_sum_props).collect::<Vec<_>>();
+
+        full_data.propensities = propensities;
+*/
         let Ok(buffer) = bincode::serialize(&full_data) else { return Err(AllProcessingError::WayTooBig);};
 
         let poss_fi = fs::File::create(file_out.as_str());
@@ -1322,6 +1343,7 @@ impl<'a> AllDataUse<'a> {
 
         Ok( Self{ 
                data: data,
+               propensities: &reference_struct.propensities,
                null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
                start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
@@ -1335,9 +1357,10 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background) -> Self {
+    pub unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>) -> Self {
         Self{
             data: data,
+            propensities: propensities,
             null_seq: null_seq,
             start_genome_coordinates: start_genome_coordinates,
             start_nullbp_coordinates: start_nullbp_coordinates,
@@ -1393,6 +1416,10 @@ impl<'a> AllDataUse<'a> {
     }
     pub fn offset(&self) -> f64 {
         self.offset
+    }
+
+    pub fn propensities(&self) -> &Vec<f64> {
+        self.propensities
     }
     
     pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {

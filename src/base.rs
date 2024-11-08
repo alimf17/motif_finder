@@ -400,6 +400,18 @@ impl Base {
         Base { scores }
     }
 
+    pub fn max_selective(best_bp: Bp) -> Base {
+
+        let scores:  [ f64; BASE_L] = core::array::from_fn(|_| SCORE_THRESH);
+
+        let mut base = Base { scores };
+
+        base[best_bp] = 0.0;
+
+        base
+
+    }
+
     pub fn new_by_reflections(scores: [f64; BASE_L]) -> Base {
 
         let mut scores = scores;
@@ -1389,6 +1401,22 @@ impl Motif {
 
         m
     }
+
+    pub fn from_motif_max_selective(best_bases: Vec<Bp>, peak_height: f64, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Motif {
+
+
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::max_selective(*a)).collect();
+
+        let m = Motif {
+            peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm,
+        };
+
+        m
+    }
+
 
     pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, rng: &mut R) -> Motif {
 
@@ -3071,6 +3099,22 @@ impl<'a> MotifSet<'a> {
 
         let mut mot_set = MotifSet {
             set: vec![(mot, nulls)],
+            signal: signal, 
+            ln_post: None,
+            data_ref: data_ref
+        };
+
+        _ = mot_set.ln_posterior();
+
+        mot_set
+    }
+    
+    pub fn manual_set_null_free(data_ref: &'a AllDataUse<'a>, mot: Motif) -> Self {
+
+        let signal = mot.generate_waveform(data_ref);
+
+        let mut mot_set = MotifSet {
+            set: vec![(mot, Vec::new())],
             signal: signal, 
             ln_post: None,
             data_ref: data_ref
