@@ -14,6 +14,7 @@ use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, MIN_HEIGHT,MotifSet, Motif};
 use thiserror::Error;
 
 use rayon::prelude::*;
+use rand::Rng;
 
 use statrs::distribution::{Continuous, StudentsT};
 
@@ -182,20 +183,22 @@ impl AllData {
 
         println!("validated data");
         
-        /*let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
+        let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
 
             let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian));
 
-            nullless_mot.ln_posterior()
+            let a = nullless_mot.ln_posterior();
+
+            a.exp()
 
         }).collect();
 
-        let ln_sum_props = propensities.iter().map(|a| a.exp()).sum::<f64>().ln();
- 
-        let _ = propensities.par_iter_mut().map(|a| *a = *a-ln_sum_props).collect::<Vec<_>>();
+        let sum_props = propensities.iter().sum::<f64>();
+
+        let _ = propensities.par_iter_mut().map(|a| *a = *a/sum_props).collect::<Vec<_>>();
 
         full_data.propensities = propensities;
-*/
+
         let Ok(buffer) = bincode::serialize(&full_data) else { return Err(AllProcessingError::WayTooBig);};
 
         let poss_fi = fs::File::create(file_out.as_str());
@@ -1421,7 +1424,22 @@ impl<'a> AllDataUse<'a> {
     pub fn propensities(&self) -> &Vec<f64> {
         self.propensities
     }
-    
+
+    pub fn propensity_minmer(&self, minmer: u64) -> f64 {
+        self.propensities[minmer as usize]
+    }
+
+    pub fn rand_minmer_by_propensity<R: Rng + ?Sized>(&self, rng: &mut R) -> u64 {
+
+        const NUM_MINMERS: usize = (1_usize << ((MIN_BASE * 2)));
+        if self.propensities.len() == 0 {
+            rand::seq::index::sample(rng, NUM_MINMERS, 1).index(0) as u64
+        } else {
+            //SAFETY: 0..self.propensities.len() is always in bounds, since we already made sure that self.propensities.len() > 0
+            rand::seq::index::sample_weighted(rng, self.propensities.len(), |a| unsafe{ *self.propensities.get_unchecked(a)}, 1).expect("All weights need to be positive!").index(0) as u64
+        }
+    }
+
     pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {
 
         let num_forward = self.background.bp_span()/self.data.spacer();

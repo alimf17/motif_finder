@@ -211,7 +211,7 @@ impl<'a> Waveform<'a> {
        This function has an additional constraint for correctness:
 
        The start_data must be organized in accordance with spacer and sequence.
-       In particular, each block must have 1+floor((block length-1)/spacer) data points
+       In particular, each block must have 1+floor((block length-1spacer) data points
        HOWEVER, this initializer only knows TO panic if the total number of data points
        cannot be reconciled with seq and spacer. If you have one too MANY points in one
        block and one too FEW points in another, this will NOT know to break. If you get 
@@ -1561,6 +1561,7 @@ mod tests{
         //This is in units of number of u8s
         let null_sizes: Vec<usize> = vec![78,17];
 
+        println!("pre do {:?}", signal.raw_wave());
         unsafe{
 
         signal.place_peak(&k, 1, 20);
@@ -1568,19 +1569,21 @@ mod tests{
         let t = Instant::now();
         //kmer_propensities is tested by inspection, not asserts, because coming up with a good assert case was hard and I didn't want to
         //It passed the inspections I gave it, though
-        let propens = signal.kmer_propensities(9);
         println!("duration {:?}", t.elapsed());
 
-        //println!("{:?}", signal);
-        println!("{:?}", propens);
+        println!("{:?}", signal.raw_wave());
+        println!("start dats {:?}", signal.start_dats());
+        println!("point lens {:?}", signal.point_lens());
         //Waves are in the correct spot
-        assert!((signal.raw_wave()[21]-2.0).abs() < 1e-6);
+
+        let ind = signal.start_dats()[1]+4;
+        println!("{ind} {:?}", &signal.raw_wave()[15..25]);
+        assert!((signal.raw_wave()[ind]-2.0).abs() < 1e-6);
 
         signal.place_peak(&k, 1, 2);
 
-        println!("after second ins {:?}", signal.kmer_propensities(9));
         //Waves are not contagious
-        assert!(signal.raw_wave()[0..17].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+        assert!(signal.raw_wave()[0..signal.start_dats()[1]].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
 
         //point_lens: Vec<usize>,
         //start_dats: Vec<usize>,
@@ -1593,8 +1596,10 @@ mod tests{
 
         signal.place_peak(&k, 2, 20);
 
+        let ind2 = signal.start_dats()[2]+4;
+
         //Waves are in the correct spot
-        assert!((signal.raw_wave()[35]-2.0).abs() < 1e-6);
+        assert!((signal.raw_wave()[ind2]-2.0).abs() < 1e-6);
 
         //This is a check just for miri
         signal.place_peak(&k, 2, 70);
@@ -1617,7 +1622,9 @@ mod tests{
 
         let invented_null: NullSequence =  NullSequence::new(null_makeup);
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background)};
+        let invented_propensities = vec![1.0/65536_f64; 65536];
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, &invented_propensities)};
 
         let noise: Noise = signal.produce_noise(&data_seq);
 

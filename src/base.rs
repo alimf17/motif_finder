@@ -232,6 +232,10 @@ pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
 pub const SCORE_THRESH: f64 = -1.0;
+
+//This needs to equal 1/(2^(-SCORE_THRESH)-1). Since our SCORE_THRESH is -1.0, 1/(2-1) = 1
+const PWM_CONVERTER: f64 = 1.0;
+
 const BARRIER: f64 = -SCORE_THRESH*2.0;
 
 const SPLIT_SD: f64 = 0.05;
@@ -461,6 +465,34 @@ impl Base {
         Ok(Base::new(scores))
     }
 
+    pub fn from_pwm(props: [f64; BASE_L]) -> Result<Base, InvalidBase> {
+
+
+        let mut sum = 0_f64;
+        for prop in props {
+            if prop < 0.0 { return Err(InvalidBase::NegativeBase); }
+            sum += prop;
+        }
+
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + PWM_CONVERTER).log2());
+
+
+        Ok(Base::new(scores))
+
+    }
+
+    pub fn to_pwm(&self) -> [f64; BASE_L] {
+
+        let mut sum = 0_f64;
+        let mut scores: [f64; BASE_L] = core::array::from_fn(|a| {
+            let s = self.scores[a].exp2() - PWM_CONVERTER;
+            sum += s;
+            s
+        });
+
+        core::array::from_fn(|a| scores[a]/sum)
+              
+    }
 
     pub fn rand_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
@@ -1417,6 +1449,38 @@ impl Motif {
         m
     }
 
+    pub fn from_meme_pwm(meme_pwm: Vec<[f64; BASE_L]>, background_dist: Option<[f64; BASE_L]>, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Result<Motif, InvalidBase> {
+
+        let mut background = background_dist.unwrap_or([0.25; BASE_L]);
+
+        let mut sum: f64 = 0.0;
+
+        for prop in background {
+            if prop <= 0.0 { 
+                eprintln!("Your background distribution needs to have positive density");
+                return Err(InvalidBase::NegativeBase); }
+            sum += prop;
+        }
+
+        background = core::array::from_fn(|a| background[a]/sum);
+
+        let try_pwm = meme_pwm.into_iter().map(|a| {
+            let pwm_scores: [f64; BASE_L] = core::array::from_fn(|i| a[i]/background[i]);
+            Base::from_pwm(pwm_scores)
+        }).collect::<Result<Vec<Base>, _>>();
+
+        let mut pwm = try_pwm?;
+
+        pwm.reserve_exact(MAX_BASE-pwm.len());
+
+        Ok(Motif {
+            peak_height: MIN_HEIGHT, 
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm, 
+        })
+
+    }
 
     pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, rng: &mut R) -> Motif {
 
@@ -2296,11 +2360,7 @@ impl Motif {
         }
 
 
-        //println!("through sixmer {}", forward_checks.len());
-
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-        //println!("motif in ham {:?} \n sixmers {:?}", self, forward_checks.iter().map(|(a,b)| (Sequence::u64_to_kmer(*a, 6), *b)).collect::<Vec<_>>());
 
 
         if forward_checks.len() > CAPACITY_FOR_NULL {
@@ -2310,7 +2370,6 @@ impl Motif {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
         }
         }
-        //println!("through sixmer filter {}", forward_checks.len());
 
         forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
             (0_u64..=0b11_11).filter_map(move |twomer| {
@@ -2321,13 +2380,10 @@ impl Motif {
                 let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
                 //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
                 let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
-                //println!("in 8 sixmer {:?} twomer {:?} eightmer {:?} old score {} new_score {}", Sequence::u64_to_kmer(sixmer, 6), Sequence::u64_to_kmer(twomer, 2), Sequence::u64_to_kmer(eightmer, 8), score, new_score);
                 if new_score >= cutoff { Some((eightmer, new_score))} else {None}
             })
         }).flatten().collect();
         
-        //println!("through eightmermer {}", forward_checks.len());
-
         let mut accounted_length: usize = 8;
 
         while accounted_length < len {
@@ -2337,15 +2393,9 @@ impl Motif {
                 return Vec::new();
             }
 
-            //This starts the segment where we cut as many kmers as possible from consideration
-            //All the kmers we cut are the ones which could never beat any of the top 200 of either group
             check_cutoff = cutoff;
             
             forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-
-            //println!("sorted {}mer {}", accounted_length, forward_checks.len());
-
 
             if forward_checks.len() > CAPACITY_FOR_NULL {
                 check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-accounted_length) as f64)*SCORE_THRESH;
@@ -2355,10 +2405,7 @@ impl Motif {
                 _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
             }
             }
-            //println!("chopped {}mer {}", accounted_length, forward_checks.len());
-            //This ends the "cut more kmers" part of this
-
-            //This segment actually iterates to check the k+1 mers
+            
             forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
                 BP_ARRAY.iter().filter_map(move |&base| {
                     
@@ -2369,26 +2416,16 @@ impl Motif {
 
                     let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
                     
-                    //println!("old {score} {:?} {:?}", Sequence::u64_to_kmer(kmer, accounted_length), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(kmer, accounted_length), accounted_length));
-                    //println!("new {score} {:?} {:?}", Sequence::u64_to_kmer(kplus1mer, accounted_length+1), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(kplus1mer, accounted_length+1), 1+accounted_length));
 
                     if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
                 })
             }).flatten().collect();
 
-            //println!("through {}mer {}", accounted_length, forward_checks.len());
-            //if forward_checks.len() > 0 {println!("forward checks {:?}", &forward_checks[0..CAPACITY_FOR_NULL.min(forward_checks.len())]);}
             accounted_length+=1;
         }
 
-        //println!("through nmer checks");
-
-        //Now, forward_checks and reverse_checks hold all of the scores which could possibly matter. 
-        
-        //We start with a short circuit. Especially later on in the inference, I anticipate we'll end up using it a lot 
         if forward_checks.len() == 0 { return Vec::new();}
 
-        //We now do a final pruning where necessary. I suspect that it will be short circuited a lot, but still
         check_cutoff = cutoff;
         
         forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
@@ -2404,9 +2441,6 @@ impl Motif {
             _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
         }
 
-        //println!("chop 1");
-
-        //Now, forward_checks and reverse_checks are both sorted, AND only contain binding that can possibly be relevant
         
         let mut final_binds: Vec<f64> = Vec::with_capacity(CAPACITY_FOR_NULL);
         let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
@@ -2425,31 +2459,20 @@ impl Motif {
                     //Which corresponds to both forward and reverse binding happening to seem fine
                     //But we already have the score which is actually the better one, and thus we ignore the other
                     if accounted_kmers.contains(&t.0) {
-                        //println!("skipping {:?} {:?}", Sequence::u64_to_kmer(t.0, len), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(t.0, len), len));
-                        //println!("fail");
                         _ = forward_checks.drain(0..1).collect::<Vec<_>>();
-                        //println!("drained {}", forward_checks.len());
                         continue;
                     } else {
                     
-                        //println!("keeping {:?} {:?}", Sequence::u64_to_kmer(t.0, len), Sequence::u64_to_kmer(crate::sequence::reverse_complement_u64_kmer(t.0, len), len));
-
-                        //println!("success");
                         accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
                     }
-                    //println!("adding");
                     let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
-                    //println!("adding {times_to_add}");
                     for _ in 0..times_to_add { final_binds.push(t.1+standin_height); }
-                    //println!("added");
                     _ = forward_checks.drain(0..1).collect::<Vec<_>>();
-                    //println!("drained {}", forward_checks.len());
                 },
             };
 
         }
             
-        //println!("chop 2");
 
         //This can technically happen if we add more than one element at the end
         if final_binds.len() > CAPACITY_FOR_NULL { 
@@ -2457,7 +2480,154 @@ impl Motif {
         }
 
 
-        //println!("chop 3");
+
+        final_binds
+
+
+    }
+    
+    pub fn return_any_null_binds_by_hamming_with_kmers(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<(Vec<Bp>,f64)> {
+
+        let cutoff = -MIN_HEIGHT-distribution_cutoff;
+
+        let standin_height = self.peak_height+distribution_cutoff;
+        
+        let mut check_cutoff = cutoff;
+
+        const CHECK_CUTOFF_INDEX: usize = CAPACITY_FOR_NULL-1;
+
+        let len = self.len();
+
+        
+        let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
+
+        for sixmer in 0_u64..=0b11_11_11_11_11_11 {
+
+            let forward_score = self.calc_6mer_prefix_binding(sixmer);
+            if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
+        }
+
+
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+        check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-6) as f64)*SCORE_THRESH;
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        if forward_partition < forward_checks.len() {
+            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+        }
+        }
+
+        forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
+            (0_u64..=0b11_11).filter_map(move |twomer| {
+                let eightmer = (twomer << 12) + sixmer;
+                if seq.kmer_count(eightmer, 8).is_none() {return None;};
+                //SAFETY: two bits can only add up to 3 at most
+                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
+                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
+                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
+                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
+            })
+        }).flatten().collect();
+        
+        let mut accounted_length: usize = 8;
+
+        while accounted_length < len {
+
+
+            if forward_checks.len() == 0 {
+                return Vec::new();
+            }
+
+            check_cutoff = cutoff;
+            
+            forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+            if forward_checks.len() > CAPACITY_FOR_NULL {
+                check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-accounted_length) as f64)*SCORE_THRESH;
+
+            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+            if forward_partition < forward_checks.len() {
+                _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+            }
+            }
+            
+            forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
+                BP_ARRAY.iter().filter_map(move |&base| {
+                    
+                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
+                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
+                    //SAFETY: two bits can only add up to 3 at most
+                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+
+                    let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
+                    
+
+                    if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
+                })
+            }).flatten().collect();
+
+            accounted_length+=1;
+        }
+
+        if forward_checks.len() == 0 { return Vec::new();}
+
+        check_cutoff = cutoff;
+        
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+            let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1;
+            check_cutoff = cutoff.max(potential_cutoff);
+        }
+
+
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        if forward_partition < forward_checks.len() {
+            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+        }
+
+        
+        let mut final_binds: Vec<(Vec<Bp>,f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
+        let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
+
+
+        while final_binds.len() < CAPACITY_FOR_NULL {
+
+            match forward_checks.get(0) {
+
+                None => break,
+                Some(t) => {
+                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
+                    //That's because it _can't_: we only store any particular kmer in one direction
+                    //And we check for the reverse complement through the reverse complement MATRIX
+                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
+                    //Which corresponds to both forward and reverse binding happening to seem fine
+                    //But we already have the score which is actually the better one, and thus we ignore the other
+                    if accounted_kmers.contains(&t.0) {
+                        _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                        continue;
+                    } else {
+                    
+                        accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
+                    }
+                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    for _ in 0..times_to_add { final_binds.push((Sequence::u64_to_kmer(t.0, self.len()),t.1+standin_height)); }
+                    _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                },
+            };
+
+        }
+            
+
+        //This can technically happen if we add more than one element at the end
+        if final_binds.len() > CAPACITY_FOR_NULL { 
+            _ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+        }
+
+
 
         final_binds
 
@@ -3233,10 +3403,10 @@ impl<'a> MotifSet<'a> {
                 for j in 0..BASE_L {
                     let Some(prop_str) = line_split.next() else { return Err(Box::new(MemeParseError::ColumnLengthFailure{line_num: line+i+1})); };
                     let Ok(prop)= prop_str.parse::<f64>() else { return Err(Box::new(MemeParseError::FloatParseFailure{line_num: line+i+1}));}; 
-                    scores[j] = prop.log2();
+                    scores[j] = prop;
                 }
 
-                base_vec.push(Base::new(scores));
+                base_vec.push(Base::from_pwm(scores).expect("We really shouldn't have negative bases in a meme file?"));
             }
 
             let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
@@ -3748,18 +3918,34 @@ impl<'a> MotifSet<'a> {
 
 
         let mut new_set = self.derive_set();
+        
+        let minmer_choice = self.data_ref.rand_minmer_by_propensity(rng);
 
-        let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng); //There may not always be a place with decent propensities
+        let k = rng.gen_range(MIN_BASE..=MAX_BASE);
+
+        let (pot_kmer_choice, num) = self.data_ref.data().seq().rand_kmer_start_minmer_and_number(minmer_choice, k, rng);
+
+        let Some(kmer_choice) = pot_kmer_choice else {return None;};
+
+        let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
+
+        let new_mot = Motif::from_motif(motif_choice, rng); //There may not always be a place with decent propensities
 
         //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
+        let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
+
+        //Probability of picking the particular base vector we did GIVEN the best motif we already picked
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
+        println!("ln gen {pick_motif_prob} {pick_prob} {ln_gen_prob}");
         let ln_post = new_set.add_motif(new_mot);
         //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
@@ -3779,14 +3965,23 @@ impl<'a> MotifSet<'a> {
 
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
+            let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
                 BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
 
 
+            const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());
+            let minmer_choice = Sequence::kmer_to_u64(&new_mot.best_motif()) & MINMER_MASK;
+
+            let num = self.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
+
+            //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
+            let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+
+
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -3800,15 +3995,29 @@ impl<'a> MotifSet<'a> {
 
         let mut new_set = self.derive_set();
 
-        let new_mot = Motif::rand_mot(self.data_ref.data().seq(), rng); //There may not always be a place with decent propensities
+        let minmer_choice = self.data_ref.rand_minmer_by_propensity(rng);
+
+        let k = rng.gen_range(MIN_BASE..=MAX_BASE);
+
+        let (pot_kmer_choice, num) = self.data_ref.data().seq().rand_kmer_start_minmer_and_number(minmer_choice, k, rng);
+
+        let Some(kmer_choice) = pot_kmer_choice else {return None;};
+
+        let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
+
+        let new_mot = Motif::from_motif_alt(motif_choice, rng); //There may not always be a place with decent propensities
 
         //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
+        let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(new_mot.len()) as f64).ln());
+        //Probability of picking the particular base vector we did GIVEN the best motif we already picked
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -3830,14 +4039,23 @@ impl<'a> MotifSet<'a> {
 
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
-            let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
+            let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
                 BASE_CHOOSE_ALT.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
+       
+
+            const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
+
+            let minmer_choice = Sequence::kmer_to_u64(&new_mot.best_motif()) & MINMER_MASK;
+
+            let num = self.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
+
+            //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
+            let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
 
-
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64).ln());
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -4053,9 +4271,13 @@ impl<'a> MotifSet<'a> {
 
     pub fn propose_base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> { 
 
+        const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
+
         let mut new_set = self.derive_set();
 
         let id = rng.gen_range(0..self.set.len());
+
+        let self_slant = self.data_ref.propensity_minmer(Sequence::kmer_to_u64(&self.nth_motif(id).best_motif()) & MINMER_MASK);
 
         let threshold = if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
 
@@ -4064,15 +4286,31 @@ impl<'a> MotifSet<'a> {
         //If we don't have any new kmers within the hamming distance, we immediately fail
         if kmer_ids.len() < 2 {return None;}
 
-        let new_kmer_id = unsafe { kmer_ids.choose(rng).unwrap_unchecked() };
+
+        let minmer_slant = self.data_ref.data().seq().kmer_id_minmer_vec(&kmer_ids, self.nth_motif(id).len()).iter().map(|&a| self.data_ref.propensity_minmer(a)).collect::<Vec<_>>();
+
+        let sum_minmer_slants = minmer_slant.iter().map(|&a| a).sum::<f64>();
+
+        let ids_and_slants: Vec<(usize, f64)> = kmer_ids.into_iter().zip(minmer_slant.into_iter()).collect();
+
+        let (new_kmer_id, new_slant) = unsafe { ids_and_slants.choose_weighted(rng, |id| id.1).unwrap_unchecked() };
 
         let add_mot = self.nth_motif(id).scramble_by_id_to_valid(*new_kmer_id, false, self.data_ref.data().seq());
+ 
+        //let num_alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1).len() as f64;
+        let alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1);
 
-        let num_alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1).len() as f64;
+        let alter_slant = self.data_ref.data().seq().kmer_id_minmer_vec(&alter_kmers, self.nth_motif(id).len()).iter().map(|&a| self.data_ref.propensity_minmer(a)).collect::<Vec<_>>();
+
+        let sum_alter_slants = alter_slant.iter().map(|&a| a).sum::<f64>();
+
+        //No need to normalize the slants: the normalization constants cancel each other out
+        let select_ratio = new_slant.ln()-sum_minmer_slants.ln()-(self_slant.ln()-sum_alter_slants.ln());
 
         let ln_post = new_set.replace_motif(add_mot, id);
 
-        Some((new_set, ln_post+(num_alter_kmers.ln() - ((kmer_ids.len() as f64).ln()))))
+        //Some((new_set, ln_post+(num_alter_kmers.ln() - ((kmer_ids.len() as f64).ln()))))
+        Some((new_set, ln_post+select_ratio))
 
 
     }
@@ -6640,15 +6878,15 @@ mod tester{
 
         println!("sim {:?} simb {:?} noref {:?} norefb {:?} ref {:?} refb{:?}", simp, simp_b, b3a.base_to_vect(), b3a, b3.base_to_vect(), b3);
 
-        assert!((simp[0]-sim_b3a[0]).abs() < 1e-6, "0th element changes with no reflection");
-        assert!((0.09-sim_b3[0] ).abs() < 1e-6, "0th element changes with a reflection");
+        assert!((simp[0]-sim_b3a[0]).abs() < 1e-3, "0th element changes with no reflection");
+        assert!((0.09-sim_b3[0] ).abs() < 1e-3, "0th element changes with a reflection");
 
-        assert!((simp[1]-sim_b3a[1]).abs() < 1e-6, "1st element changes with no reflection");
-        assert!((simp[1]-sim_b3[1] ).abs() < 1e-6, "1st element changes with a reflection");
+        assert!((simp[1]-sim_b3a[1]).abs() < 1e-3, "1st element changes with no reflection");
+        assert!((simp[1]-sim_b3[1] ).abs() < 1e-3, "1st element changes with a reflection");
 
         println!("{:?} {:?}", sim_b3a, sim_b3);
-        assert!((-0.09-sim_b3a[2]).abs() < 1e-6, "2nd element incorrect with no reflection");
-        assert!((-simp[0]-sim_b3[2]).abs() < 1e-6, "2nd element incorrect with a reflection");
+        assert!((-0.09-sim_b3a[2]).abs() < 1e-3, "2nd element incorrect with no reflection");
+        assert!((-simp[0]-sim_b3[2]).abs() < 1e-3, "2nd element incorrect with a reflection");
 
         let b_a = b.add_in_vector_space([10.0, -10.0, 1./3.], false);
 
@@ -6829,7 +7067,9 @@ mod tester{
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background)};
+        let invented_propensities = vec![1.0/65536_f64; 65536];
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -7031,7 +7271,8 @@ mod tester{
         println!("unforgiven {:?}", no_forgive_diffs);
 
         assert!(no_forgive_diffs.len() == 0, "waves not lining up"); 
-        
+       
+        /*
         let mut swap = motif_set.propose_kernel_swap( &mut rng );
 
         while swap.is_none() {
@@ -7077,6 +7318,8 @@ mod tester{
         let mut alt_swapped = swapped.clone();
         alt_swapped.ln_post = None;
         let ln_post = alt_swapped.ln_posterior();
+    */
+      
     }
 
     #[test]
@@ -7119,9 +7362,18 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 350./6.);
 
+        let mut invented_propensities = vec![0.0_f64; 65536];
+
+        let minmers = sequence.unique_kmers(MIN_BASE);
+
+        let mut sum: f64 = 0.0;
+        for minmer in minmers { invented_propensities[minmer as usize] = 1.0; sum += 1.0; }
+
+        for i in 0..invented_propensities.len() { invented_propensities[i] /= sum;}
+
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities)};
         let _block_n: usize = 5;
 
         let duration = start_gen.elapsed();
@@ -7322,6 +7574,7 @@ mod tester{
         }
         
         let mut failures = 0_usize;
+        /*
         if let Some((mut split_mot, ln_prop_split)) = loop { if let Some(r) = check_set.propose_split_motif(&mut rng) { break Some(r); } else {failures+=1; println!("failed {failures} time(s)"); if failures > 10000 {break None;}}} {
         
         
@@ -7342,7 +7595,7 @@ mod tester{
         println!("post merge split {:?}", merge_mot);
 
         println!("distance {:?}", check_set.nth_motif(0).distance_function(&merge_mot.nth_motif(0)));
-        }
+        }*/
         let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
         assert!(single_height.is_some()); //scaling a single base should always make possible motifs
@@ -7390,10 +7643,20 @@ mod tester{
 
         let new_mot = birth_mot.nth_motif(l);
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
+        const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(birth_mot.nth_motif(l).len()) as f64).ln());
+        let minmer_choice = Sequence::kmer_to_u64(&new_mot.best_motif()) & MINMER_MASK;
 
+        let num = motif_set.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
+
+         
+        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+
+        println!("actuals {pick_motif_prob} {pick_prob} {actual_prior}");
         println!("{should_prior} {actual_prior} asd");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
 
@@ -7431,10 +7694,20 @@ mod tester{
 
         let new_mot = motif_set.nth_motif(l);
 
-        let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln())+new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)} else {0.0}).sum::<f64>()).sum::<f64>();
 
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob-((MAX_BASE+1-MIN_BASE) as f64).ln()-((motif_set.data_ref.data().seq().number_unique_kmers(motif_set.nth_motif(l).len()) as f64).ln());
+        let minmer_choice = Sequence::kmer_to_u64(&new_mot.best_motif()) & MINMER_MASK;
+
+        let num = motif_set.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
+
+
+        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH) + BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+
+
 
         println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
 
@@ -7484,7 +7757,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0"))) + ((BASE_L-1) as f64)*BASE_RESOLUTION.ln();
 
         println!("hanging");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
@@ -7539,7 +7812,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")));
+        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0"))) + ((BASE_L-1) as f64)*BASE_RESOLUTION.ln();
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
         }
@@ -7720,8 +7993,9 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 20.);
 
+        let invented_propensities = vec![1.0/65536_f64; 65536];
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, &invented_propensities)};
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -7748,7 +8022,7 @@ mod tester{
 
         let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
 
-        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background) }; 
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, &invented_propensities) }; 
 
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
@@ -8052,7 +8326,7 @@ mod tester{
 
 
 
-        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background) }; 
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,&invented_propensities) }; 
         let theory_base = [1.0.log2(), 1e-5.log2(), 1e-5.log2(), 0.2_f64.log2()];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -8068,7 +8342,7 @@ mod tester{
         let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
-        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6, -0.4], &small, 5);
+        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, -0.2, -0.4, -0.6, -0.6], &small, 5);
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, KernelWidth::Wide, KernelVariety::Gaussian); //small

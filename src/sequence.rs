@@ -456,6 +456,14 @@ impl Sequence {
                     
     }
 
+    //Returns the kmer id in position 0 if possible and the number of possible kmers in position 1
+    //NOTE: Yes, it is possible to have a minmer that does not have a valid extension to a kmer: 
+    //      Imagine a minmer that only appears once near the end of a sequence block
+    pub fn rand_kmer_start_minmer_and_number<R: Rng + ?Sized>(&self, minmer: u64, len: usize, rng: &mut R) -> (Option<usize>, usize) {
+        let samp = self.all_kmers_start_minmer(minmer, len);
+        (samp.choose(rng).copied(), samp.len())
+    }
+
     pub fn kmer_id_minmer_vec(&self, kmer_ids: &[usize], len: usize) -> Vec<u64> {
         const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
 

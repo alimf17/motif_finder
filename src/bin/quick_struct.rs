@@ -39,14 +39,6 @@ fn main() {
     //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
     //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
 
-    let mut try_bincode = fs::File::open(file_out).unwrap();
-    let mut try_bin_trace = fs::File::open(trace_file).unwrap();
-
-    let mut buffer: Vec<u8> = Vec::new();
-    let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
-    let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
-
-    let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
     let regulon_argR_raw: Vec<[f64; BASE_L]> = vec![
                                                     //[0.065574, 0.180328, 0.065574, 0.688525],
@@ -103,6 +95,14 @@ fn main() {
    println!("ref {:?}", refine_argr);
    //println!("ref {:?}", refine_trpr);
 
+    let mut try_bincode = fs::File::open(file_out).unwrap();
+    let mut try_bin_trace = fs::File::open(trace_file).unwrap();
+
+    let mut buffer: Vec<u8> = Vec::new();
+    let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
+    let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
+
+    let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
     buffer.clear();
 
