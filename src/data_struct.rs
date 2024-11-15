@@ -182,20 +182,33 @@ impl AllData {
         let use_data = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
 
         println!("validated data");
-        
+       
+        let mut max = -f64::INFINITY;
+
         let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
 
             let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian));
 
+            
+
             let a = nullless_mot.ln_posterior();
 
-            a.exp()
+
+            a/10000.0
 
         }).collect();
+
+
+        let mut max = -f64::INFINITY;
+        for i in 0..propensities.len() { if propensities[i] > max { max = propensities[i]; } }
+        for i in 0..propensities.len() { propensities[i] = (propensities[i]-max).exp(); }
 
         let sum_props = propensities.iter().sum::<f64>();
 
         let _ = propensities.par_iter_mut().map(|a| *a = *a/sum_props).collect::<Vec<_>>();
+
+        println!("propensities {:?}", propensities);
+        println!("{:?}", propensities.len());
 
         full_data.propensities = propensities;
 

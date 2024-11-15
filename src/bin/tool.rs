@@ -158,7 +158,7 @@ fn main() {
 
     let data_ref = AllDataUse::new(&total_data, filter).unwrap();
 
-    println!("alldata use");
+    println!("alldata use {:?}", data_ref.propensities());
 
     let _data = data_ref.data();
 

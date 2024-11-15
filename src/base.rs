@@ -886,7 +886,6 @@ impl Base {
 
         let change_base = *(self.all_non_best().choose(rng).unwrap());
 
-        println!("changed base: {:?}", change_base);
 
         new_base[change_base] += add;
 
@@ -3878,7 +3877,6 @@ impl<'a> MotifSet<'a> {
 
         let base_change = rng.gen_range(0..replacement.pwm.len());
 
-        println!("changed {:?} base {:?}", c_id, base_change);
 
         let (attempt_new, base_pair) = replacement.pwm[base_change].move_manual(energy, rng);
 
@@ -3945,7 +3943,6 @@ impl<'a> MotifSet<'a> {
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
-        println!("ln gen {pick_motif_prob} {pick_prob} {ln_gen_prob}");
         let ln_post = new_set.add_motif(new_mot);
         //println!("propose birth: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, h_prior, pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
@@ -4287,13 +4284,19 @@ impl<'a> MotifSet<'a> {
         if kmer_ids.len() < 2 {return None;}
 
 
-        let minmer_slant = self.data_ref.data().seq().kmer_id_minmer_vec(&kmer_ids, self.nth_motif(id).len()).iter().map(|&a| self.data_ref.propensity_minmer(a)).collect::<Vec<_>>();
+        let mut minmer_slant = self.data_ref.data().seq().kmer_id_minmer_vec(&kmer_ids, self.nth_motif(id).len()).iter().map(|&a| self.data_ref.propensity_minmer(a)).collect::<Vec<_>>();
 
-        let sum_minmer_slants = minmer_slant.iter().map(|&a| a).sum::<f64>();
+        let mut sum_minmer_slants = minmer_slant.iter().map(|&a| a).sum::<f64>();
+
+        if sum_minmer_slants == 0.0 {
+
+            minmer_slant = vec![1.0/(minmer_slant.len() as f64);minmer_slant.len()];
+            sum_minmer_slants = 1.0;
+        }
 
         let ids_and_slants: Vec<(usize, f64)> = kmer_ids.into_iter().zip(minmer_slant.into_iter()).collect();
 
-        let (new_kmer_id, new_slant) = unsafe { ids_and_slants.choose_weighted(rng, |id| id.1).unwrap_unchecked() };
+        let (new_kmer_id, new_slant) = unsafe { ids_and_slants.choose_weighted(rng, |id| id.1).unwrap() };
 
         let add_mot = self.nth_motif(id).scramble_by_id_to_valid(*new_kmer_id, false, self.data_ref.data().seq());
  
