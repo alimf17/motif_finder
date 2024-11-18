@@ -168,7 +168,7 @@ fn main() {
     let maybe_init = match check {
 
         Some(("meme", meme_file)) => {
-            match MotifSet::set_from_meme(&meme_file , &data_ref, MAX_E_VAL, &mut rng) { 
+            match MotifSet::set_from_meme(&meme_file , &data_ref, MAX_E_VAL, true, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None

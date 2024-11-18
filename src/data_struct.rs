@@ -11,6 +11,7 @@ use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel, KernelWid
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
 use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, MIN_HEIGHT,MotifSet, Motif};
 
+
 use thiserror::Error;
 
 use rayon::prelude::*;

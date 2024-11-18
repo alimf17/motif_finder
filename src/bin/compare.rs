@@ -17,8 +17,8 @@ use statrs::distribution::Continuous;
 
 
 
-
-//use rand::prelude::*;
+ 
+use rand::prelude::*;
 
 
 
@@ -29,76 +29,14 @@ use plotters::prelude::full_palette::ORANGE;
 
 fn main() {
 
-    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_GSM639836_TrpR_Trp_ln_ratio_25_data.bin";
-    //let trace_file =  "/Users/afarhat/Downloads/removedHMC_20240407_GSM639836_TrpR_Trp_ln_ratio_D_1_trace_from_step_0999999.bin";
 
-    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_TrpR_Trp_lb_ratio_unstranded_minus_mean_25_data.bin";
-    let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_lb_ratio_unstranded_minus_mean_25_data.bin";
-    let trace_file =  "/Users/afarhat/Downloads/newLikelihood_20241008_filt_0.00_ArgR_Arg_D_0_trace_from_step_0004140.bin";
+    let args: Vec<String> = std::env::args().collect();
 
-    //let file_out = "/Users/afarhat/Downloads/NC_000913.2_ArgR_Arg_TrpR_Trp_ln_ratio_25_data.bin";
-    //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
+    let file_out = args[1].clone();
 
-
-    let regulon_argR_raw: Vec<[f64; BASE_L]> = vec![
-    
-         [-0.6641540527, -0.5166015625, -0.6641540527, 0.0000000000],
-         [-0.7500305176, -0.7720642090, 0.0000000000, -0.8171386719],
-         //this is the non permuted version
-         //[0.0000000000, -0.1327819824, -0.3785400391, -0.5770874023],
-         [-0.1327819824, 0.0000000000, -0.3785400391, -0.5770874023],
-         [0.0000000000, -0.6918945312, -0.6481628418, -0.6268005371],
-         [-0.7412719727, -0.8073730469, -0.8531799316, 0.0000000000],
-         //this is the non permuted version 
-         //[0.0000000000, -0.4613342285, -0.2660827637, -0.6156616211],
-         [-0.6156616211, -0.4613342285, -0.2660827637, 0.0000000000],
-         [-0.0320739746, -0.5305175781, -0.5536193848, 0.0000000000],
-         [-0.4103088379, -0.6138305664, -0.7040405273, 0.0000000000],
-         [-0.1520080566, -0.3020324707, -0.5611267090, 0.0000000000],
-         [0.0000000000, -0.9272460938, -0.9038085938, -0.8135986328],
-         [-0.7757873535, -0.7978210449, -0.8894653320, 0.0000000000],
-         [-0.4417114258, -0.5536193848, -0.0984191895, 0.0000000000],
-         [-0.8912963867, 0.0000000000, -0.8912963867, -0.8011169434]
-
-    ];
-
-
-
-   /*let mut refine_argr: Vec<[f64; BASE_L]> = regulon_argR_raw.iter().map(|a| {
-       let max = *a.iter().max_by(|b,c| b.partial_cmp(c).unwrap()).unwrap();
-       core::array::from_fn(|i| 0.5_f64.max(a[i]/max))
-   }).collect();*/
-
-/*
-    let regulon_TrpR_raw: Vec<[f64; BASE_L]> = vec![
-                        [0.700000, 0.300000, 0.000000, 0.000000],
-						[0.000000, 0.000000, 0.600000, 0.400000],
-						//[0.200000, 0.100000, 0.000000, 0.700000], //This is the official base in regulon for what's below
-						[0.700000, 0.100000, 0.000000, 0.200000],
-						[0.000000, 0.000000, 0.700000, 0.300000],
-						[0.600000, 0.000000, 0.000000, 0.400000],
-						[0.900000, 0.000000, 0.100000, 0.000000],
-						[0.000000, 1.000000, 0.000000, 0.000000],
-						[0.000000, 0.000000, 0.100000, 0.900000],
-						[0.800000, 0.000000, 0.200000, 0.000000],
-						[0.000000, 0.000000, 1.000000, 0.000000],
-						[0.000000, 0.000000, 0.000000, 1.000000],
-						//[0.500000, 0.000000, 0.200000, 0.300000], //This is the official base in regulon for what's below
-						[0.200000, 0.000000, 0.500000, 0.300000],
-						[0.100000, 0.700000, 0.000000, 0.200000],
-						[0.600000, 0.000000, 0.400000, 0.000000],
-    ];*/
-   let mut refine_argr = Motif::raw_pwm(regulon_argR_raw.iter().map(|&a| Base::new(a)).collect(), 2.5, KernelWidth::Wide, KernelVariety::Gaussian);
-   //let mut refine_trpr = Motif::raw_pwm(regulon_TrpR_raw.iter().map(|a| Base::new(core::array::from_fn(|i| a[i].log2()))).collect(), 4.0, KernelWidth::Wide, KernelVariety::Gaussian);
-
-//   refine_argr = Motif::raw_pwm(refine_argr.rev_complement(), refine_argr.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);
-
-
-   println!("ref {:?}", refine_argr);
-   //println!("ref {:?}", refine_trpr);
+    let motif_set_meme = args[2].clone();
 
     let mut try_bincode = fs::File::open(file_out).unwrap();
-    let mut try_bin_trace = fs::File::open(trace_file).unwrap();
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
@@ -108,70 +46,26 @@ fn main() {
 
     buffer.clear();
 
-    let _ = try_bin_trace.read_to_end(&mut buffer);
-    let pre_trace: SetTraceDef = bincode::deserialize(&buffer).unwrap();
-
     let mut rng = rand::thread_rng();
 
-    let trace = pre_trace.get_set_trace(&data, &mut rng, None);
-    println!("{:?}", trace.loan_active());
-    mod_save_trace(&trace, &data);
+    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data, f64::INFINITY, false, &mut rng).unwrap();
 
-    let numnull = trace.loan_active().null_peak_scores().len() as isize;
+    let mut rmse = f64::INFINITY;
 
-    let cap = 100_usize;
+    let len = mot_set.len();
 
-    let mut posterior_ratios: Vec<f64> = Vec::with_capacity(cap);
-    let mut evaluated_ratios: Vec<f64> = Vec::with_capacity(cap);
+    for id in 0..len {
+        (mot_set, rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
+    }
 
-    let base_background = data.background_ref().get_sd_df();
+    println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
 
-    let background_lens = vec![100_f64, 200., 300., 500., 800., 1000., 1500., 2000., 2500., 3000.];
+    let wave_file = format!("{}_waves", motif_set_meme);
+
+    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
 
     //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
     //let datas: Vec<AllDataUse> = background_lens.iter().map(|&a| unsafe{ data.with_new_fragment_length(a) }).collect();
-
-
-    for fragment in background_lens {
-
-        //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
-        let data_use = unsafe{ data.with_new_fragment_length(fragment/(2.0*WIDE)) };
-
-        let mut set = MotifSet::manual_set(&data_use, refine_argr.clone());
-        //let mut set = MotifSet::manual_set(&data_use, refine_trpr.clone());
-
-        let num_moves = 1000_usize;
-        let mut accep = 0_usize;
-
-        /*
-        for _ in 0..num_moves {
-
-    let mut rng = rand::thread_rng();
-            let (try_set, modded) = set.propose_height_move_custom(&mut rng, 0.1).unwrap();
-
-            let accept = MotifSet::accept_test(set.ln_posterior(), modded, 1.0, &mut rng);
-
-            if accept {
-                set = try_set;
-                accep += 1;
-            }
-
-        }
-
-*/
-        println!("Fragment length {fragment} ln LIKELIHOOD {} ln prior {} height {} height prop {}", set.ln_likelihood(), set.ln_prior(), set.nth_motif(0).peak_height(), (accep as f64)/(num_moves as f64));
-
-        //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("TrpR_Fragment_higher_{:04}", fragment).as_str());
-        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_init_{:04}", fragment).as_str());
-        //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_higher_{:04}", fragment).as_str());
-
-        let (new, _) = set.propose_new_motif(&mut rng).unwrap();
-
-        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_{:04}", fragment).as_str());
-
-   }
-
-
 
     /*for _ in 0..cap {
     //for id in 0..trace.loan_active().len() {
@@ -260,13 +154,10 @@ fn main() {
 */
 }
 
-pub fn mod_save_trace(trace: &SetTrace, data_ref: &AllDataUse) {
+pub fn mod_save_set(current_active: &MotifSet, data_ref: &AllDataUse, signal_file: &str) {
 
-        let current_active = trace.loan_active();
 
         let locs = data_ref.data().generate_all_locs();
-
-        let signal_file = "/Users/afarhat/Downloads/traceTrialDiff20.png";
 
         let plot = BitMapBackend::new(signal_file, (3300, 1500)).into_drawing_area();
         

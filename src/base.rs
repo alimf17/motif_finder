@@ -3363,7 +3363,7 @@ impl<'a> MotifSet<'a> {
     
     
  
-    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -3410,12 +3410,15 @@ impl<'a> MotifSet<'a> {
 
             let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
 
-            let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
+            if make_poss {
+                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
 
-            match poss_hamming {
-                Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
-                None => (),
-            };
+                match poss_hamming {
+                    Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
+                    None => (),
+                };
+
+            }
 
             println!("init motif {mot_num} {:?}", motif);
 
@@ -4734,6 +4737,55 @@ impl<'a> MotifSet<'a> {
     }
 
 
+
+    pub fn best_height_set_from_rmse(&self, c_id: usize) -> Option<(Self, f64)> {
+
+        if c_id >= self.set.len() { return None; }
+
+        let height_len: usize = ((MAX_HEIGHT-MIN_HEIGHT)/0.5) as usize + 1;
+
+        let heights: Vec<f64> = (0..height_len).map(|i| MIN_HEIGHT+0.5*(i as f64)).collect();
+
+        let mut try_set = self.derive_set();
+
+        let mut replacement = self.nth_motif(c_id).clone();
+
+        let mut best: Option<(usize, f64)> = None;
+
+        let mut id: usize = 0;
+
+        for height in &heights {
+
+            replacement.peak_height = *height;
+
+            _ = try_set.replace_motif(replacement.clone(), c_id);
+
+            let rmse = try_set.signal.rmse_with_wave(self.data_ref.data());
+
+            if best == None {
+                best = Some((id, rmse));
+            } else {
+
+                let unwrappable = best.clone();
+                let check = unwrappable.unwrap().1;
+
+                if rmse <= check {
+                    best = Some((id, rmse));
+                }
+            }
+
+            id += 1;
+
+        }
+
+        let (id, rmse) = best.unwrap();
+
+        replacement.peak_height = heights[id];
+        _ = try_set.replace_motif(replacement.clone(), c_id);
+
+        Some((try_set, rmse))
+
+    }
 
     fn measure_movement(&mut self, proposal: &mut Self) -> [f64; 4] {
 
