@@ -1,6 +1,6 @@
 
 
-use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL};
+use motif_finder::{NULL_CHAR, NUM_CHECKPOINT_FILES, NUM_RJ_STEPS, MAX_E_VAL, ECOLI_FREQ};
 use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use motif_finder::base::*;
 
@@ -168,7 +168,7 @@ fn main() {
     let maybe_init = match check {
 
         Some(("meme", meme_file)) => {
-            match MotifSet::set_from_meme(&meme_file , &data_ref, MAX_E_VAL, true, &mut rng) { 
+            match MotifSet::set_from_meme(&meme_file , &data_ref, Some(ECOLI_FREQ), MAX_E_VAL, true, &mut rng) { 
                 Err(e) => { 
                     eprintln!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None

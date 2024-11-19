@@ -465,13 +465,28 @@ impl Base {
         Ok(Base::new(scores))
     }
 
-    pub fn from_pwm(props: [f64; BASE_L]) -> Result<Base, InvalidBase> {
+    pub fn from_pwm(props: [f64; BASE_L], background_dist: Option<[f64; BASE_L]>) -> Result<Base, InvalidBase> {
 
+        let mut props = props;
+
+        let mut background = background_dist.unwrap_or([0.25; BASE_L]);
+
+        let mut sum: f64 = 0.0;
+
+        for prop in background {
+            if prop <= 0.0 {
+                eprintln!("Your background distribution needs to have positive density");
+                return Err(InvalidBase::NegativeBase); }
+            sum += prop;
+        }
+
+        background = core::array::from_fn(|a| background[a]/sum);
 
         let mut sum = 0_f64;
-        for prop in props {
-            if prop < 0.0 { return Err(InvalidBase::NegativeBase); }
-            sum += prop;
+        for (i, prop) in props.iter_mut().enumerate() {
+            if *prop < 0.0 { return Err(InvalidBase::NegativeBase); }
+            *prop = *prop * background[i];
+            sum += *prop;
         }
 
         let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + PWM_CONVERTER).log2());
@@ -481,16 +496,28 @@ impl Base {
 
     }
 
-    pub fn to_pwm(&self) -> [f64; BASE_L] {
+    pub fn to_pwm(&self,background_dist: Option<[f64; BASE_L]> ) -> Result<[f64; BASE_L], InvalidBase> {
 
+        let mut background = background_dist.unwrap_or([0.25; BASE_L]);
+
+        let mut sum: f64 = 0.0;
+
+        for prop in background {
+            if prop <= 0.0 {
+                eprintln!("Your background distribution needs to have positive density");
+                return Err(InvalidBase::NegativeBase); }
+            sum += prop;
+        }
+
+        background = core::array::from_fn(|a| background[a]/sum);
         let mut sum = 0_f64;
         let mut scores: [f64; BASE_L] = core::array::from_fn(|a| {
             let s = self.scores[a].exp2() - PWM_CONVERTER;
             sum += s;
-            s
+            s/background[a]
         });
 
-        core::array::from_fn(|a| scores[a]/sum)
+        Ok(core::array::from_fn(|a| scores[a]/sum))
               
     }
 
@@ -1465,7 +1492,7 @@ impl Motif {
 
         let try_pwm = meme_pwm.into_iter().map(|a| {
             let pwm_scores: [f64; BASE_L] = core::array::from_fn(|i| a[i]/background[i]);
-            Base::from_pwm(pwm_scores)
+            Base::from_pwm(pwm_scores, background_dist)
         }).collect::<Result<Vec<Base>, _>>();
 
         let mut pwm = try_pwm?;
@@ -3164,14 +3191,14 @@ impl Motif {
 
     }*/
 
-    fn for_meme(&self) -> String {
+    fn for_meme(&self, background_dist: Option<[f64; BASE_L]>) -> Result<String, InvalidBase> {
 
         const MEME_DIGITS: usize = 6;
 
         let mut meme_string = format!("letter-probability matrix: alength= {} w= {}\n", BPS.len(), self.len());
 
         for base in self.pwm.iter() {
-            let probs = base.as_probabilities();
+            let probs = base.to_pwm(background_dist)?;
             for prob in probs.iter() {
                 meme_string = format!("{} {:.MEME_DIGITS$} ", meme_string, prob);
             }
@@ -3179,7 +3206,7 @@ impl Motif {
         }
         meme_string = format!("{}\n", meme_string);
 
-        meme_string
+        Ok(meme_string)
     }
 
 
@@ -3363,7 +3390,7 @@ impl<'a> MotifSet<'a> {
     
     
  
-    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -3405,10 +3432,98 @@ impl<'a> MotifSet<'a> {
                     scores[j] = prop;
                 }
 
-                base_vec.push(Base::from_pwm(scores).expect("We really shouldn't have negative bases in a meme file?"));
+                base_vec.push(Base::from_pwm(scores, background_dist).expect("We really shouldn't have negative bases in a meme file?"));
             }
 
             let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
+
+            if make_poss {
+                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
+
+                match poss_hamming {
+                    Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
+                    None => (),
+                };
+
+            }
+
+            println!("init motif {mot_num} {:?}", motif);
+
+            set.push(motif);    
+
+        }
+
+
+        let mut signal = data_ref.data().derive_zero();
+
+        for mot in &set {
+            signal += &(mot.generate_waveform(data_ref));
+        }
+
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a, Vec::new())).collect();
+
+        let mut full_set = MotifSet {
+            set: set_with_nulls,
+            signal: signal, 
+            ln_post: None, 
+            data_ref: data_ref, 
+        };
+
+        let _ = full_set.ln_posterior();
+
+        Ok(full_set)
+
+    }
+    
+    pub fn set_from_meme_max_selective<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+
+        let meme_file_string = fs::read_to_string(meme_file_name)?;
+        let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
+
+        //This should be infallible, because it never changes and I already validated it once. 
+        //If THIS is where you're breaking, this whole function is invalid and needs to be fixed. 
+        let re = Regex::new(r"letter-probability matrix: alength= (\d+) w= (\d+)")?;
+
+        let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
+
+        if start_matrix_lines.len() == 0 { return Err(Box::new(MemeParseError::EmptyMatrix)); }
+
+        let mut set: Vec<Motif> = Vec::new();
+
+        for (mot_num, &line) in start_matrix_lines.iter().enumerate() {
+            let captures = re.captures(meme_as_vec[line]).expect("We can only get here because we matched on regex");
+            let alphabet_len: usize = captures[1].parse().expect("We can only get here because we matched on regex");
+
+            if alphabet_len != BASE_L { return Err(Box::new(MemeParseError::InvalidAlphabet{ motif_num: mot_num }));}
+
+            let motif_len: usize = captures[2].parse().unwrap();
+            if (motif_len < MIN_BASE) || (motif_len > MAX_BASE) { return Err(Box::new(MemeParseError::InvalidMotifLength{ motif_num: mot_num, captured_length: motif_len })); }
+
+
+            //let e_value: f64 = captures.get(3).map(|a| a.parse()).flatten().unwrap_or(0.0);
+
+            //if (set.len() > 0) && (e_value > e_value_cutoff) {
+            //    break;
+            //}
+
+            let mut bp_vec: Vec<Bp> = Vec::with_capacity(MAX_BASE);
+
+            for i in 1..(motif_len+1) {
+                let mut scores: [ f64; BASE_L] = [0.0; BASE_L];
+                let mut line_split = meme_as_vec[line+i].split_whitespace();
+                for j in 0..BASE_L {
+                    let Some(prop_str) = line_split.next() else { return Err(Box::new(MemeParseError::ColumnLengthFailure{line_num: line+i+1})); };
+                    let Ok(prop)= prop_str.parse::<f64>() else { return Err(Box::new(MemeParseError::FloatParseFailure{line_num: line+i+1}));}; 
+                    
+                    scores[j] = prop;
+                }
+                //Safety: self.scores has a size of BASE_L, so this always produces a valid result
+                let bp = unsafe{ std::mem::transmute::<usize, Bp>(Base::argmax(&scores))};
+
+                bp_vec.push(bp);
+            }
+
+            let mut motif = Motif::from_motif_max_selective(bp_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
 
             if make_poss {
                 let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
@@ -3803,6 +3918,9 @@ impl<'a> MotifSet<'a> {
     pub fn median_data_dist(&self) -> f64 {
         self.signal.median_distance_between_waves(self.data_ref.data())
     }
+
+   
+
     fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
         self.signal += &new_mot.generate_waveform(self.data_ref) ;
@@ -4807,7 +4925,13 @@ impl<'a> MotifSet<'a> {
         [rmse, likelihood_diff, height_dists_sq.sqrt(), pwm_dists_sq.sqrt()]
     }
 
+    pub fn ref_signal(&self) -> &Waveform {
+        &self.signal
+    }
 
+    pub fn signal_rmse(&self) -> f64 {
+        self.signal.rmse_with_wave(self.data_ref.data())
+    }
 
 }
 
@@ -4897,7 +5021,7 @@ impl StrippedMotifSet {
     }
 
 
-    pub fn output_to_meme(&self, output_dir: &str, run_name: &str) -> std::io::Result<String> {
+    pub fn output_to_meme(&self, background_dist: Option<[f64; BASE_L]>, output_dir: &str, run_name: &str) -> std::io::Result<String> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.meme";
 
@@ -4914,22 +5038,29 @@ impl StrippedMotifSet {
             let header_str = format!("MOTIF motif_{i} {i}\n");
             outfile_handle.write(&header_str.into_bytes())?;
 
-            let body_str = mot.for_meme();
+            let body_str = match mot.for_meme(background_dist) {
+                Ok(m) => m,
+                Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, Box::new(e))),
+            };
             outfile_handle.write(&body_str.into_bytes())?;
         }
 
         Ok(savestate_file)
     }
 
-    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
+    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
 
         println!("start pr");
         let mut peak_locations = data_ref.basic_peak(5.0);
         
         peak_locations.sort_by(|((a, _), _), ((b, _), _)| a.cmp(b));
 
-        let meme_file = self.output_to_meme(output_dir, run_name)?;
        
+        let meme_file = match self.output_to_meme(background_dist, output_dir, run_name) {
+            Ok(m) => m,
+            Err(e) => return Err(Box::new(e)),
+        };
+
         let fimo_output = format!("{}/{}_fimo", output_dir, run_name);
 
         let _ = fs::create_dir(&fimo_output);
@@ -5734,6 +5865,12 @@ impl SetTraceDef {
 
     pub fn wave_dist_trace(&self, waypost: &AllDataUse) -> Vec<f64> {
         self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
+    }
+
+    pub fn wave_rmse_trace(&self, waypost: &AllDataUse, number_samps: usize) -> Vec<(usize, f64)> {
+
+        let step_size: usize = self.trace.len()/number_samps;
+        self.trace.par_iter().enumerate().step_by(step_size).map(|(i, a)| (i, a.reactivate_set(waypost).signal_rmse())).collect()
     }
 
     pub fn data_name(&self) -> &str {

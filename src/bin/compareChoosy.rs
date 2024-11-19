@@ -2,8 +2,6 @@
 use std::fs;
 use std::io::Read;
 
-
-use motif_finder::ECOLI_FREQ;
 use motif_finder::base::*;
 use motif_finder::waveform::*;
 
@@ -50,7 +48,7 @@ fn main() {
 
     let mut rng = rand::thread_rng();
 
-    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+    let mut mot_set: MotifSet = MotifSet::set_from_meme_max_selective(&motif_set_meme, &data, f64::INFINITY, false, &mut rng).unwrap();
 
     let mut rmse = f64::INFINITY;
 

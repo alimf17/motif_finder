@@ -4,7 +4,7 @@ use std::io::Read;
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
 
-use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT};
+use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT, ECOLI_FREQ};
 
 use motif_finder::data_struct::{AllData, AllDataUse};
 
@@ -220,7 +220,7 @@ pub fn main() {
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
-    let _ = best_single_motif_set.generate_pr_curve(&data_ref,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_file);
+    let _ = best_single_motif_set.generate_pr_curve(&data_ref,Some(ECOLI_FREQ),"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
 
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 
@@ -301,6 +301,8 @@ pub fn main() {
 
     }
 
+
+
     autocorrelations_ctx.configure_series_labels().draw().unwrap();
     for ctx in distances_ctxes.iter_mut() { ctx.configure_series_labels().draw().unwrap(); }
 
@@ -374,6 +376,14 @@ pub fn main() {
         plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
     };
     plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
+    
+    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
    
     /*
     let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");

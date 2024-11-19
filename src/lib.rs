@@ -57,3 +57,5 @@ pub static mut THRESH: f64 = 5e-3;
 
 pub static mut NECESSARY_MOTIF_IMPROVEMENT: f64 = 10.0_f64;
 
+pub const ECOLI_FREQ: [f64; 4] = [0.246, 0.254, 0.254, 0.246];
+
