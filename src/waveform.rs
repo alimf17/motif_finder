@@ -444,7 +444,7 @@ impl<'a> Waveform<'a> {
 
         let length: f64 = residual.wave.len() as f64;
 
-        (residual.wave.into_iter().map(|a| a.powi(2)).sum::<f64>()/length).sqrt()
+        (residual.wave.into_iter().map(|a| a.powi(2)).sum::<f64>()).sqrt()
 
     }
 

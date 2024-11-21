@@ -246,7 +246,12 @@ impl AllData {
         Ok(self.data.get_waveform(&self.seq))
 
     }
-    
+   
+    pub fn clear_props(&mut self) {
+
+        self.propensities = vec![-(MINMER_NUM as f64).ln(); MINMER_NUM];
+    }
+
     pub fn background(&self) -> &Background {
         &self.background
     }

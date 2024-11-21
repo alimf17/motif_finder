@@ -500,6 +500,9 @@ pub fn main() {
         println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);*/
     }
 
+    println!("RMSE best {}", best_single_motif_set.reactivate_set(&data_ref).signal_rmse());
+
+
     //TODO: generate lnlikelihood and lnposterior traces here
 
     

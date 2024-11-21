@@ -50,6 +50,7 @@ fn main() {
 
     let mut rng = rand::thread_rng();
 
+    println!("Freq change");
     let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
 
     let mut rmse = f64::INFINITY;
@@ -60,7 +61,25 @@ fn main() {
         (mot_set, rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
     }
 
-    println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
+    println!("Best set RMSE {}\n set {:?} {} {}", rmse,mot_set, mot_set.ln_prior(), mot_set.nth_motif(0).pwm_prior(data.data().seq()));
+
+
+    let wave_file = format!("{}_waves", motif_set_meme);
+
+    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
+
+    println!("No change");
+    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, false, &mut rng).unwrap();
+
+    let mut rmse = f64::INFINITY;
+
+    let len = mot_set.len();
+
+    for id in 0..len {
+        (mot_set, rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
+    }
+
+    println!("Best set RMSE {}\n set {:?} {} {}", rmse,mot_set, mot_set.ln_prior(), mot_set.nth_motif(0).pwm_prior(data.data().seq()));
 
     let wave_file = format!("{}_waves", motif_set_meme);
 

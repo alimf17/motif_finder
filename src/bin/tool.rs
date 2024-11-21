@@ -152,7 +152,10 @@ fn main() {
 
     println!("rayon {:?}", rayon::current_num_threads());
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
+    let (mut total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
+
+    total_data.clear_props();
+
 
     println!("have all data");
 

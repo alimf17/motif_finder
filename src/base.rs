@@ -2891,7 +2891,7 @@ impl Motif {
         let bind_score_floats = self.return_bind_score(data.seq());
         //let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
-        let thresh = -self.peak_height;
+        let thresh = -MIN_HEIGHT;
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
@@ -5390,7 +5390,7 @@ impl<'a> SetTrace<'a> {
 
         let which_move = PICK_MOVE.sample(rng);
 
-        let which_variant = SAMPLE_VARIANTS[which_move].sample(rng); 
+        let mut which_variant = SAMPLE_VARIANTS[which_move].sample(rng); 
 
         //Can't use non const values in match statements. Using a bajillion if-elses 
         
@@ -5427,6 +5427,10 @@ impl<'a> SetTrace<'a> {
             },
             
             3 => {
+                if *MAX_TF_NUM.get().unwrap() == 1 {
+                    let extend: bool = rng.gen();
+                    which_variant = if extend {2} else {3};
+                }
                 self.active_set.run_rj_move_known(which_variant, self.thermo_beta, rng)
             },
             //4 => Some((self.active_set.base_leap(self.thermo_beta, rng), true)),
@@ -6565,6 +6569,7 @@ impl<'a> TemperSetTraces<'a> {
         println!("Even swaps: {:?}", even_swaps);
 
         println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
+        println!("distances of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.signal_rmse()).collect::<Vec<f64>>());
 
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 
