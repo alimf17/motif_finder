@@ -58,7 +58,7 @@ fn main() {
     let len = mot_set.len();
 
     for id in 0..len {
-        (mot_set, rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
+        (mot_set, rmse) = mot_set.best_height_set_from_rmse_noise(id).unwrap();
     }
 
     println!("Best set RMSE {}\n set {:?} {} {}", rmse,mot_set, mot_set.ln_prior(), mot_set.nth_motif(0).pwm_prior(data.data().seq()));
@@ -76,7 +76,7 @@ fn main() {
     let len = mot_set.len();
 
     for id in 0..len {
-        (mot_set, rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
+        (mot_set, rmse) = mot_set.best_height_set_from_rmse_noise(id).unwrap();
     }
 
     println!("Best set RMSE {}\n set {:?} {} {}", rmse,mot_set, mot_set.ln_prior(), mot_set.nth_motif(0).pwm_prior(data.data().seq()));

@@ -448,6 +448,7 @@ impl<'a> Waveform<'a> {
 
     }
 
+
     pub fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
@@ -1147,6 +1148,21 @@ impl<'a> Noise<'a> {
         
         
     }*/
+
+    pub fn rmse_noise(&self, spacer: usize) -> f64 {
+
+        
+        let extra = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
+
+        let a = self.resids.iter().map(|&a| a.powi(2)).sum::<f64>();
+        let b = extra.into_iter().map(|a| a.powi(2)).sum::<f64>();
+
+        let dist = (a+b).sqrt();
+
+        println!("{a} {b} {dist}");
+        dist
+
+    }
 
 
     //This does not work on calculating the AD based on the cdf of the background directly.

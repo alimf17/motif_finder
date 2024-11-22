@@ -385,6 +385,14 @@ pub fn main() {
     };
     plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
    
+    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist_with_noises.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_noise_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
+   
     /*
     let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
     let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
@@ -500,7 +508,7 @@ pub fn main() {
         println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);*/
     }
 
-    println!("RMSE best {}", best_single_motif_set.reactivate_set(&data_ref).signal_rmse());
+    println!("RMSE best {}", best_single_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
 
 
     //TODO: generate lnlikelihood and lnposterior traces here

@@ -3460,7 +3460,7 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a, Vec::new())).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0))).collect();
 
         let mut full_set = MotifSet {
             set: set_with_nulls,
@@ -3548,7 +3548,7 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a, Vec::new())).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0))).collect();
 
         let mut full_set = MotifSet {
             set: set_with_nulls,
@@ -3884,6 +3884,14 @@ impl<'a> MotifSet<'a> {
         //println!("nulls {:?} ad_calc {}", self.null_peak_scores(), Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer())));
         Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer()))
     }
+
+    pub fn magnitude_signal_with_noise(&self) -> f64 {
+        let a = (self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).rmse_noise(self.data_ref.data().spacer());
+        println!("in base {a}");
+        a
+            
+    }
+                    
 
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
         match self.ln_post {
@@ -4905,6 +4913,59 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    pub fn best_height_set_from_rmse_noise(&self, c_id: usize) -> Option<(Self, f64)> {
+
+        if c_id >= self.set.len() { return None; }
+
+        let height_len: usize = ((MAX_HEIGHT-MIN_HEIGHT)/0.5) as usize + 1;
+
+        let heights: Vec<f64> = (0..height_len).map(|i| MIN_HEIGHT+0.5*(i as f64)).collect();
+
+        let mut try_set = self.derive_set();
+
+        let mut replacement = self.nth_motif(c_id).clone();
+
+        let mut best: Option<(usize, f64)> = None;
+
+        let mut id: usize = 0;
+
+        for height in &heights {
+
+            replacement.peak_height = *height;
+
+            _ = try_set.replace_motif(replacement.clone(), c_id);
+
+            let rmse = try_set.magnitude_signal_with_noise();
+
+            let rmse2 = try_set.signal.rmse_with_wave(self.data_ref.data());
+
+            println!("noise {rmse} noiseless {rmse2}");
+
+            if best == None {
+                best = Some((id, rmse));
+            } else {
+
+                let unwrappable = best.clone();
+                let check = unwrappable.unwrap().1;
+
+                if rmse <= check {
+                    best = Some((id, rmse));
+                }
+            }
+
+            id += 1;
+
+        }
+
+        let (id, rmse) = best.unwrap();
+
+        replacement.peak_height = heights[id];
+        _ = try_set.replace_motif(replacement.clone(), c_id);
+
+        Some((try_set, rmse))
+
+    }
+
     fn measure_movement(&mut self, proposal: &mut Self) -> [f64; 4] {
 
         let rmse = self.signal.rmse_with_wave(&proposal.signal);
@@ -5875,6 +5936,12 @@ impl SetTraceDef {
 
         let step_size: usize = self.trace.len()/number_samps;
         self.trace.par_iter().enumerate().step_by(step_size).map(|(i, a)| (i, a.reactivate_set(waypost).signal_rmse())).collect()
+    }
+    
+    pub fn wave_rmse_noise_trace(&self, waypost: &AllDataUse, number_samps: usize) -> Vec<(usize, f64)> {
+
+        let step_size: usize = self.trace.len()/number_samps;
+        self.trace.par_iter().enumerate().step_by(step_size).map(|(i, a)| (i, a.reactivate_set(waypost).magnitude_signal_with_noise())).collect()
     }
 
     pub fn data_name(&self) -> &str {

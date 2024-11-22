@@ -249,7 +249,7 @@ impl AllData {
    
     pub fn clear_props(&mut self) {
 
-        self.propensities = vec![-(MINMER_NUM as f64).ln(); MINMER_NUM];
+        self.propensities = vec![1.0/(MINMER_NUM as f64); MINMER_NUM];
     }
 
     pub fn background(&self) -> &Background {
