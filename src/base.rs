@@ -13,7 +13,7 @@ use std::ptr;
 use std::mem::size_of;
 
 use std::process::*;
-
+use std::sync::Arc;
 
 use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
@@ -512,9 +512,10 @@ impl Base {
         background = core::array::from_fn(|a| background[a]/sum);
         let mut sum = 0_f64;
         let mut scores: [f64; BASE_L] = core::array::from_fn(|a| {
-            let s = self.scores[a].exp2() - PWM_CONVERTER;
+            let mut s = (self.scores[a] - PWM_CONVERTER).exp2();
+            s /= background[a];
             sum += s;
-            s/background[a]
+            s
         });
 
         Ok(core::array::from_fn(|a| scores[a]/sum))
@@ -3862,6 +3863,10 @@ impl<'a> MotifSet<'a> {
         self.set.len()
     }
 
+    pub fn set_copy(&self) -> Vec<Motif> {
+        self.set.iter().map(|a| a.0.clone()).collect()
+    }
+
     //This is our prior on the number of motifs
     //We do not justify this with a maximum entropy prior
     //Instead, we only want to consider an additional motif if 
@@ -4939,7 +4944,6 @@ impl<'a> MotifSet<'a> {
 
             let rmse2 = try_set.signal.rmse_with_wave(self.data_ref.data());
 
-            println!("noise {rmse} noiseless {rmse2}");
 
             if best == None {
                 best = Some((id, rmse));
@@ -5109,9 +5113,8 @@ impl StrippedMotifSet {
         Ok(savestate_file)
     }
 
-    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error>> {
+    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
-        println!("start pr");
         let mut peak_locations = data_ref.basic_peak(5.0);
         
         peak_locations.sort_by(|((a, _), _), ((b, _), _)| a.cmp(b));
@@ -5127,9 +5130,17 @@ impl StrippedMotifSet {
         let _ = fs::create_dir(&fimo_output);
 
         println!("created dir");
-        Command::new("fimo").arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file).output()?;
+        let mut bind_command = Command::new("fimo");
+        let commander = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
+        println!("command: {:?}", commander);
+        
+        commander.status()?;
 
+        println!("ran fimo");
+
+        /*
         let fimo_tsv = format!("{}/fimo.tsv", fimo_output);
+
 
         let tsv_file_handle = std::fs::File::open(&fimo_tsv)?;
 
@@ -5211,6 +5222,7 @@ impl StrippedMotifSet {
 
         pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), BLUE.filled().stroke_width(10))).unwrap().label("Total Motif Set");
 
+        */
 
         Ok(())
     }
@@ -5944,6 +5956,24 @@ impl SetTraceDef {
         self.trace.par_iter().enumerate().step_by(step_size).map(|(i, a)| (i, a.reactivate_set(waypost).magnitude_signal_with_noise())).collect()
     }
 
+    pub fn many_pr_track(&self, waypost: &AllDataUse, number_samps: usize, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+        let step_size: usize = self.trace.len()/number_samps;
+        
+        let m: Vec<Result<(), Box<dyn Error+Send+Sync>>> = self.trace.par_iter().step_by(step_size).enumerate().map(|(i, a)| {
+         
+            let save_file = format!("{}_{i}", run_name);
+            let b = a.generate_pr_curve(waypost,background_dist,fasta_file,output_dir, &save_file);
+        
+            b
+        }).collect();
+
+        let n = m.into_iter().find(|a| a.is_err());
+        match n {
+            None => Ok(()),
+            Some(e) => e,
+        }
+    }
+
     pub fn data_name(&self) -> &str {
         &self.all_data_file
     }
@@ -6637,6 +6667,7 @@ impl<'a> TemperSetTraces<'a> {
 
         println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
         println!("distances of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.signal_rmse()).collect::<Vec<f64>>());
+        println!("distances of each trace after swaps accounting noise: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.magnitude_signal_with_noise()).collect::<Vec<f64>>());
 
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 

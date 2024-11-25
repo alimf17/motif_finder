@@ -1159,7 +1159,6 @@ impl<'a> Noise<'a> {
 
         let dist = (a+b).sqrt();
 
-        println!("{a} {b} {dist}");
         dist
 
     }

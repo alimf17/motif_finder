@@ -18,6 +18,8 @@ use ndarray::prelude::*;
 use rayon::iter::ParallelIterator;
 use rayon::iter::IntoParallelIterator;
 
+use rand::prelude::*;
+
 use regex::Regex;
 
 use poloto;
@@ -220,8 +222,20 @@ pub fn main() {
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
-    let _ = best_single_motif_set.generate_pr_curve(&data_ref,Some(ECOLI_FREQ),"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
+    
+    let trial_a = best_single_motif_set.generate_pr_curve(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
 
+    if trial_a.is_err() {
+        println!("error in pr gen {:?}", trial_a);
+    }
+
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
+        let trial_b = trace.many_pr_track(&data_ref, 100, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
+        if trial_b.is_err() {
+            println!("error in pr gen {i} {:?}", trial_b);
+        }
+    }
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 
     let distances_file = format!("{}/{}_distances_to_refs.png",out_dir.clone(), base_file);
@@ -247,7 +261,27 @@ pub fn main() {
                                .draw().unwrap();
 
 
+    let mut rng = rand::thread_rng();
 
+    let potential_trpr = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
+    let potential_trpr_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+    let potential_trpr_raw = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon_Raw.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
+    let potential_trpr_raw_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon_Raw.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+
+    let potential_argr = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
+    let potential_argr_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+    let potential_argr_raw = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon_Raw.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
+    let potential_argr_raw_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon_Raw.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+
+    let distances_file_trpr = format!("{}/{}_distances_to_trpr.png",out_dir.clone(), base_file);
+    let distances_file_trpr_alt = format!("{}/{}_distances_to_trpr_alt.png",out_dir.clone(), base_file);
+    let distances_file_trpr_raw = format!("{}/{}_distances_to_trpr_raw.png",out_dir.clone(), base_file);
+    let distances_file_trpr_raw_alt = format!("{}/{}_distances_to_trpr_raw_alt.png",out_dir.clone(), base_file);
+
+    let distances_file_argr = format!("{}/{}_distances_to_argr.png",out_dir.clone(), base_file);
+    let distances_file_argr_alt = format!("{}/{}_distances_to_argr_alt.png",out_dir.clone(), base_file);
+    let distances_file_argr_raw = format!("{}/{}_distances_to_argr_raw.png",out_dir.clone(), base_file);
+    let distances_file_argr_raw_alt = format!("{}/{}_distances_to_argr_raw_alt.png",out_dir.clone(), base_file);
 
     let distances_panels = distances_plot.split_evenly((2, (reference_motifs.len()+1)/2));
     let mut distances_ctxes = distances_panels.iter().enumerate().map(|(i,a)| ChartBuilder::on(a)
@@ -262,6 +296,106 @@ pub fn main() {
                                                .x_desc("Saved steps")
                                                .y_desc("Mean of motif set distance to reference")
                                                .draw().unwrap(); }
+
+    let distances_plot_trpr = BitMapBackend::new(distances_file_trpr.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_trpr.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_trpr_alt = BitMapBackend::new(distances_file_trpr_alt.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_trpr_alt.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_trpr_raw = BitMapBackend::new(distances_file_trpr_raw.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_trpr_raw.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_trpr_raw_alt = BitMapBackend::new(distances_file_trpr_raw_alt.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_trpr_raw_alt.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_argr = BitMapBackend::new(distances_file_argr.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_argr.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_argr_alt = BitMapBackend::new(distances_file_argr_alt.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_argr_alt.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_argr_raw = BitMapBackend::new(distances_file_argr_raw.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_argr_raw.fill(&full_palette::WHITE).unwrap();
+    let distances_plot_argr_raw_alt = BitMapBackend::new(distances_file_argr_raw_alt.as_str(), (2600, 2600)).into_drawing_area();
+    distances_plot_argr_raw_alt.fill(&full_palette::WHITE).unwrap();
+
+    let mut distances_trpr = ChartBuilder::on(&distances_plot_trpr)
+        .caption(format!("Distance from TrpR Initial ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_trpr.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+
+    let mut distances_trpr_alt = ChartBuilder::on(&distances_plot_trpr_alt)
+        .caption(format!("Distance from TrpR Initial Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_trpr_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+    
+    
+    let mut distances_trpr_raw = ChartBuilder::on(&distances_plot_trpr_raw)
+        .caption(format!("Distance from TrpR Regulon Raw ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_trpr_raw.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+
+    let mut distances_trpr_raw_alt = ChartBuilder::on(&distances_plot_trpr_raw_alt)
+        .caption(format!("Distance from TrpR Regulon Raw Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_trpr_raw_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+    
+    let mut distances_argr = ChartBuilder::on(&distances_plot_argr)
+        .caption(format!("Distance from ArgR Initial ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_argr.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+
+    let mut distances_argr_alt = ChartBuilder::on(&distances_plot_argr_alt)
+        .caption(format!("Distance from ArgR Initial Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_argr_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+    
+    
+    let mut distances_argr_raw = ChartBuilder::on(&distances_plot_argr_raw)
+        .caption(format!("Distance from ArgR Regulon Raw ").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_argr_raw.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+
+    let mut distances_argr_raw_alt = ChartBuilder::on(&distances_plot_argr_raw_alt)
+        .caption(format!("Distance from ArgR Regulon Raw Scaled By Base Fequency").as_str(), ("Times New Roman", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
+        .unwrap();
+
+    distances_argr_raw_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
+   
+    let mut plot_pair_refs = [(&potential_trpr, &mut distances_trpr), 
+                          (&potential_trpr_alt, &mut distances_trpr_alt),
+                          (&potential_trpr_raw, &mut distances_trpr_raw),
+                          (&potential_trpr_raw_alt, &mut distances_trpr_raw_alt),
+                          (&potential_argr, &mut distances_argr),
+                          (&potential_argr_alt, &mut distances_argr_alt),
+                          (&potential_argr_raw, &mut distances_argr_raw),
+                          (&potential_argr_raw_alt, &mut distances_argr_raw_alt)];
 
     let correlation_len = 1000;
 
@@ -279,8 +413,6 @@ pub fn main() {
 
         let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, correlation_len);
 
-        println!("Collection Autocorrelation: {:?}", collection_autocorrelation);
-
         let style = ShapeStyle{ color: (*PALETTE[chain]).into(), filled: true, stroke_width: 0};
 
         let color = unsafe{*PALETTE.as_ptr().add(chain)};
@@ -293,6 +425,19 @@ pub fn main() {
                               .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
                               
         }
+
+        for (reference_set, plot_ref) in plot_pair_refs.iter_mut() {
+
+            let set_mots_try = reference_set.set_copy();
+            let distance_traces = collection.create_distance_traces(&set_mots_try);
+            (plot_ref).draw_series(LineSeries::new(distance_traces[0].iter().enumerate().map(|(i, p)| (i,*p)), color.clone()))
+                .unwrap().label(format!("{}", letter).as_str())
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
+
+            plot_ref.configure_series_labels().position(SeriesLabelPosition::UpperRight).margin(40).legend_area_size(20).border_style(&full_palette::BLACK).label_font(("Calibri", 80)).draw().unwrap();
+
+        }
+
 
         autocorrelations_ctx.draw_series(collection_autocorrelation.iter().enumerate().map(|(i, p)| Circle::new((i,*p), 5, ShapeStyle{ color: (*PALETTE[chain]).into(), filled : true, stroke_width : 0})))
                                                                    .unwrap().label(format!("{}", UPPER_LETTERS[chain]).as_str())
@@ -958,3 +1103,4 @@ mod tests {
     }
 
 }
+
