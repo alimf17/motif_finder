@@ -1,4 +1,4 @@
-use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Range};
 use std::cmp::{max, min};
 
 //use std::time::{Duration, Instant};
@@ -272,6 +272,37 @@ impl<'a> Waveform<'a> {
         }
 
         (point_lens, start_dats)
+    }
+
+    //Returns None if data_ind is >= length of the backing vector
+    pub fn block_and_base(&self, data_ind: usize) -> Option<(usize, usize)> {
+
+        if data_ind >= self.wave.len() { return None;}
+
+        let block: usize = self.start_dats.partition_point(|&a| a <= data_ind)-1;
+
+        let data_point = data_ind-self.start_dats[block];
+
+        let bp = data_point*self.spacer;
+
+        Some((block, bp))
+
+    }
+
+
+    pub fn intersect_kmer_start_range(&self, data_ind: usize, k: usize) -> Option<(usize, Range<usize>)>{
+
+        if k == 0 { return None; }
+
+        let Some((block, bp)) = self.block_and_base(data_ind) else { return None; };
+
+        let begin = if bp < k { 0_usize } else { bp+1-k };
+
+        let block_len = self.seq.ith_block_len(block);
+
+        let end = if (bp+k) >= block_len { block_len-k } else { bp } ;
+
+        Some((block, begin..(end+1)))
     }
 
     pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
@@ -1188,7 +1219,8 @@ impl<'a> Noise<'a> {
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
             let cdf = 2.0*self.background.dist.cdf(f)-1.0; //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
             let ln_sf = self.background.dist.ln_sf(f)+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
-            let coeff = ((2*n+1-2*i) as f64)/(n as f64);
+            //The forumula uses (2n-2i+1), but also goes from 1 to n, not 0 to n-1
+            let coeff = 2.0-((2*i+1) as f64)/(n as f64);
 
             a_d -= coeff*ln_sf+2.0*cdf;
         }

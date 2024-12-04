@@ -252,7 +252,11 @@ impl Sequence {
     pub fn block_lens(&self) -> Vec<usize> {
         self.block_lens.clone()
     }
-    
+   
+    pub fn ith_block_len(&self, i: usize) -> usize {
+        self.block_lens[i]
+    }
+
     pub fn max_len(&self) -> usize {
         self.max_len
     }

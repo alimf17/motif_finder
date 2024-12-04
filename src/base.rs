@@ -2310,7 +2310,60 @@ impl Motif {
 
 
     }
-  
+
+    pub fn return_best_bind_inds(&self, seq: &Sequence) -> Vec<(usize, usize)> {
+
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
+
+        let best_motif = self.best_motif();
+
+        let mut ind: usize;
+
+        let mut store: [Bp; BP_PER_U8];
+
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+        let mut blocks_and_bps: Vec<(usize, usize)> = vec![];
+
+        {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..=((block_lens[i])-self.len()) {
+
+                    ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+
+                    if binding_borrow.into_iter().zip(best_motif.iter()).all(|(&a, &b)| a == b) { blocks_and_bps.push((i, j)); }
+
+                }
+
+            }
+        }
+
+
+        blocks_and_bps
+
+
+    }
+
+
     pub fn return_bind_score_alt(&self, seq: &Sequence, distribution_cutoff: f64) -> Vec<(f64,bool)> {
 
         let coded_sequence = seq.seq_blocks();
