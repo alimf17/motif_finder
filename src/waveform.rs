@@ -274,6 +274,7 @@ impl<'a> Waveform<'a> {
         (point_lens, start_dats)
     }
 
+
     //Returns None if data_ind is >= length of the backing vector
     pub fn block_and_base(&self, data_ind: usize) -> Option<(usize, usize)> {
 
@@ -296,6 +297,14 @@ impl<'a> Waveform<'a> {
 
         let Some((block, bp)) = self.block_and_base(data_ind) else { return None; };
 
+        self.intersect_kmer_start_range_block_and_bp(block, bp, k)
+    
+    }
+
+    pub fn intersect_kmer_start_range_block_and_bp(&self, block: usize, bp: usize, k: usize) -> Option<(usize, Range<usize>)> {
+
+        if k == 0 { return None; }
+
         let begin = if bp < k { 0_usize } else { bp+1-k };
 
         let block_len = self.seq.ith_block_len(block);
@@ -303,6 +312,26 @@ impl<'a> Waveform<'a> {
         let end = if (bp+k) >= block_len { block_len-k } else { bp } ;
 
         Some((block, begin..(end+1)))
+
+
+    }
+
+    pub fn intersect_kmer_data_block_and_bp(&self, block: usize, bp: usize, k: usize) -> Vec<f64> {
+
+        if k == 0 { return vec![]; }
+
+        let begin = if bp < k { 0_usize } else { bp+1-k };
+
+        let block_len = self.seq.ith_block_len(block);
+
+        let end = if (bp+k) >= block_len { block_len-k } else { bp } ;
+
+        let begin_dat_ind = (begin + (begin % self.spacer))/self.spacer;
+
+        let end_dat_ind = (((end - (end % self.spacer))/self.spacer)+1).min(self.point_lens[block]);
+
+        self.wave[(self.start_dats[block]+begin_dat_ind)..(self.start_dats[block]+end_dat_ind)].iter().map(|&a| a).collect()
+
     }
 
     pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
