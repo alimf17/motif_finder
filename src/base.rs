@@ -235,6 +235,7 @@ pub const SCORE_THRESH: f64 = -1.0;
 
 //This needs to equal 1/(2^(-SCORE_THRESH)-1). Since our SCORE_THRESH is -1.0, 1/(2-1) = 1
 const PWM_CONVERTER: f64 = 1.0;
+const PWM_UNCONVERT: f64 = 1.0+PWM_CONVERTER;
 
 const BARRIER: f64 = -SCORE_THRESH*2.0;
 
@@ -482,13 +483,14 @@ impl Base {
 
         background = core::array::from_fn(|a| background[a]/sum);
 
-        let mut sum = 0_f64;
+        let mut max = 0_f64;
         for (i, prop) in props.iter_mut().enumerate() {
             if *prop < 0.0 { return Err(InvalidBase::NegativeBase); }
             *prop = *prop * background[i];
-            sum += *prop;
+            max = max.max(*prop);
         }
 
+        if max == 0.0 { return Err(InvalidBase::NoNonZeroBase);}
         let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + PWM_CONVERTER).log2());
 
 
@@ -512,12 +514,12 @@ impl Base {
         background = core::array::from_fn(|a| background[a]/sum);
         let mut sum = 0_f64;
         let mut scores: [f64; BASE_L] = core::array::from_fn(|a| {
-            let mut s = (self.scores[a] - PWM_CONVERTER).exp2();
-            s /= background[a];
+            let mut s = (self.scores[a]).exp2()*PWM_UNCONVERT-PWM_CONVERTER;
             sum += s;
             s
         });
 
+        println!("Base {:?}, scores {:?} uncon {PWM_UNCONVERT} sum {sum}", self, scores);
         Ok(core::array::from_fn(|a| scores[a]/sum))
               
     }
