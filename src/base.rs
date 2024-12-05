@@ -179,11 +179,11 @@ const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
 //const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
-const NUM_MOVES: usize = 1+BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+10;
+const NUM_MOVES: usize = 1+1+HEIGHT_SDS.len()+2*SCALE_SDS.len()+10;
 //const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
-const VARIANT_NUMS: [usize; 10] = [1, BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
+const VARIANT_NUMS: [usize; 10] = [1, 1, HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 0, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 80, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 10]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -193,7 +193,7 @@ static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let b = RATIO_LINEAR_SD_COMBO;
                                                    //let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
                                                    let m = (0..1).map(|_| format!("_rook_move.png"));
-                                                   let m = m.chain(b.iter().map(|&[a,b]| format!("_motif_scale_ratio_sd_{a}_linear_sd_{b}.png"))); 
+                                                   let m = m.chain((0..1).map(|_| format!("_resid_lean.png"))); 
                                                    let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
                                                    let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
                                                    "_motif_contract.png".to_owned(), "_motif_split.png".to_owned(), "_motif_merge.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
@@ -1926,6 +1926,22 @@ impl Motif {
         new_mot
 
     }
+    
+    pub fn scramble_by_kmer(&self, kmer: &[Bp]) -> Option<Motif> {
+
+        if self.len() != kmer.len() { return None; }
+        
+        let mut new_mot: Motif = self.clone();
+
+        let old_best = self.best_motif();
+
+        for i in 0..self.len() {
+            new_mot.pwm[i] = new_mot.pwm[i].make_best(kmer[i]);
+        }
+
+        Some(new_mot)
+    }
+
 
     pub fn scramble_secondaries(&self, to_scramble: &[usize]) -> Vec<Motif> {
 
@@ -4454,6 +4470,100 @@ impl<'a> MotifSet<'a> {
         }
     }
 
+    pub fn propose_resid_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+
+
+        //This can't be fully one, or else we could never get rid of a motif that bound somewhere unpeaky
+        //Because then that move couldn't be reversed
+        const PICK_PEAK_THING: f64 = 0.99;
+
+        //I wish Rust had const ln
+        let peak_pick_ln = PICK_PEAK_THING.ln();
+
+        let unpeak_pick_ln = (-PICK_PEAK_THING).ln_1p();
+
+        let mut new_set = self.derive_set();
+
+        let id = rng.gen_range(0..self.set.len());
+
+        let (old_motif, old_off_targets) = self.set[id].clone();
+
+        let num_bases = old_motif.len();
+
+        _ = new_set.remove_motif(id);
+
+        let unaccounted_trace = self.data_ref.data()-&new_set.signal;
+
+        //Still have to specify types of peaky and unpeaky
+        //let (peaky, unpeaky): (Vec<_>, Vec<_>)  = unaccounted_trace.read_wave().into_iter().enumerate().partition(|(_, &a)| a >= MIN_HEIGHT); 
+
+        let unaccounted_wave = unaccounted_trace.read_wave();
+
+
+        let mut peaky_locs: Vec<usize> = Vec::with_capacity(unaccounted_wave.len());
+
+        let mut unpeaky_locs: Vec<usize> = Vec::with_capacity(unaccounted_wave.len());
+
+        let mut is_peaky: Vec<bool> = vec![false; unaccounted_wave.len()];
+
+        for (i, &remain) in unaccounted_wave.into_iter().enumerate() {
+            if remain >= MIN_HEIGHT {
+            
+                peaky_locs.push(i);
+                is_peaky[i] = true;
+
+            } else {
+                unpeaky_locs.push(i);
+                //Default is already false
+                //is_peaky[i] = false;
+            }
+        }
+
+        let r: f64 = rng.gen();
+
+        let &choice = if r <= PICK_PEAK_THING {
+            //Autoreject if we chose to do the peak move and couldn't
+            //if peaky_locs.len() == 0 { return None;}
+            peaky_locs.choose(rng)?
+        } else {
+            unpeaky_locs.choose(rng)?
+        };
+        //SAFETY: intersect_kmer_start_range only returns None if kmer length is 0 or if the data index is out of range
+        //        MIN_BASES == 8, and all elements of (un)peaky_locs are fundamentally valid indices of the backing vector for the occupancy trace
+        
+        let (block, start_range) = unsafe { self.data_ref.data().intersect_kmer_start_range(choice, num_bases).unwrap_unchecked() };
+
+        //This should basically never return None, but in case, there's this short circuit
+        let chosen_start = start_range.choose(rng)?;
+
+        let new_kmer = self.data_ref.data().seq().return_bases(block, chosen_start, num_bases);
+
+        //scramble to kmer
+        let new_mot = old_motif.scramble_by_kmer(&new_kmer)?;
+
+
+        //Determine likelihood of choices
+        let old_best_binds = old_motif.return_best_bind_inds(self.data_ref.data().seq());
+
+        let select_reverse_ln_prob = old_best_binds.iter().filter_map(|&(block, base)| self.data_ref.data().intersect_data_start_range_block_and_base(block, base, num_bases)).flatten()
+                                                  .map(|data_ind| { 
+                                                      let (bin_select_ln_prob, bin_size_ln_prob) = if is_peaky[data_ind] { (peak_pick_ln, -(peaky_locs.len() as f64).ln()) } else { (unpeak_pick_ln, -(unpeaky_locs.len() as f64).ln()) };
+                                                      let kmer_select_ln_prob = -(self.data_ref.data().intersect_kmer_start_num(data_ind, num_bases) as f64).ln();
+                                                      bin_select_ln_prob+bin_size_ln_prob+kmer_select_ln_prob
+                                                  }).sum::<f64>();
+
+        let new_best_binds = new_mot.return_best_bind_inds(self.data_ref.data().seq());
+
+        let select_forward_ln_prob = new_best_binds.iter().filter_map(|&(block, base)| self.data_ref.data().intersect_data_start_range_block_and_base(block, base, num_bases)).flatten()
+                                                  .map(|data_ind| {
+                                                      let (bin_select_ln_prob, bin_size_ln_prob) = if is_peaky[data_ind] { (peak_pick_ln, -(peaky_locs.len() as f64).ln()) } else { (unpeak_pick_ln, -(unpeaky_locs.len() as f64).ln()) };
+                                                      let kmer_select_ln_prob = -(self.data_ref.data().intersect_kmer_start_num(data_ind, num_bases) as f64).ln();
+                                                      bin_select_ln_prob+bin_size_ln_prob+kmer_select_ln_prob
+                                                  }).sum::<f64>();
+        let mut modded_like = new_set.insert_motif(new_mot, id);
+
+        Some((new_set, modded_like+select_reverse_ln_prob-select_forward_ln_prob))
+    }
 
     pub fn propose_base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> { 
 
@@ -5540,8 +5650,7 @@ impl<'a> SetTrace<'a> {
                 })  
             },
             1 =>  {
-                let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
-                self.active_set.propose_ordered_motif_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
+                self.active_set.propose_resid_leap(rng).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
                 })

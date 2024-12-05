@@ -284,47 +284,92 @@ impl<'a> Waveform<'a> {
 
         let data_point = data_ind-self.start_dats[block];
 
-        let bp = data_point*self.spacer;
+        let base = data_point*self.spacer;
 
-        Some((block, bp))
+        Some((block, base))
 
     }
 
+    pub fn data_ind(&self, block: usize, base: usize) -> Option<usize> {
+
+        if block >= self.start_dats.len() { return None; }
+        let data_point = base/self.spacer;
+
+        Some(self.start_dats[block]+data_point)
+
+    }
+
+    pub fn intersect_kmer_start_num(&self, data_ind: usize, k: usize) -> usize {
+
+        self.intersect_kmer_start_range(data_ind, k).map(|a| a.1.len()).unwrap_or(0)
+
+    }
 
     pub fn intersect_kmer_start_range(&self, data_ind: usize, k: usize) -> Option<(usize, Range<usize>)>{
 
         if k == 0 { return None; }
 
-        let Some((block, bp)) = self.block_and_base(data_ind) else { return None; };
+        let Some((block, base)) = self.block_and_base(data_ind) else { return None; };
 
-        self.intersect_kmer_start_range_block_and_bp(block, bp, k)
+        self.intersect_kmer_start_range_block_and_base(block, base, k)
     
     }
 
-    pub fn intersect_kmer_start_range_block_and_bp(&self, block: usize, bp: usize, k: usize) -> Option<(usize, Range<usize>)> {
+    pub fn intersect_kmer_start_range_block_and_base(&self, block: usize, base: usize, k: usize) -> Option<(usize, Range<usize>)> {
 
         if k == 0 { return None; }
 
-        let begin = if bp < k { 0_usize } else { bp+1-k };
+        let begin = if base < k { 0_usize } else { base+1-k };
 
         let block_len = self.seq.ith_block_len(block);
 
-        let end = if (bp+k) >= block_len { block_len-k } else { bp } ;
+        let end = if (base+k) >= block_len { block_len-k } else { base } ;
 
         Some((block, begin..(end+1)))
 
 
     }
 
-    pub fn intersect_kmer_data_block_and_bp(&self, block: usize, bp: usize, k: usize) -> Vec<f64> {
+   
+    pub fn intersect_data_start_range_block_and_base(&self, block: usize, base: usize, k: usize) ->  Option<Vec<usize>> {
+
+        let (block, base_range) = self.intersect_kmer_start_range_block_and_base(block, base, k)?;
+
+        let mut prior_dat: Option<usize> = None;
+
+        let mut intersect_data: Vec<usize> = Vec::with_capacity(k/self.spacer + 1);
+
+        for base_id in base_range {
+
+            let Some(data_ind) = self.data_ind(block, base_id) else {continue;};
+
+            match prior_dat {
+                None => {
+                    prior_dat = Some(data_ind);
+                    intersect_data.push(data_ind);
+                },
+                Some(dat) => {
+                    if dat != data_ind {
+                        prior_dat = Some(data_ind);
+                        intersect_data.push(data_ind);
+                    }
+                },
+            };
+        }
+
+        Some(intersect_data)
+
+    }
+
+    pub fn intersect_kmer_data_block_and_base(&self, block: usize, base: usize, k: usize) -> Vec<f64> {
 
         if k == 0 { return vec![]; }
 
-        let begin = if bp < k { 0_usize } else { bp+1-k };
+        let begin = if base < k { 0_usize } else { base+1-k };
 
         let block_len = self.seq.ith_block_len(block);
 
-        let end = if (bp+k) >= block_len { block_len-k } else { bp } ;
+        let end = if (base+k) >= block_len { block_len-k } else { base } ;
 
         let begin_dat_ind = (begin + (begin % self.spacer))/self.spacer;
 
