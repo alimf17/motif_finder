@@ -1332,8 +1332,14 @@ impl<'a> Noise<'a> {
     //Note: this is kinda bad for some of the main body, but it's Fine(tm)
     fn low_val(la: f64) -> f64 {
 
+        //This was a prior fit on some of the low data using a standard approximation for a sum of
+        //chi squares
         //1.5*ln(3/2)-lngamma(1.5) is this magic constant
-        1.7687006706374098+la.ln()/2.0-3.0*la
+        //1.7687006706374098+la.ln()/2.0-3.0*la
+        //
+        let ln_la = la.ln();
+
+        -1.4286015+ln_la*(-1.5951525-1.0 + ln_la*(-0.9975172 + ln_la *(-0.3141198-ln_la*0.1146426)))
     }
 
     /*fn deriv_low_val(la: f64) -> f64 {

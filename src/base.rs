@@ -3963,7 +3963,6 @@ impl<'a> MotifSet<'a> {
 
     pub fn magnitude_signal_with_noise(&self) -> f64 {
         let a = (self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).rmse_noise(self.data_ref.data().spacer());
-        println!("in base {a}");
         a
             
     }
@@ -4521,12 +4520,18 @@ impl<'a> MotifSet<'a> {
 
         let r: f64 = rng.gen();
 
+        //println!("peaky locs len {} unpeaky locs len {}", peaky_locs.len(), unpeaky_locs.len());
+
         let &choice = if r <= PICK_PEAK_THING {
             //Autoreject if we chose to do the peak move and couldn't
             //if peaky_locs.len() == 0 { return None;}
-            peaky_locs.choose(rng)?
+            //peaky_locs.choose(rng)?
+            let Some(cho) = peaky_locs.choose(rng) else { println!("peaky locs fail {}", peaky_locs.len()); return None;};
+            cho
         } else {
-            unpeaky_locs.choose(rng)?
+            //unpeaky_locs.choose(rng)?
+            let Some(cho) = peaky_locs.choose(rng) else { println!("peaky locs fail {}", peaky_locs.len()); return None;};
+            cho
         };
         //SAFETY: intersect_kmer_start_range only returns None if kmer length is 0 or if the data index is out of range
         //        MIN_BASES == 8, and all elements of (un)peaky_locs are fundamentally valid indices of the backing vector for the occupancy trace
@@ -4534,7 +4539,20 @@ impl<'a> MotifSet<'a> {
         let (block, start_range) = unsafe { self.data_ref.data().intersect_kmer_start_range(choice, num_bases).unwrap_unchecked() };
 
         //This should basically never return None, but in case, there's this short circuit
-        let chosen_start = start_range.choose(rng)?;
+        //
+        let choose_start = start_range.choose(rng);
+
+
+        let chosen_start = match choose_start {
+            Some(choice) => choice,
+            None => {
+                println!("chosen start nulls out {:?}", self.data_ref.data().intersect_kmer_start_range(choice, num_bases));
+                return None;
+            },
+        };
+       
+
+        //let chosen_start = start_range.choose(rng)?;
 
         let new_kmer = self.data_ref.data().seq().return_bases(block, chosen_start, num_bases);
 
@@ -4562,7 +4580,10 @@ impl<'a> MotifSet<'a> {
                                                   }).sum::<f64>();
         let mut modded_like = new_set.insert_motif(new_mot, id);
 
-        Some((new_set, modded_like+select_reverse_ln_prob-select_forward_ln_prob))
+        modded_like = modded_like +select_reverse_ln_prob-select_forward_ln_prob;
+        //println!("select ratio old like {:?} new_like {:?} modded like {} ratio {}", self.ln_post, new_set.ln_post, modded_like, modded_like-self.ln_post.unwrap());
+
+        Some((new_set, modded_like))
     }
 
     pub fn propose_base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> { 
@@ -6337,7 +6358,7 @@ impl MoveTracker {
             None => {self.immediate_failures_per_move[move_id] += 1;},
             Some((move_arr, accept)) => {
                 if accept { self.successes_per_move[move_id] += 1;}
-                //self.distances_per_attempted_move[move_id].push((move_arr, accept));
+                self.distances_per_attempted_move[move_id].push((move_arr, accept));
             },
         };
 
@@ -6362,14 +6383,19 @@ impl MoveTracker {
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
             ind += 1;
 
-            for i in 0..BASE_RATIO_SDS.len(){
+            /*for i in 0..BASE_RATIO_SDS.len(){
                 for j in 0..BASE_LINEAR_SDS.len() {
                     println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                              BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                              (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
                     ind += 1;
                 }
-            }
+            }*/
+
+            println!("Guided scramble. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+                     self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
+                     (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
             for i in 0..HEIGHT_SDS.len() {
                 println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                          HEIGHT_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
