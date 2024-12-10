@@ -47,7 +47,7 @@ use rand::seq::SliceRandom;
 //Technically, they cross again later, but based on visual inspection,
 //this is a nothingburger: the low tail just happens to osscilate and
 //the high tail is more accurate throughout that range
-const A0: f64 = 1.545;
+const A0: f64 = 1.97;
 
 
 //This is just a constant which determines how sharp the transition between the low and high tail are while still being analytic
@@ -55,7 +55,7 @@ const K: f64 = 16.0;
 
 //This is a constant that tells us when to stop computing the high tail because it literally doesn't matter, since it would be 2^(-53) times its value at most added to the function
 //It is equal to a round number greater than 2^(53/K). Since I chose K = 16, the cutoff is 10.0
-const HIGH_CUT: f64 = 10.0;
+const HIGH_CUT: f64 = 20.0;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelWidth {
      //Narrow = 0,

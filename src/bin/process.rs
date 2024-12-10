@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
@@ -231,10 +231,10 @@ pub fn main() {
 
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
-        let trial_b = trace.many_pr_track(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
+        /*let trial_b = trace.many_pr_track(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
         if trial_b.is_err() {
             println!("error in pr gen {i} {:?}", trial_b);
-        }
+        }*/
     }
     let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
 
@@ -475,9 +475,12 @@ pub fn main() {
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
     let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    let diff_sig_directory = format!("{}/{base_file}_most_improved", out_dir.clone());
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         let tracey = trace.ln_posterior_trace();
+        let mut diff_trace: Vec<(usize, f64)> = tracey.windows(2).map(|a| a[1]-a[0]).enumerate().collect();
+        diff_trace.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         let mut ordered_tracey = tracey.clone();
         ordered_tracey.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
         let minind = ordered_tracey.len()/10;
@@ -487,6 +490,71 @@ pub fn main() {
         let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
         let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
 
+        let track_bests: usize = diff_trace.len().min(5);
+
+        for i in 0..track_bests {
+
+            let last_digit = i % 10;
+            let ordinal_tail = match last_digit {
+                1 => {if i == 11 {"th"} else {"st"}},
+                2 => {if i == 12 {"th"} else {"nd"}},
+                3 => "rd",
+                _ => "th",
+            };
+                
+            let prev_ind = diff_trace[i].0;
+            let next_ind = prev_ind+1;
+
+            println!("Tracking {i}{ordinal_tail} best increase in ln posterior for trace {letter}. Improvement is {} from step {prev_ind} to step {next_ind}", diff_trace[i].1);
+
+            let prev_set = trace[prev_ind].reactivate_set(&data_ref);
+            let next_set = trace[next_ind].reactivate_set(&data_ref);
+
+            let signal_difference = next_set.ref_signal()-prev_set.ref_signal();
+
+            let improve_name = format!("{letter}_{i}{ordinal_tail}_improvement_difference");
+            signal_difference.save_waveform_to_directory(&data_ref, &diff_sig_directory, &improve_name, &full_palette::CYAN, true);
+
+            let output_name = format!("{diff_sig_directory}/{improve_name}_comparions.txt");
+            let Ok(mut text_file_out) = fs::File::create(&output_name) else { println!("Failed to create {output_name}"); continue;};
+
+            let guarentee_len = prev_set.len().min(next_set.len());
+
+            for k in 0..guarentee_len {
+                let prev_mot_scores = prev_set.nth_motif_and_scores(k);
+                let next_mot_scores = next_set.nth_motif_and_scores(k);
+
+                let mut output: String = format!("Motif {k} for each set has a height of {} before and {} after. Difference is {}.\n Best motifs are:\n", 
+                                                 prev_mot_scores.0.peak_height(), next_mot_scores.0.peak_height(), next_mot_scores.0.peak_height()-prev_mot_scores.0.peak_height());
+
+                output.push_str(format!("Prev: {}\nNext: {}\n", prev_mot_scores.0.best_motif_string(), next_mot_scores.0.best_motif_string()).as_str());
+                let mut min: f64 = f64::INFINITY;
+                let mut max: f64 = -f64::INFINITY;
+                for &score in prev_mot_scores.1.iter() {
+                    min = min.min(score);
+                    max = max.max(score);
+                }
+                output.push_str(format!("Prev motif off target binding score range: {} to {} with {} elements\n", min, max, prev_mot_scores.1.len()).as_str());
+                let mut min: f64 = f64::INFINITY;
+                let mut max: f64 = -f64::INFINITY;
+                for &score in next_mot_scores.1.iter() {
+                    min = min.min(score);
+                    max = max.max(score);
+                }
+                output.push_str(format!("Next motif off target binding score range: {} to {} with {} elements\n", min, max, next_mot_scores.1.len()).as_str());
+
+                let (dist, rev) = prev_mot_scores.0.distance_function(&next_mot_scores.0);
+
+                let rev_str = if rev { "is closer reverse complement" } else {"is closer as standard"};
+                output.push_str(format!("Motif distance is {} and {rev_str}", dist).as_str());
+                                
+                let Ok(()) = text_file_out.write_all(output.as_bytes()) else { println!("Couldn't write the information regarding Motif {k} for {i}{ordinal_tail} improvement difference of chain {letter}");  continue;};
+            }
+
+            if prev_set.len() != next_set.len() {
+                let Ok(()) = text_file_out.write_all(format!("Sets have different motif numbers. Previous set has {} motifs, while the next set has {} motifs", prev_set.len(), next_set.len()).as_bytes()) else {continue;};
+            }
+        }
 
         //println!("conj {} {:?}", conj.len(), conj);
 

@@ -1997,6 +1997,10 @@ impl Motif {
         self.pwm.iter().map(|a| a.best_base()).collect()
     }
 
+    pub fn best_motif_string(&self) -> String {
+        self.pwm.iter().map(|a| format!("{}", a.best_base())).collect::<Vec<_>>().concat()
+    }
+
     pub fn rev_complement(&self) -> Vec<Base> {
         self.pwm.iter().rev().map(|a| a.rev()).collect()
     }
@@ -3924,6 +3928,18 @@ impl<'a> MotifSet<'a> {
 
     pub fn get_nth_motif(&self, n: usize) -> Motif {
         self.set[n].0.clone()
+    }
+    
+    pub fn nth_motif_and_scores(&self, n: usize) -> &(Motif, Vec<f64>) {
+        &self.set[n]
+    }
+
+    pub fn nth_motif_and_scores_mut(&mut self, n: usize) -> &mut (Motif, Vec<f64>) {
+        &mut self.set[n]
+    }
+
+    pub fn get_nth_motif_and_scores(&self, n: usize) -> (Motif, Vec<f64>) {
+        self.set[n].clone()
     }
 
     pub fn null_peak_scores(&self) -> Vec<f64> {
@@ -6301,6 +6317,15 @@ impl SetTraceDef {
     }
 
     
+}
+
+impl Index<usize> for SetTraceDef {
+type Output = StrippedMotifSet;
+
+    fn index(&self, index: usize) -> &StrippedMotifSet {
+        &self.trace[index]
+    }
+
 }
 
 
