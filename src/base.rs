@@ -481,7 +481,7 @@ impl Base {
             sum += prop;
         }
 
-        background = core::array::from_fn(|a| background[a]/sum);
+        background = core::array::from_fn(|a| background[a]/(sum*0.25));
 
         let mut max = 0_f64;
         for (i, prop) in props.iter_mut().enumerate() {
@@ -1494,8 +1494,7 @@ impl Motif {
         background = core::array::from_fn(|a| background[a]/sum);
 
         let try_pwm = meme_pwm.into_iter().map(|a| {
-            let pwm_scores: [f64; BASE_L] = core::array::from_fn(|i| a[i]/background[i]);
-            Base::from_pwm(pwm_scores, background_dist)
+            Base::from_pwm(a, background_dist)
         }).collect::<Result<Vec<Base>, _>>();
 
         let mut pwm = try_pwm?;
@@ -5140,12 +5139,13 @@ impl<'a> MotifSet<'a> {
 
             replacement.peak_height = *height;
 
-            _ = try_set.replace_motif(replacement.clone(), c_id);
+            let like = try_set.replace_motif(replacement.clone(), c_id);
 
             let rmse = try_set.magnitude_signal_with_noise();
 
             let rmse2 = try_set.signal.rmse_with_wave(self.data_ref.data());
 
+            println!("{height} {like} {rmse} {rmse2}");
 
             if best == None {
                 best = Some((id, rmse));
