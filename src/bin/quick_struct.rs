@@ -40,7 +40,7 @@ fn main() {
     //let trace_file =  "/Users/afarhat/Downloads/ReportingReplicaExchange_20240421_ArgR_Arg_TrpR_Trp_ln_ratio_D_1_trace_from_step_0000004.bin";
 
 
-    let regulon_argR_raw: Vec<[f64; BASE_L]> = vec![
+/*    let regulon_argR_raw: Vec<[f64; BASE_L]> = vec![
     
          [-0.6641540527, -0.5166015625, -0.6641540527, 0.0000000000],
          [-0.7500305176, -0.7720642090, 0.0000000000, -0.8171386719],
@@ -61,25 +61,39 @@ fn main() {
          [-0.8912963867, 0.0000000000, -0.8912963867, -0.8011169434]
 
     ];
+*/
 
-
-
-   /*let mut refine_argr: Vec<[f64; BASE_L]> = regulon_argR_raw.iter().map(|a| {
-       let max = *a.iter().max_by(|b,c| b.partial_cmp(c).unwrap()).unwrap();
-       core::array::from_fn(|i| 0.5_f64.max(a[i]/max))
-   }).collect();*/
-
-/*
-    let regulon_TrpR_raw: Vec<[f64; BASE_L]> = vec![
-                        [0.700000, 0.300000, 0.000000, 0.000000],
-						[0.000000, 0.000000, 0.600000, 0.400000],
-						//[0.200000, 0.100000, 0.000000, 0.700000], //This is the official base in regulon for what's below
-						[0.700000, 0.100000, 0.000000, 0.200000],
-						[0.000000, 0.000000, 0.700000, 0.300000],
-						[0.600000, 0.000000, 0.000000, 0.400000],
-						[0.900000, 0.000000, 0.100000, 0.000000],
-						[0.000000, 1.000000, 0.000000, 0.000000],
-						[0.000000, 0.000000, 0.100000, 0.900000],
+    let regulon_ArgR_nums : Vec<[f64; BASE_L]> = vec![ 
+       [0.065574, 0.180328, 0.065574, 0.688525],
+       [0.081967, 0.065574, 0.819672, 0.032787],
+       [0.360656, 0.491803, 0.147541, 0.000000],
+       [0.721311, 0.065574, 0.098361, 0.114754],
+       [0.098361, 0.049180, 0.016393, 0.836066],
+       [0.016393, 0.131148, 0.295082, 0.557377],
+       [0.459016, 0.032787, 0.016393, 0.491803],
+       [0.245902, 0.081967, 0.016393, 0.655738],
+       [0.327869, 0.196721, 0.000000, 0.475410],
+       [0.901639, 0.000000, 0.016393, 0.081967],
+       [0.081967, 0.065574, 0.000000, 0.852459],
+       [0.098361, 0.016393, 0.393443, 0.491803],
+       [0.016393, 0.885246, 0.016393, 0.081967],
+       [0.754098, 0.081967, 0.049180, 0.114754],
+];
+        /*let mut refine_argr: Vec<[f64; BASE_L]> = regulon_argR_raw.iter().map(|a| {]
+          let max = *a.iter().max_by(|b,c| b.partial_cmp(c).unwrap()).unwrap();]
+          core::array::from_fn(|i|, 0.5_f64.max(a[i]/max))]
+          }).collect();*/
+/*]
+    let regulon_TrpR_raw: Vec<[f64; BASE_L]> = vec![]
+                        [0.700000,, 0.300000,, 0.000000,, 0.000000],]
+						[0.000000,, 0.000000,, 0.600000,, 0.400000],]
+						//[0.200000,, 0.100000,, 0.000000,, 0.700000], //This is the official base in regulon for what's below]
+						[0.700000,, 0.100000,, 0.000000,, 0.200000],]
+						[0.000000,, 0.000000,, 0.700000,, 0.300000],]
+						[0.600000,, 0.000000,, 0.000000,, 0.400000],]
+						[0.900000,, 0.000000,, 0.100000,, 0.000000],]
+						[0.000000, 1.000000,, 0.000000,, 0.000000],]
+						[0.000000,, 0.000000,, 0.100000,, 0.900000],]
 						[0.800000, 0.000000, 0.200000, 0.000000],
 						[0.000000, 0.000000, 1.000000, 0.000000],
 						[0.000000, 0.000000, 0.000000, 1.000000],
@@ -98,7 +112,7 @@ fn main() {
    //println!("ref {:?}", refine_trpr);
 
     let mut try_bincode = fs::File::open(file_out).unwrap();
-    let mut try_bin_trace = fs::File::open(trace_file).unwrap();
+    //let mut try_bin_trace = fs::File::open(trace_file).unwrap();
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
@@ -108,16 +122,16 @@ fn main() {
 
     buffer.clear();
 
-    let _ = try_bin_trace.read_to_end(&mut buffer);
-    let pre_trace: SetTraceDef = bincode::deserialize(&buffer).unwrap();
+    //let _ = try_bin_trace.read_to_end(&mut buffer);
+    //let pre_trace: SetTraceDef = bincode::deserialize(&buffer).unwrap();
 
     let mut rng = rand::thread_rng();
 
-    let trace = pre_trace.get_set_trace(&data, &mut rng, None);
-    println!("{:?}", trace.loan_active());
-    mod_save_trace(&trace, &data);
+    //let trace = pre_trace.get_set_trace(&data, &mut rng, None);
+    //println!("{:?}", trace.loan_active());
+    //mod_save_trace(&trace, &data);
 
-    let numnull = trace.loan_active().null_peak_scores().len() as isize;
+    //let numnull = trace.loan_active().null_peak_scores().len() as isize;
 
     let cap = 100_usize;
 
@@ -162,12 +176,12 @@ fn main() {
         println!("Fragment length {fragment} ln LIKELIHOOD {} ln prior {} height {} height prop {}", set.ln_likelihood(), set.ln_prior(), set.nth_motif(0).peak_height(), (accep as f64)/(num_moves as f64));
 
         //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("TrpR_Fragment_higher_{:04}", fragment).as_str());
-        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_init_{:04}", fragment).as_str());
+        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_init_attempt_{:04}", fragment).as_str());
         //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_higher_{:04}", fragment).as_str());
 
         let (new, _) = set.propose_new_motif(&mut rng).unwrap();
 
-        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_{:04}", fragment).as_str());
+        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_attempt_{:04}", fragment).as_str());
 
    }
 

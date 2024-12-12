@@ -491,7 +491,7 @@ impl Base {
         }
 
         if max == 0.0 { return Err(InvalidBase::NoNonZeroBase);}
-        let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + PWM_CONVERTER).log2());
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + max*PWM_CONVERTER).log2());
 
 
         Ok(Base::new(scores))
