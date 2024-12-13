@@ -102,7 +102,7 @@ fn main() {
 						[0.100000, 0.700000, 0.000000, 0.200000],
 						[0.600000, 0.000000, 0.400000, 0.000000],
     ];*/
-   let mut refine_argr = Motif::raw_pwm(regulon_argR_raw.iter().map(|&a| Base::new(a)).collect(), 2.5, KernelWidth::Wide, KernelVariety::Gaussian);
+   let mut refine_argr = Motif::raw_pwm(regulon_ArgR_nums.iter().map(|&a| Base::new(a)).collect(), 2.5, KernelWidth::Wide, KernelVariety::Gaussian);
    //let mut refine_trpr = Motif::raw_pwm(regulon_TrpR_raw.iter().map(|a| Base::new(core::array::from_fn(|i| a[i].log2()))).collect(), 4.0, KernelWidth::Wide, KernelVariety::Gaussian);
 
 //   refine_argr = Motif::raw_pwm(refine_argr.rev_complement(), refine_argr.peak_height(), KernelWidth::Wide, KernelVariety::Gaussian);

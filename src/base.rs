@@ -37,7 +37,7 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use  rand_distr::weighted_alias::*;
 
 use statrs::{consts, StatsError};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp, Beta};
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp, Beta, Categorical, Discrete, DiscreteCDF, DiscreteUniform};
 use statrs::statistics::{Min, Max};
 
 use ordered_float::*;
@@ -52,6 +52,8 @@ use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
 use plotters::coord::Shift;
 
+use ::num_traits::{Float, Num};
+use num_traits::Bounded;
 
 use log::warn;
 
@@ -225,7 +227,6 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 */
 
-pub static BASE_PRIOR: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(1.0_f64).unwrap());
 
 pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "New Motif Alt", "Kill Motif Alt"];//, "Split Motif", "Merge Motif"];
 
@@ -246,9 +247,13 @@ static HEIGHT_SPLIT_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, HEIGHT_SP
 
 static SPLIT_BASE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(0.5, 1.0).unwrap());
 
-static BASE_CHOOSE_DIST: Lazy<Beta> = Lazy::new(|| Beta::new(5.0, 1.0).unwrap());
+static BASE_CHOOSE_DIST: Lazy<Categorical> = Lazy::new(|| {
+    let slant = 5_i32;
+    let weights: Vec<f64> = (0..NUM_BASE_VALUES).map(|a| (((a+1) as f64)/(NUM_BASE_VALUES as f64)).powi(slant)-(((a as f64)/(NUM_BASE_VALUES as f64)).powi(slant))).collect();
+    Categorical::new(&weights).unwrap()
+});
 
-static BASE_CHOOSE_ALT: Lazy<Beta> = Lazy::new(|| Beta::new(1.0, 1.0).unwrap());
+static BASE_CHOOSE_ALT: Lazy<DiscreteUniform> = Lazy::new(|| DiscreteUniform::new(0, (NUM_BASE_VALUES-1) as i64 ).unwrap());
 
 //These were determined through numerical experiments and rough fits
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
@@ -256,10 +261,15 @@ const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
 const EXPONENT_WEIGHT_CONST: f64 = 1.4;
 
 //SAFETY: this is 2^(-15), but blah blah Rust doesn't like from_bits or exponents in const contexts
-pub const BASE_RESOLUTION: f64 = unsafe { std::mem::transmute::<u64, f64>(0x3F00000000000000)};
+//pub const BASE_RESOLUTION: f64 = unsafe { std::mem::transmute::<u64, f64>(0x3F00000000000000)};
+pub const BASE_RESOLUTION: f64 = 0.25;
+
+pub const BASE_RES_EXP: u64 = 2;
 
 //This is 1/BASE_RESOLUTION
-pub const NUM_BASE_VALUES: usize = 1 << 15;
+//pub const NUM_BASE_VALUES: usize = 1 << 15;
+
+pub const NUM_BASE_VALUES: usize = 4;
 
 //BEGIN BASE
 #[repr(usize)]
@@ -271,7 +281,18 @@ pub enum Bp {
     T = 3,
 }
 
+trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num>: Distribution<f64> + Discrete<K ,f64> + DiscreteCDF<K ,f64> {
+    fn sample_energy<R: Rng+?Sized>(&self, rng: &mut R) -> f64 {
+        (self.sample(rng)+1.0)*BASE_RESOLUTION*SCORE_THRESH
+    }
+    fn energy_ln_pmf(&self, energy: f64) -> f64 {
+        let sample: K = (((energy/(BASE_RESOLUTION*SCORE_THRESH))-1.0) as i64).try_into().unwrap_or(panic!("How did you get here??"));
+        self.ln_pmf(sample)
+    }
+}
 
+impl SampleToBase<u64> for Categorical {}
+impl SampleToBase<i64> for DiscreteUniform {}
 
 impl From<Bp> for usize {
     fn from(bp: Bp) -> Self {
@@ -332,8 +353,10 @@ impl fmt::Display for Bp {
 
 //This felt like a lot of operations, but because it relies exclusively on constants
 //(a binary power and -1 at that), it's about as fast as a single addition
-pub fn base_ceil(num: f64) -> f64 {
-    SCORE_THRESH*BASE_RESOLUTION*(num/(SCORE_THRESH*BASE_RESOLUTION)).ceil()
+pub fn base_ceil(num: f64) -> f64 { 
+    let a = SCORE_THRESH*BASE_RESOLUTION*(num/(SCORE_THRESH*BASE_RESOLUTION)).round();
+
+    if (a == 0.0 && num != 0.0) { SCORE_THRESH*BASE_RESOLUTION } else {a} 
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -398,7 +421,7 @@ impl Base {
         let max = Self::max(&scores);
 
         for i in 0..scores.len() {
-                scores[i] = base_ceil(scores[i]-max);
+                scores[i] = scores[i]-max;
                 if scores[i] < SCORE_THRESH { scores[i] = SCORE_THRESH;}
         }
 
@@ -461,12 +484,12 @@ impl Base {
             for p in props.iter_mut() {*p = (*p/sum)*counts+pseudo;}
         }
 
-        let scores: [f64; BASE_L] = core::array::from_fn(|a| base_ceil(props[a].log2()));
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| props[a].log2());
 
         Ok(Base::new(scores))
     }
 
-    pub fn from_pwm(props: [f64; BASE_L], background_dist: Option<[f64; BASE_L]>) -> Result<Base, InvalidBase> {
+    pub fn from_pwm(props: [f64; BASE_L], background_dist: Option<[f64; BASE_L]>, discretize: bool) -> Result<Base, InvalidBase> {
 
         let mut props = props;
 
@@ -484,15 +507,20 @@ impl Base {
         background = core::array::from_fn(|a| background[a]/(sum*0.25));
 
         let mut max = 0_f64;
+        let mut sum: f64 = 0.0;
         for (i, prop) in props.iter_mut().enumerate() {
             if *prop < 0.0 { return Err(InvalidBase::NegativeBase); }
             *prop = *prop * background[i];
             max = max.max(*prop);
+            sum += *prop
         }
 
         if max == 0.0 { return Err(InvalidBase::NoNonZeroBase);}
-        let scores: [f64; BASE_L] = core::array::from_fn(|a| (props[a]/sum + max*PWM_CONVERTER).log2());
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| {
+            let mut val = (props[a]/sum + (max/sum)*PWM_CONVERTER).log2() - (2.0*(max/sum)*PWM_CONVERTER).log2();
 
+            if discretize { base_ceil(val) } else {val} 
+        });
 
         Ok(Base::new(scores))
 
@@ -518,8 +546,8 @@ impl Base {
             sum += s;
             s
         });
-
-        println!("Base {:?}, scores {:?} uncon {PWM_UNCONVERT} sum {sum}", self, scores);
+ 
+        //println!("Base {:?}, scores {:?} uncon {PWM_UNCONVERT} sum {sum}", self, scores);
         Ok(core::array::from_fn(|a| scores[a]/sum))
               
     }
@@ -549,7 +577,7 @@ impl Base {
         }*/
 
         let best = rng.gen_range(0..BASE_L);
-        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_DIST.sample(rng))); 
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_CHOOSE_DIST.sample_energy(rng)); 
 
         /*let samps: [f64; BASE_L-1] = core::array::from_fn(|_| {
             let which = rng.gen::<f64>()+f64::EPSILON;
@@ -560,7 +588,7 @@ impl Base {
 
         let mut att =  [0.0_f64; BASE_L];
 
-        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i]*SCORE_THRESH;});
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
 
 
         Base { scores: att}
@@ -569,13 +597,13 @@ impl Base {
     pub fn rand_new_alt<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
         let best = rng.gen_range(0..BASE_L);
-        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_ALT.sample(rng))); 
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_ALT.sample_energy(rng))); 
 
         let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
 
         let mut att =  [0.0_f64; BASE_L];
 
-        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i]*SCORE_THRESH;});
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
 
 
         Base { scores: att}
@@ -682,7 +710,8 @@ impl Base {
 
             None => 4.0*self.scores.iter().map(|a| a.powi(2)).sum::<f64>()-self.scores.iter().map(|a| a).sum::<f64>().powi(2),
             Some(other) => {
-                (4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().map(|a| a).sum::<f64>()-other.scores.iter().map(|a| a).sum::<f64>()).powi(2))
+                //Remember, this is the DISTANCE. Which is the inner product OF THE DIFFERENCE. Not the inner product of the two 
+                (4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().zip(other.scores.iter()).map(|(a,b)| (a-b)).sum::<f64>()).powi(2))
             },
         }
 
@@ -713,101 +742,6 @@ impl Base {
         simplex
     }
 
-    //Returns two bases and the ln Jacobian of the split
-    pub fn split_base<R: Rng+?Sized>(&self, rng: &mut R) -> (Base, Base, f64) {
-
-        let not_bests = self.all_non_best();
-
-        let energy_penalties: [f64; BASE_L-1] = core::array::from_fn(|a| self[not_bests[a]]);
-
-        let scales: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_BASE_DIST.sample(rng));
-
-        let ln_jacobian = -((BASE_L-1) as f64)*LN_2+not_bests.iter().map(|&a| (-self[a]).ln()).sum::<f64>();
-
-        let ln_selection_density = -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
-
-        let base_0_choices: [bool; BASE_L-1] = core::array::from_fn(|_| rng.gen());
-
-        let mut base_0 = Base::new([0.0; BASE_L]);
-        let mut base_1 = Base::new([0.0; BASE_L]);
-
-        let new_penalty_pairs: [[f64;2];BASE_L-1] = core::array::from_fn(|a| {
-            let half_energy = self[not_bests[a]]*0.5;
-            [half_energy*(1.0-scales[a]), half_energy*(1.0+scales[a])]
-        });
-
-        for (i, &not_best) in not_bests.iter().enumerate(){
-
-            if base_0_choices[i] {
-                base_0[not_best] = new_penalty_pairs[i][0];
-                base_1[not_best] = new_penalty_pairs[i][1];
-            } else {
-                base_0[not_best] = new_penalty_pairs[i][1];
-                base_1[not_best] = new_penalty_pairs[i][0];
-            }
-
-        }
-
-        (base_0, base_1, ln_jacobian-ln_selection_density)
-    }
-
-    //Returns two bases and the ln Jacobian of the split, but only if they have the same best base
-    pub fn merge_bases(&self, other_base: &Base) -> Option<(Base, f64)> {
-
-        let best = self.best_base();
-        if best != other_base.best_base() { return None; }
-
-        let not_bests = self.all_non_best();
-
-        let sum_energy_penalties: [f64; BASE_L-1] = core::array::from_fn(|a| self[not_bests[a]]+other_base[not_bests[a]]);
-
-        let scales: [f64; BASE_L-1] = core::array::from_fn(|a| (self[not_bests[a]]-other_base[not_bests[a]]).abs()/sum_energy_penalties[a].abs());
-
-
-        if sum_energy_penalties.iter().any(|a| *a < SCORE_THRESH) { return None; }
-
-
-        let ln_jacobian = ((BASE_L-1) as f64)*LN_2-sum_energy_penalties.iter().map(|&a| (-a).ln()).sum::<f64>();
-
-        let ln_selection_density =  -((BASE_L-1) as f64)*LN_2+scales.iter().map(|&a| SPLIT_BASE_DIST.ln_pdf(a)).sum::<f64>();
-
-        let mut pre_base = Base::new([0.0; BASE_L]);
-
-        for (i, &not_best) in not_bests.iter().enumerate(){
-            pre_base[not_best] = sum_energy_penalties[i];
-        }
-
-
-        Some((pre_base, ln_jacobian+ln_selection_density))
-
-    }
-    
-    pub fn sum_bases_and_lb_max(&self, other_base: &Base) -> (Self, f64) {
-
-        let mut max_prop: f64 = 0.0;
-
-        let pre_base: [f64; BASE_L] = core::array::from_fn(|a| {
-            let p = self.scores[a]+other_base.scores[a];
-            max_prop = max_prop.max(p);
-            p
-        });
-
-        (Base::new(pre_base), max_prop) 
-
-    }
-
-    pub fn subtract_bases_and_lb_max(&self, subtrahend: &Base) -> (Self, f64) {
-
-        let best = self.best_base();
-
-        let pre_difference: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a]-subtrahend.scores[a]);
-
-        let base = Base::new(pre_difference);
-
-        let bested = base[best];
-
-        (base, subtrahend[best]+bested) 
-    }
 
     //This converts our base representation directly to a vector space representation
     //In particular, our bases form a metric space under 
@@ -1494,7 +1428,7 @@ impl Motif {
         background = core::array::from_fn(|a| background[a]/sum);
 
         let try_pwm = meme_pwm.into_iter().map(|a| {
-            Base::from_pwm(a, background_dist)
+            Base::from_pwm(a, background_dist, true)
         }).collect::<Result<Vec<Base>, _>>();
 
         let mut pwm = try_pwm?;
@@ -1770,108 +1704,6 @@ impl Motif {
         Self::from_motif(mot, rng)
 
     }
-
-    pub fn splitter_motif<R: Rng+?Sized>(&self, height_sd: f64, scaling_sd: f64, rng: &mut R) -> (Motif, f64) {
-
-        let mut weights = vec![2_usize; self.len()-MIN_BASE];
-        weights.push(1);
-
-        let len_dist = WeightedIndex::new(&weights).unwrap();
-
-        let num_bases = len_dist.sample(rng)+MIN_BASE;
-
-        let start_ind = ((self.len()-1)/2)-((num_bases-1)/2);
- 
-        let mut splitter_pwm: Vec<Base> = (0..num_bases).map(|i| self.pwm[i+start_ind].clone()).collect();
-    
-        splitter_pwm = splitter_pwm.into_iter().map(|a| Base::new(core::array::from_fn(|j| a.scores[j]/2.0))).collect();
-
-        let pre_height_split = NORMAL_DIST.sample(rng);
-
-        let splitter_height = self.peak_height()/2.0 + pre_height_split*height_sd;
-
-
-        let mut ln_dens_gen: f64 = HEIGHT_SPLIT_DIST.ln_pdf(pre_height_split*height_sd);
-
-        splitter_pwm = splitter_pwm.into_iter().map(|a| {
-            let splitting_vec: [f64; BASE_L-1] = core::array::from_fn(|_| SPLIT_DIST.sample(rng));
-            ln_dens_gen += splitting_vec.iter().map(|&a| SPLIT_DIST.ln_pdf(a)).sum::<f64>();
-            let splitting_base: Base = Base::vect_to_base(&splitting_vec);
-            a.sum_bases_and_lb_max(&splitting_base).0
-        }).collect();
-
-        
-        let splitter = Motif {
-            peak_height: splitter_height,
-            pwm: splitter_pwm,
-            kernel_width: self.kernel_width,
-            kernel_variety: self.kernel_variety,
-        };
-
-        (splitter, ln_dens_gen)
-
-    }
-
-    pub fn split_motif<R: Rng+?Sized>(&self, height_sd: f64, rng: &mut R) -> (Motif, Motif, f64) {
-
-        let mut pwm_a: Vec<Base> = Vec::with_capacity(MAX_BASE);
-        let mut pwm_b: Vec<Base> = Vec::with_capacity(MAX_BASE);
-
-        let mut ln_jacob_minus_proposal: f64 = 0.0;
-
-        for base in self.pwm.iter() {
-
-            let (base_a, base_b, add_to) = base.split_base(rng);
-            pwm_a.push(base_a);
-            pwm_b.push(base_b);
-            ln_jacob_minus_proposal += add_to;
-        }
-
-        let rand_height_split = NORMAL_DIST.sample(rng)*height_sd;
-        ln_jacob_minus_proposal -= NORMAL_DIST.ln_pdf(rand_height_split/height_sd)-height_sd.ln();
-        let height_a = self.peak_height*0.5+rand_height_split;
-        let height_b = self.peak_height-height_a;
-
-
-        (Motif::raw_pwm(pwm_a, height_a, self.kernel_width, self.kernel_variety), Motif::raw_pwm(pwm_b, height_b,self.kernel_width, self.kernel_variety), ln_jacob_minus_proposal)
-
-    }
-
-    //This move is all but designed to fail
-    //It basically exists ONLY for the correctness of split_motif
-    //Hence why it tries to die every third line: where it dies, split_motif has a better chance to work
-    pub fn merge_motifs(&self, motif_b: &Motif, height_sd: f64) -> Option<(Motif, f64)> {
-
-        if self.len() != motif_b.len() { return None;}
-
-        if self.kernel_width != motif_b.kernel_width { return None; } 
-        if self.kernel_variety != motif_b.kernel_variety { return None; } 
-
-        let mut ln_jacob_plus_proposal = 0.0;
-
-
-        let Some(fused_pwm) = (0..self.len()).map(|i| {
-            let Some((fused_base, add_to)) = self.pwm[i].merge_bases(&motif_b.pwm[i]) else { return None; };
-            ln_jacob_plus_proposal += add_to;
-            Some(fused_base)
-        }).collect::<Option<Vec<Base>>>() else {return None;};
-
-
-        let new_height = self.peak_height+motif_b.peak_height;
-
-        if new_height > MAX_HEIGHT { return None;}
-
-        let rand_split_height = 0.5*(self.peak_height-motif_b.peak_height);
-
-        ln_jacob_plus_proposal += NORMAL_DIST.ln_pdf(rand_split_height/height_sd)-height_sd.ln();
-      
-
-        let merged = Motif::raw_pwm(fused_pwm, new_height, self.kernel_width, self.kernel_variety);
-
-
-        Some((merged, ln_jacob_plus_proposal))
-        
-    }
     
     pub fn make_opposite(&self) -> Motif {
 
@@ -2031,12 +1863,17 @@ impl Motif {
             //number possible kmers = BASE_L^k, but this actually cancels with our integral
             //over the regions of possible bases, leaving only number unique kmers. 
             //The commented out part is technically "necessary." It just get cancelled with the commented out part that would get added for each base
+            //prior probability of motif = P(pwm is of length k) * P(we select the best motif we have |pwm is of length k)*P(We select this PWM| we select the best motif we have and motif is length k)
             let mut prior = -((MAX_BASE+1-MIN_BASE) as f64).ln()+((seq.number_unique_kmers(self.len()) as f64).ln());//-(self.len() as f64)*(BASE_L as f64).ln(); 
 
             //The probability is P(this best motif)*f(this motif| this best motif). So we have to add a BASE_L.ln() for each base
             //prior += self.pwm.iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>();//+(BASE_L as f64).ln();
 
-            prior -= ((self.len() as f64)*(BASE_L as f64).ln());
+            //prior -= ((self.len() as f64)*(BASE_L as f64).ln());
+
+            //For each base position, the probability that each of the three off bases are off as they is 1/number possible off values
+            //There are three off bases per position, and self.len() positions. Hence, this form
+            prior += BASE_RESOLUTION.ln() * (((BASE_L-1)*self.len()) as f64);
 
             prior
 
@@ -3507,7 +3344,7 @@ impl<'a> MotifSet<'a> {
                     scores[j] = prop;
                 }
 
-                base_vec.push(Base::from_pwm(scores, background_dist).expect("We really shouldn't have negative bases in a meme file?"));
+                base_vec.push(Base::from_pwm(scores, background_dist, true).expect("We really shouldn't have negative bases in a meme file?"));
             }
 
             let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
@@ -4157,7 +3994,7 @@ impl<'a> MotifSet<'a> {
 
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(b)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
@@ -4182,7 +4019,7 @@ impl<'a> MotifSet<'a> {
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
+                BASE_CHOOSE_DIST.energy_ln_pmf(a)+BASE_RESOLUTION.ln()
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
 
@@ -4231,7 +4068,7 @@ impl<'a> MotifSet<'a> {
         let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.ln_pdf(b/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(b)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
@@ -4256,7 +4093,7 @@ impl<'a> MotifSet<'a> {
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_ALT.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()
+                BASE_CHOOSE_ALT.energy_ln_pmf(a)+BASE_RESOLUTION.ln()
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
        
@@ -4279,63 +4116,6 @@ impl<'a> MotifSet<'a> {
         }
     }
     
-    
-    fn propose_split_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
-
-        let split_id = rng.gen_range(0..self.set.len());
-
-        //println!("split 0");
-        let (new_mot, split_mot, ln_split_jacobian_minus_pick_prob) = self.nth_motif(split_id).split_motif(HEIGHT_SPLIT_SD, rng);
-        //println!("split 1");
-        
-        let gen_prior = new_mot.pwm_prior(self.data_ref.data().seq())+new_mot.height_prior();
-        if gen_prior.is_infinite() { return None;} 
-        //println!("split 2");
-
-        let gen_prior = split_mot.pwm_prior(self.data_ref.data().seq())+split_mot.height_prior();
-        if gen_prior.is_infinite() { return None;} 
-        //println!("split 3");
-
-        let mut new_set = self.derive_set();
-
-        //println!("split 4");
-        _ = new_set.replace_motif(split_mot, split_id);
-
-        //println!("split 5");
-        let ln_post = new_set.add_motif(new_mot);
-        
-        //println!("split 6");
-        Some((new_set, ln_post+ln_split_jacobian_minus_pick_prob))
-
-    }
-
-    fn propose_merge_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
-
-        if self.set.len() <= 1 { return None;}
-
-        let merge_1 = rng.gen_range(0..self.set.len());
-
-        //println!("merge 0");
-        let merge_2 = *(0..self.set.len()).filter(|&a| a != merge_1).collect::<Vec<_>>()
-            .choose(rng).expect("We guaranteed that the length of the set is at least two, so this has at least one element");
-            
-        //println!("merge 1");
-
-        let Some((merge_mot, ln_merge_jacobian_plus_pick_prob)) = self.nth_motif(merge_1).merge_motifs(&self.nth_motif(merge_2), HEIGHT_SPLIT_SD) else {return None;} ;
-
-        let mut new_set = self.derive_set();
-
-        //println!("merge 2");
-        let (replace, delete) = if merge_1 < merge_2 { (merge_1, merge_2) } else { (merge_2, merge_1)};
-
-        _ = new_set.replace_motif(merge_mot, replace);
-
-        let ln_post = new_set.remove_motif(delete);
-
-        //println!("merge 3");
-
-        Some((new_set, ln_post+ln_merge_jacobian_plus_pick_prob))
-    }
 
 
     //I'm only extending motifs on one end
@@ -4423,8 +4203,6 @@ impl<'a> MotifSet<'a> {
             3 => self.propose_contract_motif(rng),
             4 => self.propose_new_motif_alt(rng),
             5 => self.propose_kill_motif_alt(rng),
-            //4 => self.propose_split_motif(rng),
-            //5 => self.propose_merge_motif(rng),
             _ => unreachable!("How you managed to get here, I do not know. You're somehow trying to make a move run when it doesn't exist.
                               \n There's a REASON that I coded my number of moves as a magic number that I use only once. 
                               \n Namely, there's just no good way to change that number and expect everything to work correctly.
@@ -4465,8 +4243,6 @@ impl<'a> MotifSet<'a> {
             3 => self.propose_contract_motif(rng),
             4 => self.propose_new_motif_alt(rng),
             5 => self.propose_kill_motif_alt(rng),
-            //4 => self.propose_split_motif(rng),
-            //5 => self.propose_merge_motif(rng),
             _ => panic!("You're trying to make a move run when it doesn't exist.")
         };
 
@@ -7288,19 +7064,7 @@ mod tester{
 
         //let r = Motif::from_motif(vec![Bp::A, Bp::G, Bp::G, Bp::T, Bp::A, Bp::G, Bp::G, Bp::T], &mut rng);
 
-        let (r, a, c) = m.split_motif(HEIGHT_SPLIT_SD, &mut rng); 
 
-
-        let Some((b, c_star)) = a.merge_motifs(&r, HEIGHT_SPLIT_SD) else {panic!("not reversing a split");};
-
-        println!("c {c} c_star {c_star}");
-
-        println!("m {:?} b {:?}", m, b);
-
-        println!("{:?}", b.distance_function(&m));
-        assert!((c+c_star).abs() < 1e-9);
-        assert!(b.distance_function(&m).0 < 1e-9);
-        assert!(!b.distance_function(&m).1);
 
     }
 
@@ -8084,28 +7848,7 @@ mod tester{
         }
         
         let mut failures = 0_usize;
-        /*
-        if let Some((mut split_mot, ln_prop_split)) = loop { if let Some(r) = check_set.propose_split_motif(&mut rng) { break Some(r); } else {failures+=1; println!("failed {failures} time(s)"); if failures > 10000 {break None;}}} {
         
-        
-        println!("failed in split move {} times before succeeding", failures);
-        assert!(split_mot.set.len()-1 == check_set.set.len());
-
-        let (mut merge_mot, ln_prop_merge) = split_mot.propose_merge_motif(&mut rng).expect("Merge motif proposing an impossibility despite split motif working");
-
-        let balance_split = ln_prop_split-split_mot.ln_posterior();
-        let balance_merge = ln_prop_merge-merge_mot.ln_posterior();
-
-        println!("{} {} {} {}", ln_prop_split, split_mot.ln_posterior(), ln_prop_merge, merge_mot.ln_posterior());
-        println!("detailed balance split and merge {} {} {}", balance_split, balance_merge, balance_split+balance_merge);
-        println!("ln acceptance probs split {} merge {}", ln_prop_split-merge_mot.ln_posterior(), ln_prop_merge-split_mot.ln_posterior());
-        assert!((balance_split+balance_merge).abs() < 1e-6);
-
-        println!("pre merge split {:?}", check_set);
-        println!("post merge split {:?}", merge_mot);
-
-        println!("distance {:?}", check_set.nth_motif(0).distance_function(&merge_mot.nth_motif(0)));
-        }*/
         let single_height = motif_set.propose_height_move_custom(&mut rng, 1.0);
 
         assert!(single_height.is_some()); //scaling a single base should always make possible motifs
@@ -8162,7 +7905,7 @@ mod tester{
          
         let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
@@ -8213,7 +7956,7 @@ mod tester{
 
         let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.ln_pdf(a/SCORE_THRESH) + BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a) + BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
@@ -8395,6 +8138,7 @@ mod tester{
         let base = Bp::T;
         let try_base: Base = Base::rand_new(&mut rng);
         let b = try_base.make_best(base);
+        println!("{:?}", try_base);
         assert_eq!(base, b.best_base());
 
         let bc: Base = b.rev();
@@ -8414,6 +8158,42 @@ mod tester{
         println!("{supposed_default_dist}, {}", b.dist_sq(None));
         assert!((supposed_default_dist - b.dist_sq(None)).abs() < 1e-7);
 
+        for i in 0..1000 {
+
+            let try_base: Base = Base::rand_new(&mut rng);
+
+            let to_pwm = try_base.to_pwm(None).unwrap();
+
+            let from_pwm = Base::from_pwm(to_pwm, None, false).unwrap();
+
+            let from_pwm_discrete = Base::from_pwm(to_pwm, None, true).unwrap();
+
+            let dist = try_base.dist_sq(Some(&from_pwm));
+
+            println!("{i} original {:?} to pwm {:?} \n from_pwm {:?}\n disc_pwm {:?} \n {dist}", try_base, to_pwm, from_pwm, from_pwm_discrete);
+
+            assert!(dist.sqrt() < 1e-3, "dist {i} failed");
+
+            let mut stick_break: [f64; BASE_L] = rng.gen();
+
+            stick_break.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+            let like_pwm: [f64; BASE_L] = [stick_break[0], stick_break[1]-stick_break[0], stick_break[2]-stick_break[1], 1.0-stick_break[2]];
+
+            let to_base = Base::from_pwm(like_pwm, None, false).unwrap();
+
+            let to_base_disc = Base::from_pwm(like_pwm, None, true).unwrap();
+
+            let back_pwm = to_base.to_pwm(None).unwrap();
+
+            let dist_pwm = (0..4).map(|i| (back_pwm[i]-like_pwm[i]).powi(2)).sum::<f64>().sqrt();
+
+            println!("{i} original pwm {:?} \n from pwm {:?}\n disc pwm {:?}\n to pwm {:?} {dist_pwm}", like_pwm, to_base, to_base_disc, back_pwm);
+
+
+            assert!(dist_pwm < 1e-3, "dist {i} failed");
+
+        }
         //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist_sq(Some(&b.to_gbase().to_base())));
         //assert!(b == b.to_gbase().to_base());
 
@@ -8641,7 +8421,7 @@ mod tester{
 
         //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
 
-        println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), ((MAX_BASE+1-MIN_BASE) as f64).ln()-(sequence.number_unique_kmers(motif.len()) as f64).ln() - motif.pwm_ref().iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>());
+        //println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), ((MAX_BASE+1-MIN_BASE) as f64).ln()-(sequence.number_unique_kmers(motif.len()) as f64).ln() - motif.pwm_ref().iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>());
         assert!((motif.pwm_prior(&sequence)-(sequence.number_unique_kmers(motif.len()) as f64).ln()+((MAX_BASE+1-MIN_BASE) as f64).ln()
                  -((motif.len() as f64)*(-(BASE_L as f64).ln() -((BASE_L-1) as f64)*(-SCORE_THRESH).ln() ))).abs() < 1e-6);
 
