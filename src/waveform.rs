@@ -1803,22 +1803,22 @@ mod tests{
         let mut noise_arr = n1.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
         noise_arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
         let noise_length = noise_arr.len();
-        let mut ad_try = -(noise_length as f64);
+        let mut ad_try = (noise_length as f64)/2.0;
 
         for i in 0..noise_length {
 
             //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
             //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
-            let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
+            let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
 
             let cdf = n1.dist().cdf(noise_arr[i]);
             let sf = 1.0-cdf;
 
-            let real_ln_cdf = (cdf-sf).ln();
+            let real_cdf = (cdf-sf);
             let real_ln_sf = (sf-cdf).ln_1p();
             
 
-            ad_try -= mult*real_ln_cdf+(2.0-mult)*real_ln_sf;
+            ad_try -= mult*real_ln_sf+2.0*real_cdf;
         }
 
         println!("ad_try {}", ad_try);
@@ -1834,37 +1834,40 @@ mod tests{
 
         let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
 
-        let mut extraneous_noises = n1_with_extraneous.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
+        let mut extraneous_noises = n1_with_extraneous.resids().into_iter().map(|a| a.abs()).collect::<Vec<f64>>();
 
         extraneous_noises.append(&mut extra_resids);
 
         extraneous_noises.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
         let noise_length = extraneous_noises.len();
-        let mut ad_try = -(noise_length as f64);
+        let mut ad_try = (noise_length as f64)/2.0;
         
         for i in 0..noise_length {
-            let mult = (2.0*((i+1) as f64)-1.0)/(noise_length as f64);
+
+            //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
+            //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
+            let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
 
             let cdf = n1.dist().cdf(extraneous_noises[i]);
             let sf = 1.0-cdf;
 
-            let real_ln_cdf = (cdf-sf).ln();
+            let real_cdf = (cdf-sf);
             let real_ln_sf = (sf-cdf).ln_1p();
             
 
-            ad_try -= mult*real_ln_cdf+(2.0-mult)*real_ln_sf;
-        
+            ad_try -= mult*real_ln_sf+2.0*real_cdf;
         }
 
         println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(1), ad_try);
 
         assert!((n1_with_extraneous.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
 
+        //This was for when I was using the Anderson Darling statistic. Since using the eth statistic, I don't have a gold standard to compare against. 
         //Calculated these with the ln of the numerical derivative of the fast implementation
         //of the pAD function in the goftest package in R
         //This uses Marsaglia's implementation, and is only guarenteed up to 8
-        let calced_ads: [(f64, f64); 6] = [(1.0, -0.644472305368), 
+        /*let calced_ads: [(f64, f64); 6] = [(1.0, -0.644472305368), 
                                            (0.46, 0.026743661078),
                                            (0.82, -0.357453548256),
                                            (2.82, -3.221007453503),
@@ -1880,7 +1883,9 @@ mod tests{
             println!("Noi {} {} {} {}",Noise::ad_like(pairs.0), pairs.1, Noise::ad_like(pairs.0)-pairs.1, (Noise::ad_like(pairs.0)-pairs.1)/pairs.1);
             assert!(((Noise::ad_like(pairs.0)-pairs.1)/pairs.1).abs() < 5e-2); 
 
-        } 
+        } */
+
+
 
     }
 

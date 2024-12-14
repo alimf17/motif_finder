@@ -176,14 +176,24 @@ const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const SCALE_SDS: [f64; 3] = [0.5, 5.0, 25.0];
+const GOOD_V_BAD_CUT: [f64; 5] = [2.5, 3.0, 3.5, 4.0, 4.5];
 
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
 //const NUM_MOVES: usize = 2*BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len()+HEIGHT_SDS.len()+2*SCALE_SDS.len()+8;
-const NUM_MOVES: usize = 1+1+HEIGHT_SDS.len()+2*SCALE_SDS.len()+10;
+//const NUM_MOVES: usize = 1+HEIGHT_SDS.len()+GOOD_V_BAD_CUT+10;
 //const VARIANT_NUMS: [usize; 9] = [BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), BASE_RATIO_SDS.len()*BASE_LINEAR_SDS.len(), HEIGHT_SDS.len(), 4, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1]; 
-const VARIANT_NUMS: [usize; 10] = [1, 1, HEIGHT_SDS.len(), 6, 1, 1, SCALE_SDS.len(), SCALE_SDS.len(), 1, 1]; 
+const VARIANT_NUMS: [usize; 8] = [1, GOOD_V_BAD_CUT.len(), HEIGHT_SDS.len(), 6, 1, 1, 1, 1]; 
+
+const NUM_MOVES: usize = { 
+    let mut i: usize  = 0;
+    let mut size: usize = 0;
+    while i < VARIANT_NUMS.len() {
+        size += VARIANT_NUMS[i];
+        i+=1;
+    }
+    size
+};
 
 static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 80, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
@@ -192,15 +202,11 @@ static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 10]> = Lazy::new(|| core::array::f
 static VARIANT_CUMULATIVE: Lazy<[usize; 10]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
-                                                   let b = RATIO_LINEAR_SD_COMBO;
-                                                   //let m = b.iter().map(|&[a,b]| format!("_base_scale_ratio_sd_{a}_linear_sd_{b}.png"));
                                                    let m = (0..1).map(|_| format!("_rook_move.png"));
-                                                   let m = m.chain((0..1).map(|_| format!("_resid_lean.png"))); 
+                                                   let m = m.chain(GOOD_V_BAD_CUT.iter().map(|a| format!("_resid_lean_cut_{a}.png"))); 
                                                    let m = m.chain(HEIGHT_SDS.iter().map(|a| format!("_height_sd_{a}.png"))); 
                                                    let m = m.chain(["_motif_birth.png".to_owned(), "_motif_death.png".to_owned(),"_motif_expand.png".to_owned(),
                                                    "_motif_contract.png".to_owned(), "_motif_split.png".to_owned(), "_motif_merge.png".to_owned(), "_base_leap.png".to_owned(), "_secondary_shuffle.png".to_owned()]);
-                                                   let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_base_sd_{a}.png")));
-                                                   let m = m.chain(SCALE_SDS.iter().map(|a| format!("_scale_mot_sd_{a}.png")));
                                                    let m = m.chain(["_kernel_move.png".to_owned()]);
                                                    let m = m.chain(["_random_motif.png".to_owned()]);
                                                    m.collect::<Vec<_>>().try_into().unwrap()
@@ -281,12 +287,12 @@ pub enum Bp {
     T = 3,
 }
 
-trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num>: Distribution<f64> + Discrete<K ,f64> + DiscreteCDF<K ,f64> {
+trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num + std::fmt::Debug>: Distribution<f64> + Discrete<K ,f64> + DiscreteCDF<K ,f64> {
     fn sample_energy<R: Rng+?Sized>(&self, rng: &mut R) -> f64 {
         (self.sample(rng)+1.0)*BASE_RESOLUTION*SCORE_THRESH
     }
-    fn energy_ln_pmf(&self, energy: f64) -> f64 {
-        let sample: K = (((energy/(BASE_RESOLUTION*SCORE_THRESH))-1.0) as i64).try_into().unwrap_or(panic!("How did you get here??"));
+    fn energy_ln_pmf(&self, energy: f64) -> f64  where <K as TryFrom<i64>>::Error: Error {
+        let sample: K = (((energy/(BASE_RESOLUTION*SCORE_THRESH))-1.0) as i64).try_into().expect(format!("How did you get here {energy} {} {:?}??", energy/(BASE_RESOLUTION*SCORE_THRESH)-1.0, TryInto::<K>::try_into((energy/(BASE_RESOLUTION*SCORE_THRESH)-1.0) as i64)).as_str());
         self.ln_pmf(sample)
     }
 }
@@ -870,26 +876,13 @@ impl Base {
         new_base
     }
 
-    pub fn scaled_base<R: Rng + ?Sized>(&self, scale_sd: f64, rng: &mut R) -> Option<Base> {
-
-        let mut new_base = self.scores;
-
-        let scale_exponent = (NORMAL_DIST.sample(rng)*scale_sd).exp();
-
-        new_base = core::array::from_fn(|a| new_base[a]*scale_exponent);
-        
-
-        Some(Base::new_by_reflections(new_base))
-
-    }
-
     pub fn rook_move<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
 
         let mut new_base = self.clone();
         //SAFETY: all_non_best() never returns an empty value
         let change_bp = unsafe { *(self.all_non_best().choose(rng).unwrap_unchecked())};
 
-        let energy: f64 = (rng.gen_range(1..=NUM_BASE_VALUES) as f64)*(SCORE_THRESH*BASE_RESOLUTION);
+        let energy: f64 = BASE_CHOOSE_ALT.sample_energy(rng);
 
         new_base[change_bp] = energy;
 
@@ -3994,7 +3987,7 @@ impl<'a> MotifSet<'a> {
 
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(b)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
@@ -4019,7 +4012,7 @@ impl<'a> MotifSet<'a> {
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_DIST.energy_ln_pmf(a)+BASE_RESOLUTION.ln()
+                BASE_CHOOSE_DIST.energy_ln_pmf(a)
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
 
@@ -4068,7 +4061,7 @@ impl<'a> MotifSet<'a> {
         let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(b)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
@@ -4093,7 +4086,7 @@ impl<'a> MotifSet<'a> {
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_ALT.energy_ln_pmf(a)+BASE_RESOLUTION.ln()
+                BASE_CHOOSE_ALT.energy_ln_pmf(a)
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
        
@@ -4145,9 +4138,9 @@ impl<'a> MotifSet<'a> {
             //println!("lock 1");
             let mut new_mot = self.nth_motif(extend_id).clone();
             //println!("lock w");
-            let new_base = Base::propose_safe_new(rng).make_best(*new_bp);
+            let new_base = Base::from_bp(*new_bp, rng);
             //println!("lock 2");
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&new_base) + ((BASE_L-1) as f64)* BASE_RESOLUTION.ln() - (valid_extends.len() as f64).ln();
+            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - (valid_extends.len() as f64).ln();
             //println!("lock 3");
             new_mot.pwm.push(new_base);
             //println!("lock 4");
@@ -4172,11 +4165,11 @@ impl<'a> MotifSet<'a> {
             //println!("contract 0");
             let new_mot_bps = new_mot.best_motif();
             //println!("contract 1");
-            let old_base = new_mot.pwm.pop();
+            let old_base = new_mot.pwm.pop()?;
             //println!("contract 2");
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             //println!("contract 3");
-            let base_ln_density = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(old_base.expect("We know this is bigger than 0")))+((BASE_L-1) as f64)* BASE_RESOLUTION.ln()-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
+            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
@@ -4260,7 +4253,7 @@ impl<'a> MotifSet<'a> {
         }
     }
 
-    pub fn propose_resid_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+    pub fn propose_resid_leap<R: Rng + ?Sized>(&self, cutoff: f64, rng: &mut R) -> Option<(Self, f64)> {
 
 
         //This can't be fully one, or else we could never get rid of a motif that bound somewhere unpeaky
@@ -4297,7 +4290,7 @@ impl<'a> MotifSet<'a> {
         let mut is_peaky: Vec<bool> = vec![false; unaccounted_wave.len()];
 
         for (i, &remain) in unaccounted_wave.into_iter().enumerate() {
-            if remain >= MIN_HEIGHT {
+            if remain >= cutoff {
             
                 peaky_locs.push(i);
                 is_peaky[i] = true;
@@ -4742,7 +4735,7 @@ impl<'a> MotifSet<'a> {
 
 
     }
-
+/*
     pub fn propose_ordered_base_move_custom<R: Rng + ?Sized>(&self, rng: &mut R , ratio_sd: f64, linear_sd: f64) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -4782,7 +4775,7 @@ impl<'a> MotifSet<'a> {
         let ln_post = new_set.replace_motif(replacement, c_id);
 
         Some((new_set, ln_post))
-    }
+    }*/
 
 
     pub fn propose_height_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, height_sd: f64 ) -> Option<(Self, f64)> {
@@ -4801,47 +4794,6 @@ impl<'a> MotifSet<'a> {
 
         Some((new_set, ln_post))
 
-    }
-
-    pub fn propose_scale_base_custom<R: Rng+?Sized>(&self, rng: &mut R, scale_exponent_sd: f64 ) -> Option<(Self, f64)> {
-
-        let mut new_set = self.derive_set();
-
-        let c_id = rng.gen_range(0..self.set.len());
-
-        let mut replacement = new_set.nth_motif(c_id).clone();
-
-        let base_change = rng.gen_range(0..replacement.pwm.len());
-
-        let Some(attempt_new) = replacement.pwm[base_change].scaled_base(scale_exponent_sd, rng) else { return None;};
-
-        replacement.pwm[base_change] = attempt_new;
-
-        let ln_post = new_set.replace_motif(replacement, c_id);
-
-        Some((new_set, ln_post))
-
-
-    }
-
-    pub fn propose_ordered_scale_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, scale_exponent_sd: f64) -> Option<(Self, f64)> {
-
-
-        let mut new_set = self.derive_set();
-
-        let c_id = rng.gen_range(0..self.set.len());
-
-        let mut replacement = new_set.nth_motif(c_id).clone();
-
-        let scaler = REDUCE_MOTIF_SCALE_MOVE[self.nth_motif(c_id).len()-MIN_BASE]*0.5;
-
-        let Some(attempt_new) = replacement.pwm.iter().map(|a| a.scaled_base(scale_exponent_sd*scaler, rng)).collect::<Option<Vec<Base>>>() else {return None;};
-
-        replacement.pwm = attempt_new;
-
-        let ln_post = new_set.replace_motif(replacement, c_id);
-
-        Some((new_set, ln_post))
     }
 
 
@@ -5463,7 +5415,7 @@ impl<'a> SetTrace<'a> {
                 })  
             },
             1 =>  {
-                self.active_set.propose_resid_leap(rng).map(|(new_mot, modded_ln_like)| { 
+                self.active_set.propose_resid_leap(GOOD_V_BAD_CUT[which_variant], rng).map(|(new_mot, modded_ln_like)| { 
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
                     (new_mot, accepted)
                 })
@@ -5498,27 +5450,12 @@ impl<'a> SetTrace<'a> {
                 })
             },
             6 => {
-                let scale_s = SCALE_SDS[which_variant];
-                self.active_set.propose_scale_base_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| { 
-                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
-                    (new_mot, accepted)
-                })
-            }, 
-
-            7 => {
-                let scale_s = SCALE_SDS[which_variant];
-                self.active_set.propose_ordered_scale_move_custom(rng, scale_s).map(|(new_mot, modded_ln_like)| {
-                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
-                    (new_mot, accepted)
-                })
-            },
-            8 => {
                 self.active_set.propose_kernel_swap(rng).map(|(new_mot, modded_ln_like)| {
                     let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng);
                     (new_mot, accepted)
                 })
             },
-            9 => {
+            7 => {
                 Some((self.active_set.randomize_motifs(self.thermo_beta, rng), true))
             },
             _ => unreachable!(),
@@ -6170,28 +6107,11 @@ impl MoveTracker {
 
     pub fn give_status(&self) {
         let mut ind: usize = 0;
-            /*for i in 0..BASE_RATIO_SDS.len(){
-                for j in 0..BASE_LINEAR_SDS.len() {
-                    println!("Single base move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                             BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
-                             (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
-                    ind += 1;
-                }
-            }*/
 
             println!("Single base sample. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", 
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind], 
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
             ind += 1;
-
-            /*for i in 0..BASE_RATIO_SDS.len(){
-                for j in 0..BASE_LINEAR_SDS.len() {
-                    println!("Motif bases move with ratio sd {} and linear sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                             BASE_RATIO_SDS[i], BASE_LINEAR_SDS[j], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
-                             (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
-                    ind += 1;
-                }
-            }*/
 
             println!("Guided scramble. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
@@ -6254,18 +6174,6 @@ impl MoveTracker {
 
             //println!("Secondary shuffle move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
             ind += 1;
-            for i in 0..SCALE_SDS.len() {
-                println!("Base scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                         SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
-                         (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
-                ind += 1;
-            }
-            for i in 0..SCALE_SDS.len() {
-                println!("Motif scale move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
-                         SCALE_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
-                         (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
-                ind += 1;
-            }
             println!("Randomize kernel. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.", self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],(self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
             ind += 1;
             println!("Randomize move (always accepts). Times {}. Last distance is {}", self.attempts_per_move[ind], match self.distances_per_attempted_move[ind].last() { Some(dist) => format!("{:?}", dist.0), None => "None tried".to_owned() });
@@ -7809,7 +7717,7 @@ mod tester{
         }
 
 
-        let mut failures = 0_usize;
+        /*let mut failures = 0_usize;
         let (single_mot, _ln_prop) = loop { if let Some(r) = motif_set.propose_ordered_motif_move_custom(&mut rng, 0.1, 0.1) { break r; } else {println!("fail base {failures}"); failures+=1;}};
 
         println!("failed in single motif move {} times before succeeding", failures);
@@ -7846,6 +7754,8 @@ mod tester{
                 }
             }
         }
+
+        */
         
         let mut failures = 0_usize;
         
@@ -7905,7 +7815,7 @@ mod tester{
          
         let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)+BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
@@ -7956,7 +7866,7 @@ mod tester{
 
         let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a) + BASE_RESOLUTION.ln()} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
         let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
 
@@ -8010,7 +7920,7 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0"))) + ((BASE_L-1) as f64)*BASE_RESOLUTION.ln();
+        let actual_prior = extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
 
         println!("hanging");
         assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
@@ -8065,7 +7975,7 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = PROPOSE_EXTEND.get().expect("no writes expected now").ln_pdf(&(motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0"))) + ((BASE_L-1) as f64)*BASE_RESOLUTION.ln();
+        let actual_prior = (motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")).scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
 
         assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
         }
@@ -8423,7 +8333,7 @@ mod tester{
 
         //println!("{} {} {} PWM PRIOR",sequence.kmer_in_seq(&motif.best_motif()), motif.pwm_prior(&sequence), ((MAX_BASE+1-MIN_BASE) as f64).ln()-(sequence.number_unique_kmers(motif.len()) as f64).ln() - motif.pwm_ref().iter().map(|a| BASE_PRIOR.ln_pdf(a)).sum::<f64>());
         assert!((motif.pwm_prior(&sequence)-(sequence.number_unique_kmers(motif.len()) as f64).ln()+((MAX_BASE+1-MIN_BASE) as f64).ln()
-                 -((motif.len() as f64)*(-(BASE_L as f64).ln() -((BASE_L-1) as f64)*(-SCORE_THRESH).ln() ))).abs() < 1e-6);
+                 -((motif.len() as f64)*(BASE_RESOLUTION.ln() * ((BASE_L-1) as f64) ))).abs() < 1e-6);
 
         let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],&mut rng);//Sequence
 
