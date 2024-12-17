@@ -218,6 +218,15 @@ pub fn main() {
         let mot = activated.get_nth_motif(i);
         println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0));
     }
+
+    let cumulative_lns = activated.ln_posts_by_strength();
+
+    println!("Number\tLn Posterior");
+    for (i, like) in cumulative_lns.into_iter().enumerate() {
+        println!("{i}\t{like}");
+    }
+
+
     let save_file = format!("{}_best_trace", base_file);
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);

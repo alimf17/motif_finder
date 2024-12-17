@@ -176,7 +176,7 @@ const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const GOOD_V_BAD_CUT: [f64; 5] = [2.5, 3.0, 3.5, 4.0, 4.5];
+const GOOD_V_BAD_CUT: [f64; 6] = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
 
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
@@ -195,11 +195,11 @@ const NUM_MOVES: usize = {
     size
 };
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 80, 20, 5, 20, 40, 40, 20, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 80, 20, 20, 20, 40, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
-static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 10]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
+static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 8]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
-static VARIANT_CUMULATIVE: Lazy<[usize; 10]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
+static VARIANT_CUMULATIVE: Lazy<[usize; 8]> = Lazy::new(|| core::array::from_fn(|a| if a == 0 {0} else {VARIANT_NUMS[0..a].iter().sum()}));
 
 static HIST_END_NAMES: Lazy<[String; NUM_MOVES]> = Lazy::new(|| {
                                                    let m = (0..1).map(|_| format!("_rook_move.png"));
@@ -3519,7 +3519,47 @@ impl<'a> MotifSet<'a> {
         mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
     }
 
+    pub fn sort_by_height(&mut self) {
+        self.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
+    }
+
+    pub fn ln_posts_by_strength(&self) -> Vec<f64> {
+
+        let mut motif_set = self.clone();
+
+        motif_set.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
+
+        let mut cumulative_signal = self.signal.derive_zero();
+
+        let mut ln_posts: Vec<f64> = Vec::with_capacity(self.set.len());
+
+        for i in 0..self.set.len() {
+
+            cumulative_signal += &motif_set.nth_motif(i).generate_waveform(self.data_ref);
+
+            let mut cumulative_set = MotifSet {
+
+                set: (0..i).map(|a| motif_set.set[a].clone()).collect(),
+                signal: cumulative_signal.clone(),
+                ln_post: None,
+                data_ref: self.data_ref,
+
+            };
+
+            ln_posts.push(cumulative_set.ln_posterior());
+
+
+        }
+
+        ln_posts
+
+    }
+
     pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) {
+
+        let mut motif_set = self.clone();
+
+        motif_set.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
 
         let signal = self.recalced_signal();
 
@@ -3527,12 +3567,22 @@ impl<'a> MotifSet<'a> {
 
         signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false);
 
+        let mut cumulative_signal = self.signal.derive_zero();
+
         if self.set.len() > 1 {
-            for (i, _mot) in self.set.iter().enumerate() {
+            for i in 0..self.set.len() {
 
                 let signal_name = format!("Motif_{}",i);
-                let sub_signal = self.nth_motif(i).generate_waveform(self.data_ref);
+                let sub_signal = motif_set.nth_motif(i).generate_waveform(self.data_ref);
                 sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &GREEN, true);
+
+                cumulative_signal += &sub_signal;
+
+                if i >= 1 { 
+                    let accumulator_name = format!("Strongest_{}_motifs", i+1);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &plotters::prelude::full_palette::PURPLE, true);
+                
+                }
 
             }
         }
@@ -4310,11 +4360,11 @@ impl<'a> MotifSet<'a> {
             //Autoreject if we chose to do the peak move and couldn't
             //if peaky_locs.len() == 0 { return None;}
             //peaky_locs.choose(rng)?
-            let Some(cho) = peaky_locs.choose(rng) else { println!("peaky locs fail {}", peaky_locs.len()); return None;};
+            let Some(cho) = peaky_locs.choose(rng) else { return None;};
             cho
         } else {
             //unpeaky_locs.choose(rng)?
-            let Some(cho) = peaky_locs.choose(rng) else { println!("peaky locs fail {}", peaky_locs.len()); return None;};
+            let Some(cho) = peaky_locs.choose(rng) else { return None;};
             cho
         };
         //SAFETY: intersect_kmer_start_range only returns None if kmer length is 0 or if the data index is out of range
@@ -5393,6 +5443,7 @@ impl<'a> SetTrace<'a> {
 
         let which_move = PICK_MOVE.sample(rng);
 
+
         let mut which_variant = SAMPLE_VARIANTS[which_move].sample(rng); 
 
         //Can't use non const values in match statements. Using a bajillion if-elses 
@@ -6113,10 +6164,12 @@ impl MoveTracker {
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
             ind += 1;
 
-            println!("Guided scramble. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
+            for cut in GOOD_V_BAD_CUT {
+            println!("Guided scramble with cut {cut}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
             ind += 1;
+            }
             for i in 0..HEIGHT_SDS.len() {
                 println!("Height move with sd {}. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                          HEIGHT_SDS[i], self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],

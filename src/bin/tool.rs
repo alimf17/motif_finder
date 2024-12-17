@@ -98,8 +98,9 @@ fn main() {
 
     let max_tf: usize = args.get(13).map(|a| a.parse().ok()).flatten().unwrap_or(5);
 
-    MAX_TF_NUM.set(max_tf).unwrap();
+    //MAX_TF_NUM.set(max_tf).unwrap();
 
+    MAX_TF_NUM.set(200).unwrap();
 
     println!("Max TF num {:?}", MAX_TF_NUM);
 
