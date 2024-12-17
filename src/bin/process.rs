@@ -223,10 +223,12 @@ pub fn main() {
 
     let cumulative_lns = activated.ln_posts_by_strength();
 
-    println!("Number\tAdded Motif\tAdded Motif Height\tLn Posterior");
+    let cumulative_noises = activated.distances_by_strength();
+
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
     for (i, like) in cumulative_lns.into_iter().enumerate() {
         let mot_ref = activated.get_nth_motif(i);
-        println!("{i}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height());
+        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
     }
 
 

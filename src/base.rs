@@ -3554,6 +3554,38 @@ impl<'a> MotifSet<'a> {
         ln_posts
 
     }
+    
+    pub fn distances_by_strength(&self) -> Vec<f64> {
+
+        let mut motif_set = self.clone();
+
+        motif_set.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
+
+        let mut cumulative_signal = self.signal.derive_zero();
+
+        let mut dists: Vec<f64> = Vec::with_capacity(self.set.len());
+
+        for i in 0..self.set.len() {
+
+            cumulative_signal += &motif_set.nth_motif(i).generate_waveform(self.data_ref);
+
+            let mut cumulative_set = MotifSet {
+
+                set: (0..i).map(|a| motif_set.set[a].clone()).collect(),
+                signal: cumulative_signal.clone(),
+                ln_post: None,
+                data_ref: self.data_ref,
+
+            };
+
+            dists.push(cumulative_set.magnitude_signal_with_noise());
+
+
+        }
+
+        dists
+
+    }
 
     pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) {
 
