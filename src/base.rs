@@ -3612,7 +3612,7 @@ impl<'a> MotifSet<'a> {
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
-                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &plotters::prelude::full_palette::PURPLE, true);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &plotters::prelude::full_palette::PURPLE, true);
                 
                 }
 
