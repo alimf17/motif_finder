@@ -213,17 +213,20 @@ pub fn main() {
     let data_ref = AllDataUse::new(&data_reconstructed, 0.0).expect("AllData file must be valid!");
 
     println!("Best motif set: {:?}", best_single_motif_set);
-    let activated = best_single_motif_set.reactivate_set(&data_ref);
+    let mut activated = best_single_motif_set.reactivate_set(&data_ref);
     for i in 0..best_single_motif_set.num_motifs(){
         let mot = activated.get_nth_motif(i);
         println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0));
     }
 
+    activated.sort_by_height();
+
     let cumulative_lns = activated.ln_posts_by_strength();
 
-    println!("Number\tLn Posterior");
+    println!("Number\tAdded Motif\tAdded Motif Height\tLn Posterior");
     for (i, like) in cumulative_lns.into_iter().enumerate() {
-        println!("{i}\t{like}");
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height());
     }
 
 
