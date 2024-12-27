@@ -5078,6 +5078,10 @@ impl StrippedMotifSet {
     }
 
     pub fn num_motifs(&self) -> usize { self.set.len() }
+    
+    pub fn sort_by_height(&mut self) {
+        self.set.sort_unstable_by(|a, b| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
+    }
 
     pub fn motif_num_prior(&self) -> f64 {
         if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
@@ -5267,6 +5271,31 @@ impl StrippedMotifSet {
             matches
         }
     }
+    pub fn pair_to_other_set_rmse_data<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
+   
+        let self_waves: Vec<Waveform> = self.set_iter().map(|a| a.generate_waveform(&data_seq)).collect();
+        let alts_waves: Vec<Waveform> = reference_set.set_iter().map(|a| a.generate_waveform(&data_seq)).collect();
+
+
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[i].rmse_with_wave(&alts_waves[j]));
+
+        //We want the self to act like the columns, because the positions of the reference set should be pulled
+        let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
+
+        if self.num_motifs() >= reference_set.num_motifs() {
+            let (_, matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),self.get_nth_motif(x)))).collect()
+        } else {
+            let transpose = check_matrix.transposed();
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
+            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; reference_set.num_motifs()];
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(), self.get_nth_motif(i)));
+            }
+            matches
+        }
+    }
+
 
     pub fn get_nth_motif(&self, index: usize) -> &Motif {
         &self.set[index]
