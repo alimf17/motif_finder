@@ -143,8 +143,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-//pub const MIN_HEIGHT: f64 = 3.0;
-pub const MIN_HEIGHT: f64 = 1.5;
+pub const MIN_HEIGHT: f64 = 3.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -2418,6 +2417,127 @@ impl Motif {
 
     }
     
+    pub fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
+
+        let cutoff = -MIN_HEIGHT-distribution_cutoff;
+
+        let standin_height = self.peak_height+distribution_cutoff;
+        
+        let mut check_cutoff = cutoff;
+
+
+        let len = self.len();
+
+        
+        let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
+
+        for sixmer in 0_u64..=0b11_11_11_11_11_11 {
+
+            let forward_score = self.calc_6mer_prefix_binding(sixmer);
+            if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
+        }
+
+
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+
+        forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
+            (0_u64..=0b11_11).filter_map(move |twomer| {
+                let eightmer = (twomer << 12) + sixmer;
+                if seq.kmer_count(eightmer, 8).is_none() {return None;};
+                //SAFETY: two bits can only add up to 3 at most
+                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
+                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
+                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
+                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
+            })
+        }).flatten().collect();
+        
+        let mut accounted_length: usize = 8;
+
+        while accounted_length < len {
+
+
+            if forward_checks.len() == 0 {
+                return Vec::new();
+            }
+
+            check_cutoff = cutoff;
+            
+            forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+            
+            forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
+                BP_ARRAY.iter().filter_map(move |&base| {
+                    
+                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
+                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
+                    //SAFETY: two bits can only add up to 3 at most
+                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+
+                    let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
+                    
+
+                    if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
+                })
+            }).flatten().collect();
+
+            accounted_length+=1;
+        }
+
+        if forward_checks.len() == 0 { return Vec::new();}
+
+        
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+
+        
+        let mut final_binds: Vec<f64> = Vec::with_capacity(CAPACITY_FOR_NULL);
+        let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
+
+
+        /*while forward_checks.len() > 0 {
+
+            match forward_checks.get(0) {
+
+                None => break,
+                Some(t) => {
+                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
+                    //That's because it _can't_: we only store any particular kmer in one direction
+                    //And we check for the reverse complement through the reverse complement MATRIX
+                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
+                    //Which corresponds to both forward and reverse binding happening to seem fine
+                    //But we already have the score which is actually the better one, and thus we ignore the other
+                    if accounted_kmers.contains(&t.0) {
+                        _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                        continue;
+                    } else {
+                    
+                        accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
+                    }
+                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                    for _ in 0..times_to_add { final_binds.push(t.1+standin_height); }
+                    _ = forward_checks.drain(0..1).collect::<Vec<_>>();
+                },
+            };
+
+        }*/
+          
+
+        _ = forward_checks.into_iter().map(|t| {
+            if !accounted_kmers.contains(&t.0) {
+                accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
+                let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
+                for _ in 0..times_to_add { final_binds.push(t.1+standin_height); }
+            }
+        }).collect::<Vec<_>>();
+
+        final_binds
+
+
+    }
+    
     pub fn return_any_null_binds_by_hamming_with_kmers(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<(Vec<Bp>,f64)> {
 
         let cutoff = -MIN_HEIGHT-distribution_cutoff;
@@ -3519,6 +3639,10 @@ impl<'a> MotifSet<'a> {
     
         mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
     }
+    fn calc_motif_null_binds_entire(&self, mot: &Motif) -> Vec<f64> {
+    
+        mot.return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
+    }
 
     pub fn sort_by_height(&mut self) {
         self.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
@@ -3598,6 +3722,15 @@ impl<'a> MotifSet<'a> {
 
         let signal_directory: String = format!("{}/{}_new_occupancy",output_dir,file_name);
 
+        let mut outfile_handle = fs::File::create(format!("{}/motif_set.bin", signal_directory)).expect("Output directory must be valid!");
+
+        let mot_to_save: StrippedMotifSet = self.into();
+
+        let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
+
+        outfile_handle.write(&buffer).expect("buffer should write");
+
+        
         signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false);
 
         let mut cumulative_signal = self.signal.derive_zero();
@@ -3989,6 +4122,24 @@ impl<'a> MotifSet<'a> {
 
     }
 
+
+    pub fn replace_motif_entire(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
+        let rem_mot = self.nth_motif(rem_id).clone();
+        //println!("rep 1");
+        self.signal -= &rem_mot.generate_waveform(self.data_ref);
+        //println!("rep 2");
+        self.signal += &new_mot.generate_waveform(self.data_ref) ;
+        //println!("rep 3");
+        //println!("{:?}", new_mot);
+        let new_nulls = self.calc_motif_null_binds_entire(&new_mot); 
+        //println!("rep 4");
+        self.set[rem_id] = (new_mot, new_nulls);
+        //println!("rep 5");
+        self.ln_post = None;
+        //println!("rep 6");
+        self.ln_posterior()
+
+    }
 
     pub fn recalc_negatives(&mut self) {
         for i in 0..self.set.len() {
@@ -4950,7 +5101,7 @@ impl<'a> MotifSet<'a> {
 
             replacement.peak_height = *height;
 
-            let like = try_set.replace_motif(replacement.clone(), c_id);
+            let like = try_set.replace_motif_entire(replacement.clone(), c_id);
 
             let rmse = try_set.magnitude_signal_with_noise();
 
@@ -5130,6 +5281,34 @@ impl StrippedMotifSet {
         Ok(savestate_file)
     }
 
+    pub fn generate_incremenet_pr(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+
+        let over_add = self.over_additions();
+
+
+        for (i, set) in over_add.into_iter().enumerate() {
+
+            let run_mod = format!("{}_{}", run_name, i);
+            set.generate_pr_curve(data_ref, background_dist, fasta_file, output_dir, &run_mod)?;
+        }
+
+        Ok(())
+
+    }
+
+    //Note: do NOT trust the ln posteriors that come out of this. They are explicitly erroneous
+    pub fn over_additions(&self) -> Vec<StrippedMotifSet> {
+
+        let mut clone = self.clone();
+
+        clone.sort_by_height();
+
+
+        (0..clone.num_motifs()).map(|a| StrippedMotifSet { set: clone.set[0..=a].to_vec(), ln_post: self.ln_post}).collect()
+
+
+    }
+
     pub fn generate_pr_curve(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let mut peak_locations = data_ref.basic_peak(5.0);
@@ -5273,28 +5452,91 @@ impl StrippedMotifSet {
     }
     pub fn pair_to_other_set_rmse_data<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
    
-        let self_waves: Vec<Waveform> = self.set_iter().map(|a| a.generate_waveform(&data_seq)).collect();
-        let alts_waves: Vec<Waveform> = reference_set.set_iter().map(|a| a.generate_waveform(&data_seq)).collect();
+        let self_waves: Vec<Waveform> = self.set_iter().map(|a| {let mut b = a.clone(); b.peak_height = 5.0; b.generate_waveform(&data_seq)}).collect();
+        let alts_waves: Vec<Waveform> = reference_set.set_iter().map(|a| {let mut b = a.clone(); b.peak_height = 5.0; b.generate_waveform(&data_seq)}).collect();
 
+        println!("lens {} {}", self_waves.len(), alts_waves.len());
 
-        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[i].rmse_with_wave(&alts_waves[j]));
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].rmse_with_wave(&alts_waves[i]));
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
+        println!("Made matrix");
+
         if self.num_motifs() >= reference_set.num_motifs() {
-            let (_, matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
-            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),self.get_nth_motif(x)))).collect()
+            println!("first");
+            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                println!("{i} {j}");
+                println!("{} {}", self.set.len(), reference_set.set.len());
+                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
+            }
+            matches
+            //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
         } else {
+            println!("second");
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
-            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; reference_set.num_motifs()];
+            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
+            println!("{:?}", pre_matches);
+            println!("{:?}", check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(), self.get_nth_motif(i)));
+                println!("{i} {j}");
+                println!("{} {}", self.set.len(), reference_set.set.len());
+                
+                matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(), reference_set.get_nth_motif(j)));
             }
             matches
         }
     }
+
+    pub fn pair_to_other_set_binding<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
+   
+        let self_waves: Vec<Vec<f64>> = self.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
+        let alts_waves: Vec<Vec<f64>> = reference_set.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
+
+        println!("lens {} {}", self_waves.len(), alts_waves.len());
+
+        println!("{:?} \n {:?}", self_waves[0], alts_waves[0]);
+
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>());
+
+        //We want the self to act like the columns, because the positions of the reference set should be pulled
+        let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
+
+        println!("check matrix {:?}", check_matrix);
+        println!("Made matrix");
+
+        if self.num_motifs() >= reference_set.num_motifs() {
+            println!("first");
+            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                println!("{i} {j}");
+                println!("{} {}", self.set.len(), reference_set.set.len());
+                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
+            }
+            matches
+            //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
+        } else {
+            println!("second");
+            let transpose = check_matrix.transposed();
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
+            let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
+            println!("{:?}", pre_matches);
+            println!("{:?}", check_matrix);
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                println!("{i} {j}");
+                println!("{} {}", self.set.len(), reference_set.set.len());
+                
+                matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(), reference_set.get_nth_motif(j)));
+            }
+            matches
+        }
+    }
+
 
 
     pub fn get_nth_motif(&self, index: usize) -> &Motif {

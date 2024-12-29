@@ -78,8 +78,9 @@ fn main() {
     //I only care about naive assignments, hence not doing a fully optimized assignment problem
 
 
-    let assigned = stripped_sub.pair_to_other_set_rmse_data(&stripped_sup, &data);
+    let assigned = stripped_sub.pair_to_other_set_binding(&stripped_sup, &data);
 
+    println!("Assign complete {}", assigned.len());
     for (i, check) in assigned.into_iter().enumerate() {
 
         if let Some((rmse, sup_mot)) = check {
