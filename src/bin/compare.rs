@@ -83,7 +83,7 @@ fn main() {
 
     let wave_file = format!("{}_waves", motif_set_meme);
 
-    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
+    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, true);
 
     //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
     //let datas: Vec<AllDataUse> = background_lens.iter().map(|&a| unsafe{ data.with_new_fragment_length(a) }).collect();

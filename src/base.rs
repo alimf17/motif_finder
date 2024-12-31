@@ -104,7 +104,7 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
         
-pub const CAPACITY_FOR_NULL: usize = 200;
+pub const CAPACITY_FOR_NULL: usize = 1000;
 
 /*
 const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
@@ -3458,7 +3458,9 @@ impl<'a> MotifSet<'a> {
                     scores[j] = prop;
                 }
 
-                base_vec.push(Base::from_pwm(scores, background_dist, true).expect("We really shouldn't have negative bases in a meme file?"));
+
+                //NOTE: in my motif runs, this was true. For assessing the raw PWMs, this is false
+                base_vec.push(Base::from_pwm(scores, background_dist, false).expect("We really shouldn't have negative bases in a meme file?"));
             }
 
             let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
