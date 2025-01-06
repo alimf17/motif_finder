@@ -3756,6 +3756,17 @@ impl<'a> MotifSet<'a> {
         }
 
     }
+
+    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str) {
+
+        let self_sig = self.recalced_signal();
+        let alter_sig = other_set.recalced_signal();
+
+        let signal_directory: String = format!("{}/{}_{}_occupancy_compare",output_dir,file_name, other_name);
+
+       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::ORANGE_900, &plotters::prelude::full_palette::DEEPPURPLE_600,self_name, other_name);
+
+    }
 /*
     //I deliberately chose not to scale anything by peak heights here
     pub fn generate_set_binding_report(&self, data_ref:&AllDataUse) -> Vec<(usize, usize, usize, f64)> {
@@ -3914,10 +3925,10 @@ impl<'a> MotifSet<'a> {
 
         let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
-        pr_context.configure_mesh().x_label_style(("sans-serif", 70))
-            .y_label_style(("sans-serif", 70))
+        pr_context.configure_mesh().x_label_style(("serif", 70))
+            .y_label_style(("serif", 70))
             .x_label_formatter(&|v| format!("{:.0}", v))
-            .axis_desc_style(("sans-serif",90))
+            .axis_desc_style(("serif",90))
             .x_desc("Recall")
             .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
@@ -5411,10 +5422,10 @@ impl StrippedMotifSet {
         
         let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
-        pr_context.configure_mesh().x_label_style(("sans-serif", 70))
-            .y_label_style(("sans-serif", 70))
+        pr_context.configure_mesh().x_label_style(("serif", 70))
+            .y_label_style(("serif", 70))
             .x_label_formatter(&|v| format!("{:.0}", v))
-            .axis_desc_style(("sans-serif",90))
+            .axis_desc_style(("serif",90))
             .x_desc("Recall")
             .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
@@ -6348,7 +6359,7 @@ impl SetTraceDef {
         let mut chart = ChartBuilder::on(&plot)
             .set_label_area_size(LabelAreaPosition::Left, 40)
             .set_label_area_size(LabelAreaPosition::Bottom, 40)
-            .caption("Signal Comparison", ("sans-serif", 40))
+            .caption("Signal Comparison", ("serif", 40))
             .build_cartesian_2d(0_f64..(*locs.last().unwrap() as f64), (-16_f64)..16_f64).unwrap();
 
 
@@ -6653,10 +6664,10 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 
     let mut hist_context = hist.build_cartesian_2d(range, 0_f64..max_prob).unwrap();
 
-    hist_context.configure_mesh().x_label_style(("sans-serif", 70))
-        .y_label_style(("sans-serif", 70))
+    hist_context.configure_mesh().x_label_style(("serif", 70))
+        .y_label_style(("serif", 70))
         .x_label_formatter(&|v| format!("{:.0}", v))
-        .axis_desc_style(("sans-serif",90))
+        .axis_desc_style(("serif",90))
         .x_desc("Ln posterior density proposed set/current set")
         .y_desc("Probability").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
 
