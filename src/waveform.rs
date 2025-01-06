@@ -741,10 +741,10 @@ impl<'a> Waveform<'a> {
 
             let (right_space, _) = right.split_vertically((95).percent_height());
 
-            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
             bar.configure_mesh()
-                .y_label_style(("sans-serif", 40))
+                .y_label_style(("serif", 40))
                 .disable_mesh().draw().unwrap();
 
             let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
@@ -760,8 +760,8 @@ impl<'a> Waveform<'a> {
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
             chart.configure_mesh()
-                .x_label_style(("sans-serif", 40))
-                .y_label_style(("sans-serif", 40))
+                .x_label_style(("serif", 40))
+                .y_label_style(("serif", 40))
                 .x_label_formatter(&|v| format!("{:.0}", v))
                 .x_desc("Genome Location (Bp)")
                 .y_desc("Signal Intensity")
@@ -786,7 +786,7 @@ impl<'a> Waveform<'a> {
                 .set_label_area_size(LabelAreaPosition::Bottom, 50)
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+            map.configure_mesh().x_label_style(("serif", 0)).y_label_style(("serif", 0)).x_desc("Deviance").axis_desc_style(("serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
 
             map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
@@ -812,10 +812,10 @@ impl<'a> Waveform<'a> {
 
             let (right_space, _) = right.split_vertically((95).percent_height());
 
-            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
             bar.configure_mesh()
-                .y_label_style(("sans-serif", 40))
+                .y_label_style(("serif", 40))
                 .disable_mesh().draw().unwrap();
 
             let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
@@ -831,8 +831,8 @@ impl<'a> Waveform<'a> {
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
             chart.configure_mesh()
-                .x_label_style(("sans-serif", 40))
-                .y_label_style(("sans-serif", 40))
+                .x_label_style(("serif", 70))
+                .y_label_style(("serif", 70))
                 .x_label_formatter(&|v| format!("{:.0}", v))
                 .x_desc("Genome Location (Bp)")
                 .y_desc("Signal Intensity")
@@ -856,10 +856,97 @@ impl<'a> Waveform<'a> {
                 .set_label_area_size(LabelAreaPosition::Bottom, 50)
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+            map.configure_mesh().x_label_style(("serif", 0)).y_label_style(("serif", 0)).x_desc("Deviance").axis_desc_style(("serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
 
             map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
+
+
+
+
+
+
+        }
+    
+
+    }
+    
+    pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str) {
+
+        let current_resid = data_ref.data()-&self;
+
+        let zero_locs = data_ref.zero_locs();
+        
+        let block_lens = data_ref.data().seq().block_lens();
+
+        let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+        let alterna_locs_and_signal = alternative.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+
+        let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
+
+        let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+
+        let total_dir = format!("{}/{}", signal_directory,signal_name);
+
+        if let Err(creation) = std::fs::create_dir_all(&total_dir) {
+            warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
+            println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
+            return;
+        };
+
+        for i in 0..blocked_locs_and_signal.len() {
+
+
+            let loc_block = &blocked_locs_and_signal[i].0;
+            let sig_block = &blocked_locs_and_signal[i].1;
+            let alt_block = &alterna_locs_and_signal[i].1;
+            let dat_block = &blocked_locs_and_data[i].1;
+            let res_block = &blocked_locs_and_resid[i].1;
+
+            let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let min_alter  = alt_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+            let min = min_signal.min(*min_data_o).min(*min_alter)-1.0;
+
+            let max_signal = sig_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let max_alter  = alt_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let max_data_o = dat_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+            let max = max_signal.max(*max_data_o).max(*max_alter)+1.0;
+
+
+            let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
+
+            let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
+
+            plot.fill(&WHITE).unwrap();
+
+            let mut chart = ChartBuilder::on(&plot)
+                .set_label_area_size(LabelAreaPosition::Left, 100)
+                .set_label_area_size(LabelAreaPosition::Bottom, 100)
+                .caption("Signal Comparison", ("Times New Roman", 80))
+                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
+
+            chart.configure_mesh()
+                .x_label_style(("serif", 70))
+                .y_label_style(("serif", 70))
+                .x_label_formatter(&|v| format!("{:.0}", v))
+                .x_desc("Genome Location (Bp)")
+                .y_desc("Signal Intensity")
+                .disable_mesh().draw().unwrap();
+
+            const HORIZ_OFFSET: i32 = -5;
+
+            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+
+
+            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+            
+            chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+
+            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
+
 
 
 
