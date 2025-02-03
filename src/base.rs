@@ -5499,16 +5499,14 @@ impl StrippedMotifSet {
         let self_waves: Vec<Vec<f64>> = self.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
         let alts_waves: Vec<Vec<f64>> = reference_set.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
 
-        println!("lens {} {}", self_waves.len(), alts_waves.len());
 
-        println!("{:?} \n {:?}", self_waves[0], alts_waves[0]);
 
         let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>());
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
-        println!("check matrix {:?}", check_matrix);
+        println!("check matrix {}", check_matrix);
         println!("Made matrix");
 
         if self.num_motifs() >= reference_set.num_motifs() {
