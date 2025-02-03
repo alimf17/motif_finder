@@ -907,7 +907,6 @@ impl<'a> Waveform<'a> {
             let min_alter  = alt_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
             let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
 
-            let min = min_signal.min(*min_data_o).min(*min_alter)-1.0;
 
             let max_signal = sig_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
             let max_alter  = alt_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
@@ -915,6 +914,7 @@ impl<'a> Waveform<'a> {
 
             let max = max_signal.max(*max_data_o).max(*max_alter)+1.0;
 
+            let min = min_signal.min(*min_data_o).min(*min_alter).min(-max/3.0)-1.0;
 
             let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
@@ -923,8 +923,8 @@ impl<'a> Waveform<'a> {
             plot.fill(&WHITE).unwrap();
 
             let mut chart = ChartBuilder::on(&plot)
-                .set_label_area_size(LabelAreaPosition::Left, 100)
-                .set_label_area_size(LabelAreaPosition::Bottom, 100)
+                .set_label_area_size(LabelAreaPosition::Left, 200)
+                .set_label_area_size(LabelAreaPosition::Bottom, 200)
                 .caption("Signal Comparison", ("Times New Roman", 80))
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
@@ -943,7 +943,7 @@ impl<'a> Waveform<'a> {
 
             chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
             
-            chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+            chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
 
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
 

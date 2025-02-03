@@ -3650,6 +3650,33 @@ impl<'a> MotifSet<'a> {
         self.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
     }
 
+    pub fn only_n_strongest(&'a self, n: usize) -> MotifSet<'a> {
+
+        let mut sort_set = self.clone();
+        sort_set.sort_by_height();
+        
+        if n >= self.set.len() { return sort_set;} 
+
+        let mut cumulative_signal = self.signal.derive_zero();
+
+        for i in 0..n {
+            cumulative_signal += &sort_set.nth_motif(i).generate_waveform(self.data_ref);
+        }
+
+        let mut sub_set = MotifSet {
+
+            set: (0..n).map(|a| sort_set.set[a].clone()).collect(),
+            signal: cumulative_signal.clone(),
+            ln_post: None, 
+            data_ref: self.data_ref
+        };
+
+        _ = sub_set.ln_posterior();
+
+        sub_set
+
+    }
+
     pub fn ln_posts_by_strength(&self) -> Vec<f64> {
 
         let mut motif_set = self.clone();
@@ -3764,7 +3791,7 @@ impl<'a> MotifSet<'a> {
 
         let signal_directory: String = format!("{}/{}_{}_occupancy_compare",output_dir,file_name, other_name);
 
-       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::ORANGE_900, &plotters::prelude::full_palette::DEEPPURPLE_600,self_name, other_name);
+       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::PINK_600, &plotters::prelude::full_palette::BLUE_A200,self_name, other_name);
 
     }
 /*
@@ -5512,9 +5539,8 @@ impl StrippedMotifSet {
 
         println!("lens {} {}", self_waves.len(), alts_waves.len());
 
-        println!("{:?} \n {:?}", self_waves[0], alts_waves[0]);
 
-        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>());
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>().log2());
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
@@ -5529,7 +5555,7 @@ impl StrippedMotifSet {
             for (i, j) in pre_matches.into_iter().enumerate() {
                 println!("{i} {j}");
                 println!("{} {}", self.set.len(), reference_set.set.len());
-                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
+                matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
             }
             matches
             //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
