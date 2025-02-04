@@ -5285,6 +5285,10 @@ impl StrippedMotifSet {
 
     pub fn ln_posterior(&self) -> f64 { self.ln_post }
 
+    pub fn ln_likelihood(&self, seq: &Sequence) -> f64 {
+        self.ln_posterior()-self.ln_prior(seq)
+    }
+
     pub fn set_iter(&self) -> Iter<'_, Motif> {
         self.set.iter()
     }
@@ -5544,7 +5548,7 @@ impl StrippedMotifSet {
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
-        println!("check matrix {}", check_matrix);
+        println!("check matrix {:?}", check_matrix);
         println!("Made matrix");
 
         if self.num_motifs() >= reference_set.num_motifs() {
@@ -6330,6 +6334,10 @@ impl SetTraceDef {
 
     pub fn extract_highest_posterior_set(&self, tail_start: usize) -> &StrippedMotifSet {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_post.partial_cmp(&b.ln_post).expect("No NaNs allowed in posterior")).expect("trace should have at least one motif set")
+    }
+    
+    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, tail_start: usize) -> &StrippedMotifSet {
+        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(seq).partial_cmp(&b.ln_likelihood(seq)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
 
     pub fn create_distance_traces(&self, reference_mots: &Vec<Motif>) -> Vec<Vec<f64>> {
