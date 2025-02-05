@@ -243,7 +243,7 @@ pub fn main() {
 
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
-    
+   /* 
     let trial_a = best_single_motif_set.generate_pr_curve(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
 
     let trial_x = best_single_motif_set.generate_incremenet_pr(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
@@ -255,7 +255,7 @@ pub fn main() {
     if trial_x.is_err() {
         println!("error in cum pr gen {:?}", trial_x);
     }
-
+*/
 /*
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
@@ -707,13 +707,13 @@ pub fn main() {
     };
     plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
    
-    /*
+    
     let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
     let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&all_dat).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    }; */
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_reconstructed).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+    }; 
 
     /*
     let mut plot_like = poloto::plot(format!("{} Median distance to data", base_file), "Step", "Median Dist");
@@ -723,7 +723,7 @@ pub fn main() {
         plot_like.line(format!("Chain {}", letter), trace.wave_dist_trace(&all_dat_use).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     };*/
 
-    //plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
+    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
     
     let _rng = rand::thread_rng();
     

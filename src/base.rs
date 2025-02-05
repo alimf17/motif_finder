@@ -143,7 +143,7 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 3.0;
+pub const MIN_HEIGHT: f64 = 1.0;
 pub const MAX_HEIGHT: f64 = 15.;
 const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 const LOG_HEIGHT_SD: f64 = 0.25;
@@ -6932,10 +6932,9 @@ impl<'a> TemperSetTraces<'a> {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            //NOTE: yes, I need to add the ln_prior again to the total ln posterior. This accounts for reversible jump discrepancies by accounting for different dimensionalities and the like
-            //      This effect will cancel out for motif sets with the same number of motifs with the same number of BPs per TF and the same heights.
-            //      The Jacobian matrix is just the identity matrix, basically, so I don't care
-            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior()+a.0.active_set.ln_prior(), b.0.active_set.ln_posterior()+b.0.active_set.ln_prior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            //NOTE: I don't need to do anything special for the reversible jump case. Having to
+            //account for the forward and reverse swaps already does dimension matching for me.
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
@@ -6952,10 +6951,9 @@ impl<'a> TemperSetTraces<'a> {
             let (c, d) = x.split_at_mut(1);
             let (a, b) = (&mut c[0], &mut d[0]);
             let mut rng = rng_maker();
-            //NOTE: yes, I need to add the ln_prior again to the total ln posterior. This accounts for reversible jump discrepancies by accounting for different dimensionalities and the like
-            //      This effect will cancel out for motif sets with the same number of motifs with the same number of BPs per TF and the same heights.
-            //      The Jacobian matrix is just the identity matrix, basically, so I don't care
-            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior()+a.0.active_set.ln_prior(), b.0.active_set.ln_posterior()+b.0.active_set.ln_prior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
+            //NOTE: I don't need to do anything special for the reversible jump case. Having to
+            //account for the forward and reverse swaps already does dimension matching for me.
+            let accept_swap = MotifSet::accept_test(a.0.active_set.ln_posterior(), b.0.active_set.ln_posterior(), a.0.thermo_beta-b.0.thermo_beta, &mut rng);
             if accept_swap {
                 //let tmp = a[0].0.active_set;
                 //a[0].0.active_set = a[1].0.active_set;
