@@ -145,13 +145,15 @@ fn main() {
             },
     };
 
-    println!("filt {} cut {:?}", filter, peak_cutoff);
+    println!("filt {} cut {:?} {run_name}", filter, peak_cutoff);
     PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args parsed");
 
     println!("rayon {:?}", rayon::current_num_threads());
+
+    println!("output directory {output_dir}");
 
     let (mut total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
 

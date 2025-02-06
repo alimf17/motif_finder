@@ -3751,7 +3751,15 @@ impl<'a> MotifSet<'a> {
 
         let signal_directory: String = format!("{}/{}_new_occupancy",output_dir,file_name);
 
-        let mut outfile_handle = fs::File::create(format!("{}/motif_set.bin", signal_directory)).expect("Output directory must be valid!");
+        println!("sig {signal_directory}");
+
+        let mut outfile_handle = match fs::File::create(format!("{}/motif_set.bin", signal_directory)) {
+            Err(_) => {
+                fs::create_dir_all(signal_directory.clone()).expect("Output directory must be valid!");
+                fs::File::create(format!("{}/motif_set.bin", signal_directory)).expect("Output directory must be valid!")
+            },
+            Ok(o) => o
+        };
 
         let mot_to_save: StrippedMotifSet = self.into();
 
