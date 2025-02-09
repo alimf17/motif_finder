@@ -134,9 +134,9 @@ impl AllData {
 
 
         let file_out = if peak_scale.is_some() {
-            format!("{}/{}_{}_custom_scale_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),peak_scale.expect("We only get here if peak_scale is Some"), spacing,DATA_SUFFIX)
+            format!("{}/{}_{}_custom_scale_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),peak_scale.expect("We only get here if peak_scale is Some"), spacing,DATA_SUFFIX)
         } else {
-            format!("{}/{}_{}_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX)
+            format!("{}/{}_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX)
         };
 
         println!("formatted");
