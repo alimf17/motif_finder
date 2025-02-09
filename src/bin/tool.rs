@@ -168,12 +168,11 @@ fn main() {
 
     let data_ref = AllDataUse::new(&total_data, filter).unwrap();
 
-    println!("alldata use {:?}", data_ref.propensities());
-
     let _data = data_ref.data();
 
     let background = data_ref.background_ref();
 
+    println!("min_height {}", data_ref.min_height());
     println!("background: {:?}", background);
 
     let save_step = (1+(num_advances/NUM_CHECKPOINT_FILES)).min(1000);
