@@ -1642,14 +1642,14 @@ impl Motif {
         Some((motif, dirichlet_like+propensities[selection].ln()-sum_prop.ln()))
     }
 
-    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
+    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence,rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
-        Self::from_motif(mot, height_dist, rng)
+        Self::from_motif_with_height(mot, peak_height, rng)
 
     }
 
@@ -3160,7 +3160,7 @@ impl<'a> MotifSet<'a> {
 
     pub fn rand_with_one_height<R: Rng+?Sized >(peak_height: f64, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
-        let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), data_ref.height_dist(), rng)];
+        let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), rng)];
 
         let signal = set[0].generate_waveform(data_ref);
             
@@ -7092,7 +7092,8 @@ mod tester{
     #[test]
     fn distances_test() {
         let mut rng = rand::thread_rng();
-        let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &mut rng);
+        static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, 3.0, MAX_HEIGHT).unwrap() );
+        let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &*HEIGHT_DIST, &mut rng);
         let dself = m.distance_function(&m);
         println!("{:?} dself", dself);
         assert!(dself.0.abs() < 1e-8);
@@ -7188,7 +7189,6 @@ mod tester{
 
         println!("st {:?} {:?} {:?} {} {} {}", b, simplex, mod_b, b.dist_sq(None), b.dist_sq(Some(&b)), simplex.iter().map(|&a| a.powi(2)).sum::<f64>().sqrt());
 
-        let _mot = Motif::from_motif(vec![Bp::A,Bp::C, Bp::T, Bp::G, Bp::C,Bp::T, Bp::T, Bp::A, Bp::C] , &mut rng);
 
 
         let b0 = b.add_in_vector_space([1e-6, 0.0, 0.0], false);
@@ -7372,7 +7372,7 @@ mod tester{
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 5;
-        let u8_per_block: usize = 90;
+        let u8_per_block: usize = 3000;
         let bp_per_block: usize = u8_per_block*4;
         let bp: usize = block_n*bp_per_block;
         let u8_count: usize = u8_per_block*block_n;
@@ -7381,7 +7381,7 @@ mod tester{
         let start_gen = Instant::now();
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
-        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/block_n)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
@@ -7405,7 +7405,7 @@ mod tester{
 
         let invented_propensities = vec![1.0/65536_f64; 65536];
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities, MIN_HEIGHT)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -7677,7 +7677,7 @@ mod tester{
         let start_gen = Instant::now();
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
-        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/block_n)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
@@ -7709,7 +7709,7 @@ mod tester{
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities, MIN_HEIGHT)};
         let _block_n: usize = 5;
 
         let duration = start_gen.elapsed();
@@ -8026,7 +8026,7 @@ mod tester{
 
 
 
-        println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(motif_set.data_ref().height_dist()), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
+        println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(data_seq.height_dist()), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
 
         //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
         assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
@@ -8323,7 +8323,7 @@ mod tester{
         //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
         //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
         
-        let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        let preblocks: Vec<u8> = (0..(u8_count/block_n)).map(|_| rng.gen::<u8>()).collect();
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
@@ -8349,7 +8349,7 @@ mod tester{
 
         let invented_propensities = vec![1.0/65536_f64; 65536];
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, &invented_propensities)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, &invented_propensities, 3.0)};
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -8357,9 +8357,9 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), &mut rng); //sequence
+        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), data_seq.height_dist(), &mut rng); //sequence
 
-        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), &mut rng); //sequence
+        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), data_seq.height_dist(), &mut rng); //sequence
 
         let start = Instant::now();
 
@@ -8376,7 +8376,7 @@ mod tester{
 
         let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
 
-        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, &invented_propensities) }; 
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, &invented_propensities, 3.0) }; 
 
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
@@ -8489,7 +8489,7 @@ mod tester{
         assert!((motif.pwm_prior(&sequence)-(sequence.number_unique_kmers(motif.len()) as f64).ln()+((MAX_BASE+1-MIN_BASE) as f64).ln()
                  -((motif.len() as f64)*(BASE_RESOLUTION.ln() * ((BASE_L-1) as f64) ))).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],&mut rng);//Sequence
+        let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],data_seq.height_dist(),&mut rng);//Sequence
 
         assert!(un_mot.pwm_prior(&sequence) < 0.0 && un_mot.pwm_prior(&sequence).is_infinite());
 
@@ -8554,7 +8554,7 @@ mod tester{
                             let bindy = unsafe{ motif.prop_binding(&for_mot_2)};
                             let rbind = unsafe{ motif.prop_binding(&rev_mot_2) };
 
-                            //println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
+                            println!("defect {defect} pos {}, defect_2 {defect_2} bindy {:?} rbind {:?}",pwm[k][m], bindy, rbind);
                             if bindy.1 {
                                 assert!(defect_2 < bindy.0);
                                 assert!(defect_2 < rbind.0);
@@ -8680,7 +8680,7 @@ mod tester{
 
 
 
-        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,&invented_propensities) }; 
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,&invented_propensities, 3.0) }; 
         let theory_base = [1.0.log2(), 1e-5.log2(), 1e-5.log2(), 0.2_f64.log2()];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -8803,7 +8803,7 @@ mod tester{
                 let relevant_binds = (cut_low..cut_high).filter(|&a| {
                     //println!("{a} bindslen {}", binds.0.len());
                     //binds.0[a] > (-motif.peak_height()) 
-                    binds[a] > (-motif.peak_height()) 
+                    binds[a] > (-MIN_HEIGHT) 
                 }).collect::<Vec<_>>();
 
 
@@ -8818,8 +8818,13 @@ mod tester{
                     }
 
                     scores[start_dats[i]+j] += score;
-                    //println!("wave {} score {} ratio {}", wave_gen[start_dats[i]+j], score, wave_gen[start_dats[i]+j]/score); 
-                    assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
+                    if (wave_gen[start_dats[i]+j]-score).abs() >= 1e-6{
+                        println!("error would have occurred");
+                        println!("wave {} score {} ratio {}", wave_gen[start_dats[i]+j], score, wave_gen[start_dats[i]+j]/score); 
+
+
+                    }
+                   // assert!((wave_gen[start_dats[i]+j]-score).abs() < 1e-6);
 
 
                 } else {
@@ -8830,8 +8835,9 @@ mod tester{
             }
         }
 
-        //println!("wave_gen-scores {:?}", scores.iter().zip(wave_gen.iter()).map(|(&a, &b)| a-b).collect::<Vec<_>>());
+        assert!( scores.iter().zip(wave_gen.iter()).map(|(&a, &b)| (a-b).abs()).all(|a| a < 1e-6));
 
+       
 
     }
 
