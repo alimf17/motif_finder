@@ -299,34 +299,49 @@ fn main() {
 
     let pushes = num_advances/steps_per_exchange_attempt + ((num_advances % steps_per_exchange_attempt) > 0) as usize;
 
+    let mut step_penalty = 0usize;
+
+    let step_checker = 5usize;
+
+    let abort_saving = step_checker*10;
+
     for step in 0..pushes {
 
         println!("push {step}");
         //initialization_chains.iter_and_swap(1, 1, 1, rand::thread_rng);
         initialization_chains.iter_and_swap(10, steps_per_exchange_attempt, burn_in_after_swap, rand::thread_rng);
 
-        if step % 5 == 0 {
+        if step % step_checker == 0 {
 
             initialization_chains.print_acceptances(TrackingOptions::TrackAllTraces);
 
-            //  }
             //  if ((step+1) % 5 == 0) || (step+1 == pushes) {
+            //  }
 
-            if step % 50 == 0 {
+            /*if step % 50 == 0 {
                 let root_signal: String = format!("{}/{}_dist_of",output_dir,run_name);
 
                 let num_bins: usize = 100;
 
                 initialization_chains.handle_histograms(TrackingOptions::TrackAllTraces, &root_signal, num_bins);
 
+            }*/
+       
+            let mut try_save_trace: usize = 0;
+            let save_trial: usize = 5;
+            while try_save_trace < save_trial {
+            
+                let Err(e) = initialization_chains.save_trace_and_clear(output_dir, &run_name, step-step_penalty) else {step_penalty = 0; break;};
+                try_save_trace += 1;
+                eprintln!("Error trying to save trace in step {step}: {:?}. Times occured: {try_save_trace}", e);
+                if try_save_trace >= save_trial {
+                    eprintln!("Aborting attempt to save step {step}. Will keep inference and try again next step.");
+                    step_penalty += step_checker;
+                    if step_penalty >= abort_saving { panic!("Haven't saved for too many steps! Something is wrong with the files to save to! Aborting inference."); }
+                }
             }
         
-            initialization_chains.save_trace_and_clear(output_dir, &run_name, step);
-
-            
-    }
-
-
+        }
     
     }
 

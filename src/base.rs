@@ -3741,7 +3741,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) {
+    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let mut motif_set = self.clone();
 
@@ -3755,8 +3755,8 @@ impl<'a> MotifSet<'a> {
 
         let mut outfile_handle = match fs::File::create(format!("{}/motif_set.bin", signal_directory)) {
             Err(_) => {
-                fs::create_dir_all(signal_directory.clone()).expect("Output directory must be valid!");
-                fs::File::create(format!("{}/motif_set.bin", signal_directory)).expect("Output directory must be valid!")
+                fs::create_dir_all(signal_directory.clone())?;
+                fs::File::create(format!("{}/motif_set.bin", signal_directory))?
             },
             Ok(o) => o
         };
@@ -3790,6 +3790,7 @@ impl<'a> MotifSet<'a> {
             }
         }
 
+        Ok(())
     }
 
     pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str) {
@@ -5593,12 +5594,11 @@ impl StrippedMotifSet {
         &self.set[index]
     }
     
-    pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) {
+    pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>>  {
 
         let current_active = &self.reactivate_set(data_ref);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, file_name);
-
+        current_active.save_set_trace_and_sub_traces(output_dir, file_name)
 
     }
 
@@ -6089,11 +6089,11 @@ impl<'a> SetTrace<'a> {
     pub fn current_set_to_print(&self) -> StrippedMotifSet {
         StrippedMotifSet::from(&self.active_set)
     }
-    pub fn save_initial_state(&self, output_dir: &str, run_name: &str) {
+    pub fn save_initial_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
 
-        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+        let mut outfile_handle = fs::File::create(savestate_file)?;
 
         let mot_to_save: StrippedMotifSet = match self.trace.get(0) {
             Some(set) => set.clone(), 
@@ -6102,23 +6102,25 @@ impl<'a> SetTrace<'a> {
 
         let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
 
-        outfile_handle.write(&buffer).expect("buffer should write");
+        outfile_handle.write(&buffer)?;
+        Ok(())
     }
 
-    pub fn save_final_state(&self, output_dir: &str, run_name: &str) {
+    pub fn save_final_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
 
-        if self.trace.last().is_none() {warn!("trace is empty!"); return;}
+        if self.trace.last().is_none() {warn!("trace is empty!"); return Ok(());}
 
 
         let last = self.trace.last().unwrap();
 
-        let mut outfile_handle = fs::File::create(savestate_file).expect("Output directory must be valid!");
+        let mut outfile_handle = fs::File::create(savestate_file)?;
 
         let buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
 
-        outfile_handle.write(&buffer).expect("buffer should write");
+        outfile_handle.write(&buffer)?;
+        Ok(())
     }
 
 /*
@@ -6137,10 +6139,10 @@ impl<'a> SetTrace<'a> {
         self.trace.clear();
     }
 
-    pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+    pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
-        let mut outfile_handle = fs::File::create(trace_file).expect("Need to give a valid file to write to or inference is pointless");
+        let mut outfile_handle = fs::File::create(trace_file)?;
 
         let len_trace = self.trace.len();
 
@@ -6157,18 +6159,18 @@ impl<'a> SetTrace<'a> {
 
         //fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
 
-        outfile_handle.write(&buffer).expect("buffer should write");
+        outfile_handle.write(&buffer)?;
 
-        self.save_initial_state(output_dir, run_name);
+        self.save_initial_state(output_dir, run_name)
     }
 
-    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let current_active = &self.active_set;
 
         let file_name = format!("{}/{:0>7}", run_name,zeroth_step);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, &file_name);
+        current_active.save_set_trace_and_sub_traces(output_dir, &file_name)
 
     }
 
@@ -7128,12 +7130,14 @@ impl<'a> TemperSetTraces<'a> {
     }
 
 
-    pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) {
+    pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
-        self.parallel_traces[0].0.save_trace(output_dir, run_name, zeroth_step);
-        self.parallel_traces[0].0.save_and_drop_history(output_dir, run_name, zeroth_step);
+        self.parallel_traces[0].0.save_trace(output_dir, run_name, zeroth_step)?;
+        self.parallel_traces[0].0.save_and_drop_history(output_dir, run_name, zeroth_step)?;
 
         for i in 1..self.parallel_traces.len() { self.parallel_traces[i].0.drop_history(); }
+
+        Ok(())
 
     }
 }
