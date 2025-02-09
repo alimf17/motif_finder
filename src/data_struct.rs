@@ -480,6 +480,8 @@ impl AllData {
         //Between peeking the data_file iterator and the code to process it after, we know that we have at least ONE data point now
         raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
 
+
+
         println!("Data sorted");
         let start_loc: usize = raw_locs_data[0].0;
         let last_loc: usize = raw_locs_data.last().unwrap().0;
@@ -490,7 +492,22 @@ impl AllData {
 
         let mut sorted_raw_data: Vec<f64> = raw_locs_data.iter().map(|(_,a)| *a).collect();
 
+
+
         sorted_raw_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+        let median = if sorted_raw_data.len() & 1 == 0 {
+            (sorted_raw_data[sorted_raw_data.len()/2]+sorted_raw_data[sorted_raw_data.len()/2-1])/2.0
+        } else {
+            sorted_raw_data[sorted_raw_data.len()/2]
+        };
+
+        for item in sorted_raw_data.iter_mut() {
+           *item -= median;
+        }
+        for item in raw_locs_data.iter_mut() {
+            item.1 -= median;
+        }
 
         let index_min_height: usize = ((1.0-prob_binding_site)*(sorted_raw_data.len() as f64)).ceil() as usize;
 
@@ -572,9 +589,6 @@ impl AllData {
         let mad_adjust = dat_off.median()*MAD_ADJUSTER;
         println!("rough sd is {}", mad_adjust);
 
-        for (_, dat) in refined_locs_data.iter_mut() {
-            *dat = *dat-median;
-        }
 
         println!("refined data values");
         //Here, refined_locs_data ultimately has one data value for every represented location in the data,
