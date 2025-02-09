@@ -143,12 +143,10 @@ pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit her
                                 //We store many kmers as u64s. 
 
 
-pub const MIN_HEIGHT: f64 = 3.0;
 pub const MAX_HEIGHT: f64 = 15.;
-const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
-const LOG_HEIGHT_SD: f64 = 0.25;
+pub const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
+pub const LOG_HEIGHT_SD: f64 = 0.25;
 
-static HEIGHT_DIST: Lazy<TruncatedLogNormal> = Lazy::new(|| TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap() );
 
 static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 
@@ -1202,21 +1200,21 @@ fn exponent_mantissa_f64(f: f64) -> (i64, f64) {
 
 
 
-fn reflect_abs_height(a: f64) -> f64 {
-    if (a > MIN_HEIGHT) && (a < MAX_HEIGHT) {
+fn reflect_abs_height(a: f64, min_height: f64) -> f64 {
+    if (a > min_height) && (a < MAX_HEIGHT) {
         return a;
     }
 
-    let reflect_check = (a.abs()-MIN_HEIGHT)/(MAX_HEIGHT-MIN_HEIGHT);
+    let reflect_check = (a.abs()-min_height)/(MAX_HEIGHT-min_height);
     let try_end = reflect_check-reflect_check.floor();
     let flip_space = (reflect_check.floor() as i32 & 0x01_i32) == 1;
 
     if flip_space {
-        MAX_HEIGHT-try_end*(MAX_HEIGHT-MIN_HEIGHT)
+        MAX_HEIGHT-try_end*(MAX_HEIGHT-min_height)
     } else {
-        MIN_HEIGHT+try_end*(MAX_HEIGHT-MIN_HEIGHT)
+        min_height+try_end*(MAX_HEIGHT-min_height)
     }
-    //-reflect_cond*(MAX_HEIGHT-MIN_HEIGHT)*a_sign*a.signum()+a_sign*a
+    //-reflect_cond*(MAX_HEIGHT-min_height)*a_sign*a.signum()+a_sign*a
 }
                                  
 //Note that arrays of Copy are themselves Copy
@@ -1405,7 +1403,7 @@ impl Motif {
         m
     }
 
-    pub fn from_meme_pwm(meme_pwm: Vec<[f64; BASE_L]>, background_dist: Option<[f64; BASE_L]>, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Result<Motif, InvalidBase> {
+    pub fn from_meme_pwm(meme_pwm: Vec<[f64; BASE_L]>, background_dist: Option<[f64; BASE_L]>, kernel_width: KernelWidth, kernel_variety: KernelVariety, min_height: f64) -> Result<Motif, InvalidBase> {
 
         let mut background = background_dist.unwrap_or([0.25; BASE_L]);
 
@@ -1429,7 +1427,7 @@ impl Motif {
         pwm.reserve_exact(MAX_BASE-pwm.len());
 
         Ok(Motif {
-            peak_height: MIN_HEIGHT, 
+            peak_height: min_height, 
             kernel_width: kernel_width,
             kernel_variety: kernel_variety,
             pwm: pwm, 
@@ -1437,14 +1435,12 @@ impl Motif {
 
     }
 
-    pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, rng: &mut R) -> Motif {
-
-        //let height_dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
+    pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
+        let peak_height: f64 = sign*height_dist.sample(rng);
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
         Self::raw_pwm(pwm, peak_height, kernel_width, kernel_variety)
@@ -1452,7 +1448,7 @@ impl Motif {
 
 
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+    pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -1463,7 +1459,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
+        let peak_height: f64 = sign*height_dist.sample(rng);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1479,7 +1475,7 @@ impl Motif {
     }
     
     //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn from_motif_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+    pub fn from_motif_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -1490,7 +1486,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
+        let peak_height: f64 = sign*height_dist.sample(rng);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1525,7 +1521,7 @@ impl Motif {
     }
 
 
-    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -1536,7 +1532,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*HEIGHT_DIST.sample(rng);
+        let peak_height: f64 = sign*height_dist.sample(rng);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1551,7 +1547,7 @@ impl Motif {
 
     }
 
-    pub fn from_motif_dirichlet<R: Rng + ?Sized>(best_bases: Vec<Bp>, rng: &mut R) -> Motif {
+    pub fn from_motif_dirichlet<R: Rng + ?Sized>(best_bases: Vec<Bp>, min_height: f64, rng: &mut R) -> Motif {
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_dirichlet(*a, rng)).collect();
         pwm.reserve_exact(MAX_BASE-best_bases.len());
@@ -1562,7 +1558,7 @@ impl Motif {
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
-        let peak_height: f64 = sign*(HEIGHT_PROPOSAL_DIST.sample(rng)+MIN_HEIGHT);
+        let peak_height: f64 = sign*(HEIGHT_PROPOSAL_DIST.sample(rng)+min_height);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1579,7 +1575,7 @@ impl Motif {
 
 
 
-    pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, height_dist: &impl ::rand::distributions::Distribution<f64>,rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
@@ -1587,12 +1583,12 @@ impl Motif {
         let mot = seq.random_valid_motif(num_bases, rng);
 
 
-        Self::from_motif(mot,  rng)
+        Self::from_motif(mot, height_dist, rng)
 
 
     }
     
-    pub fn rand_mot_alt<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_alt<R: Rng + ?Sized>(seq: &Sequence,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
@@ -1600,26 +1596,26 @@ impl Motif {
         let mot = seq.random_valid_motif(num_bases, rng);
 
 
-        Self::from_motif_alt(mot,  rng)
+        Self::from_motif_alt(mot, height_dist, rng)
 
 
     }
 
-    pub fn rand_mot_dirichlet<R: Rng + ?Sized>(seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_dirichlet<R: Rng + ?Sized>(seq: &Sequence, min_height: f64, rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
-        Self::from_motif_dirichlet(mot, rng)
+        Self::from_motif_dirichlet(mot, min_height, rng)
 
 
     }
 
 
 
-    pub fn rand_propensity_mot<R: Rng + ?Sized>(wave: &Waveform, rng: &mut R) -> Option<(Motif, f64)> {
+    pub fn rand_propensity_mot<R: Rng + ?Sized>(wave: &Waveform, height_dist: &impl ::rand::distributions::Distribution<f64>,rng: &mut R) -> Option<(Motif, f64)> {
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
@@ -1639,21 +1635,21 @@ impl Motif {
 
         let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
 
-        let motif = Self::from_motif_uniform(mot, rng);
+        let motif = Self::from_motif_uniform(mot,height_dist, rng);
 
         let dirichlet_like = motif.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         Some((motif, dirichlet_like+propensities[selection].ln()-sum_prop.ln()))
     }
 
-    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
 
         let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
-        Self::from_motif(mot, rng)
+        Self::from_motif(mot, height_dist, rng)
 
     }
 
@@ -1682,7 +1678,7 @@ impl Motif {
 
     }
 
-    pub fn rand_mot_with_max_len<R: Rng + ?Sized>(max_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
+    pub fn rand_mot_with_max_len<R: Rng + ?Sized>(max_bases: usize, seq: &Sequence,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut weights = vec![2_usize; max_bases-MIN_BASE];
         weights.push(1);
@@ -1694,7 +1690,7 @@ impl Motif {
         let mot = seq.random_valid_motif(num_bases, rng);
 
 
-        Self::from_motif(mot, rng)
+        Self::from_motif(mot, height_dist, rng)
 
     }
     
@@ -1889,17 +1885,14 @@ impl Motif {
         } else {-f64::INFINITY}
     }*/
 
-    pub fn height_prior(&self) -> f64 {
+    pub fn height_prior(&self, height_dist: &(impl ::rand::distributions::Distribution<f64> + Continuous<f64,f64>)) -> f64 {
 
         let mut prior = if self.peak_height > 0.0 { PROB_POS_PEAK.ln() } else { (1.0-PROB_POS_PEAK).ln() };
-        prior += HEIGHT_DIST.ln_pdf(self.peak_height.abs());
+        prior += height_dist.ln_pdf(self.peak_height.abs());
         prior
     }
 
 
-    pub fn d_height_prior(&self) -> f64 {
-        HEIGHT_DIST.d_ln_pdf(self.peak_height.abs())*self.peak_height.signum()
-    }
 
 
     //BINDING FUNCTIONS
@@ -2213,7 +2206,7 @@ impl Motif {
     }
 
 
-    pub fn return_bind_score_alt(&self, seq: &Sequence, distribution_cutoff: f64) -> Vec<(f64,bool)> {
+    pub fn return_bind_score_alt(&self, seq: &Sequence) -> Vec<(f64,bool)> {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -2269,9 +2262,9 @@ impl Motif {
 
     }
 
-    pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
+    pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
-        let cutoff = -MIN_HEIGHT-distribution_cutoff;
+        let cutoff = -min_height-distribution_cutoff;
 
         let standin_height = self.peak_height+distribution_cutoff;
         
@@ -2417,9 +2410,9 @@ impl Motif {
 
     }
     
-    pub fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<f64> {
+    pub fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
 
-        let cutoff = -MIN_HEIGHT-distribution_cutoff;
+        let cutoff = -min_height-distribution_cutoff;
 
         let standin_height = self.peak_height+distribution_cutoff;
         
@@ -2538,9 +2531,9 @@ impl Motif {
 
     }
     
-    pub fn return_any_null_binds_by_hamming_with_kmers(&self, seq: &NullSequence, distribution_cutoff: f64) -> Vec<(Vec<Bp>,f64)> {
+    pub fn return_any_null_binds_by_hamming_with_kmers(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<(Vec<Bp>,f64)> {
 
-        let cutoff = -MIN_HEIGHT-distribution_cutoff;
+        let cutoff = -min_height-distribution_cutoff;
 
         let standin_height = self.peak_height+distribution_cutoff;
         
@@ -2686,217 +2679,6 @@ impl Motif {
 
     }
 
-    //Warning: if group exceeds the number of blocks in seq, this will just return an empty vector
-    pub fn return_any_null_binds_in_group(&self, seq: &NullSequence, penalty: f64) -> Vec<f64> {
-
-        const SPAN: usize = (1+(MAX_BASE+2)/4);
-        let cutoff = -MIN_HEIGHT-penalty;
-
-        let standin_height = self.peak_height+penalty;
-
-        let coded_sequence = seq.seq_blocks();
-        let block_lens = seq.block_lens(); //bp space
-        let block_starts = seq.block_u8_starts(); //stored index space
-
-        let mut bind_scores: Vec<f64> = Vec::new();
-        
-        //let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
-
-        //println!("memory size uncoded_seq {}", seq.max_len()*size_of::<Bp>());
-
-        let num_blocks = block_lens.len();
-
-        let max_ignore_bind = cutoff;
-
-
-        {
-            //let uncoded_seq = uncoded_seq.as_mut_slice();
-            
-            for i in  0..num_blocks {
-
-
-                /*for jd in 0..(block_lens[i]/BP_PER_U8) {
-
-                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
-                    for k in 0..BP_PER_U8 {
-                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
-                    }
-
-                }*/
-
-                let mut u8_seq_window: [u8; SPAN] = core::array::from_fn(|a| coded_sequence[block_starts[i]+a]);
-                let mut bp_seq_window: [Bp; SPAN*4] = [Bp::A; SPAN*4];
-                for k in 0..SPAN {
-                    let bases = Sequence::code_to_bases(u8_seq_window[k]);
-                    bp_seq_window[4*k] = bases[0];
-                    bp_seq_window[4*k+1] = bases[1];
-                    bp_seq_window[4*k+2] = bases[2];
-                    bp_seq_window[4*k+3] = bases[3];
-                }
-
-                let mut prev_jd: usize = 0; 
-
-                
-                for j in 0..((block_lens[i])-(4*SPAN)) {
-
-                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
-                    unsafe{
-        
-
-                        //This is dividing j by 4, the number of BP in a u8, then rounding down
-                        let jd = j / 4;
-                        if jd > prev_jd {
-                            //println!("j {j} jd {jd} prev {prev_jd}");
-                            u8_seq_window.rotate_left(1);
-                            u8_seq_window[SPAN-1] = coded_sequence[block_starts[i]+SPAN-1+jd];
-                            bp_seq_window.rotate_left(4);
-
-                            let bases = Sequence::code_to_bases(u8_seq_window[SPAN-1]);
-                            bp_seq_window[4*SPAN-4] = bases[0];
-                            bp_seq_window[4*SPAN-3] = bases[1];
-                            bp_seq_window[4*SPAN-2] = bases[2];
-                            bp_seq_window[4*SPAN-1] = bases[3];
-                        }
-
-                        let start_ind = j % 4;
-                        
-
-                        let binding_borrow = bp_seq_window.get_unchecked(start_ind..(start_ind+self.len())) ;
-
-                        //let start_seq = uncoded_seq.as_ptr().add(j);
-                        if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
-                            //if let Some(bind) = self.cut_prop_binding(start_seq, max_ignore_bind) { //}
-                            
-                            bind_scores.push(bind+standin_height);
-                  
-                    
-                        };
-               
-                        prev_jd = jd;
-
-                    }
-                }
-
-                //block_lens[i] is always divisible by 4, as is 4*SPAN, so we must always do this
-                //swap
-                //
-                u8_seq_window.rotate_left(1);
-                u8_seq_window[SPAN-1] = coded_sequence[block_starts[i]+SPAN-1+( ((block_lens[i])-(4*SPAN)))/4];
-                bp_seq_window.rotate_left(4);
-                let bases = Sequence::code_to_bases(u8_seq_window[SPAN-1]);
-                bp_seq_window[4*SPAN-4] = bases[0];
-                bp_seq_window[4*SPAN-3] = bases[1];
-                bp_seq_window[4*SPAN-2] = bases[2];
-                bp_seq_window[4*SPAN-1] = bases[3];
-
-                for j in ((block_lens[i])-(4*SPAN))..=((block_lens[i])-self.len()) {
-
-                    unsafe{
-        
-                        let start_ind = j-(block_lens[i]-(4*SPAN));
-                    
-
-                        let binding_borrow = bp_seq_window.get_unchecked(start_ind..(start_ind+self.len()));
-
-
-                        if let Some(bind) = self.cut_prop_binding(binding_borrow, max_ignore_bind) {
-                            bind_scores.push(bind+standin_height);
-                        };
-                    }
-
-                }
-            }
-        }
-
-
-
-        /*bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
-
-        if bind_scores.len() > CAPACITY_FOR_NULL {
-            _ = bind_scores.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
-            
-
-        }*/
-
-        if bind_scores.len() <= CAPACITY_FOR_NULL { 
-            bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
-            return bind_scores;
-        }
-
-        let mut sub_bind_scores: Vec<f64> = bind_scores[0..CAPACITY_FOR_NULL].iter().map(|&a| a).collect();
-
-        sub_bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap());
-
-        for i in CAPACITY_FOR_NULL..bind_scores.len(){
-
-            let last = unsafe{ sub_bind_scores.last_mut().unwrap_unchecked()};
-
-            if bind_scores[i] > *last { 
-                *last = bind_scores[i];
-                sub_bind_scores.sort_unstable_by(|f, g| g.partial_cmp(f).unwrap()); //This is linear in CAPACITY_FOR_NULL
-            }
-        }
-
-
-
-        sub_bind_scores
-
-    }
-
-/*
-    pub fn gen_single_mot_binding_report(&self, data_seq: &AllDataUse) -> Vec<(usize, bool, f64)> {
-
-        let data = data_seq.data();
-
-        let (binds, revs) = self.return_bind_score(data.seq());
-
-        let starts = data.seq().block_u8_starts();
-        let lens = data.seq().block_lens();
-
-        let zero_locs = data_seq.zero_locs();
-
-        let block_and_id = (0_usize..starts.len()).map(|i| (0_usize..lens[i]).map(move |j| (i,j))).flatten().collect::<Vec<(usize, usize)>>();
-
-        assert!(binds.len() == block_and_id.len(), "{} {}", binds.len(), block_and_id.len());
-
-        let binds_locs = binds.iter().zip(revs.iter()).zip(block_and_id.iter()).map(|((&n,&r),&(l,j))| (zero_locs[l]+j, r, n)).collect::<Vec<_>>();
-
-        binds_locs
-    }
-
-    pub fn generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str) -> Result<(), Box<dyn Error>> {
-
-        let chr = chromosome_name.unwrap_or("chr");
-
-        let mut binds_locs = self.gen_single_mot_binding_report(data_seq);
-        
-        binds_locs.sort_by(|(f,_,_), (g,_,_)| g.partial_cmp(f).unwrap());
-
-        let mut file = fs::File::create(file_name)?;
-
-        let mut buffer: Vec<u8> = Vec::with_capacity(binds_locs.len()*(chr.len()+22));
-
-        for (id, (base, is_rev, bind)) in binds_locs.into_iter().enumerate() {
-
-            let strand = if is_rev { "-" } else { "+" };
-            let end_base = base+self.len();
-            let thousand_score = (bind.exp2()*1000.) as usize;
-
-            if thousand_score == 0 { break; }
-
-            let line = format!("{chr}\t{base}\t{end_base}\tbind_{id}\t{thousand_score}\t{strand}\n");
-            let mut buffer_line = line.into_bytes();
-            buffer.append(&mut buffer_line);
-        }
-
-        file.write(&buffer)?;
-
-        Ok(())
-
-    }
-
-*/
-
 
     pub fn generate_waveform<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
 
@@ -2917,7 +2699,7 @@ impl Motif {
         let bind_score_floats = self.return_bind_score(data.seq());
         //let (bind_score_floats, _) = self.return_bind_score(data.seq());
 
-        let thresh = -MIN_HEIGHT;
+        let thresh = -data_ref.min_height();
 
         for i in 0..starts.len() { //Iterating over each block
             for j in 0..(lens[i]-self.len()) {
@@ -2959,7 +2741,7 @@ impl Motif {
 
         let lens = data.seq().block_lens();
 
-        let bind_score_vec = self.return_bind_score_alt(data.seq(), 0.0);
+        let bind_score_vec = self.return_bind_score_alt(data.seq());
 
         let thresh = -self.peak_height;
 
@@ -3317,7 +3099,7 @@ impl<'a> MotifSet<'a> {
 
         let signal = mot.generate_waveform(data_ref);
 
-        let nulls = mot.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
+        let nulls = mot.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(),data_ref.offset()*2.0);
 
         let mut mot_set = MotifSet {
             set: vec![(mot, nulls)],
@@ -3353,12 +3135,12 @@ impl<'a> MotifSet<'a> {
 
         let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
-            let set = vec![Motif::rand_mot(data_ref.data().seq(), rng)];
+            let set = vec![Motif::rand_mot(data_ref.data().seq(), data_ref.height_dist(), rng)];
 
             let signal = set[0].generate_waveform(data_ref);
 
             let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0);
                 (a,null)
             }).collect();
 
@@ -3378,12 +3160,12 @@ impl<'a> MotifSet<'a> {
 
     pub fn rand_with_one_height<R: Rng+?Sized >(peak_height: f64, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
-        let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), rng)];
+        let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), data_ref.height_dist(), rng)];
 
         let signal = set[0].generate_waveform(data_ref);
             
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(), data_ref.offset()*2.0);
             (a,null)
         }).collect();
         
@@ -3403,7 +3185,7 @@ impl<'a> MotifSet<'a> {
         let signal = set[0].generate_waveform(data_ref);
         
         let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
-            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0);
+            let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(), data_ref.offset()*2.0);
             (a,null)
         }).collect();
 
@@ -3463,7 +3245,7 @@ impl<'a> MotifSet<'a> {
                 base_vec.push(Base::from_pwm(scores, background_dist, false).expect("We really shouldn't have negative bases in a meme file?"));
             }
 
-            let mut motif = Motif::raw_pwm(base_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
+            let mut motif = Motif::raw_pwm(base_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
 
             if make_poss {
                 let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
@@ -3488,7 +3270,7 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0))).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0))).collect();
 
         let mut full_set = MotifSet {
             set: set_with_nulls,
@@ -3551,7 +3333,7 @@ impl<'a> MotifSet<'a> {
                 bp_vec.push(bp);
             }
 
-            let mut motif = Motif::from_motif_max_selective(bp_vec, MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian);
+            let mut motif = Motif::from_motif_max_selective(bp_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
 
             if make_poss {
                 let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
@@ -3576,7 +3358,7 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.offset()*2.0))).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(),data_ref.offset()*2.0))).collect();
 
         let mut full_set = MotifSet {
             set: set_with_nulls,
@@ -3639,11 +3421,11 @@ impl<'a> MotifSet<'a> {
 
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
+        mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0)
     }
     fn calc_motif_null_binds_entire(&self, mot: &Motif) -> Vec<f64> {
     
-        mot.return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.offset()*2.0)
+        mot.return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0)
     }
 
     pub fn sort_by_height(&mut self) {
@@ -4063,7 +3845,7 @@ impl<'a> MotifSet<'a> {
 
     pub fn ln_prior(&self) -> f64 {
         //println!("motif num {} heights {:?} pwms {:?}",self.motif_num_prior(), self.set.iter().map(|a| a.0.height_prior()).collect::<Vec<_>>(), self.set.iter().map(|a| a.0.pwm_prior(self.data_ref.data().seq())).collect::<Vec<_>>());
-        self.motif_num_prior() + self.set.iter().map(|a| a.0.height_prior()+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
+        self.motif_num_prior() + self.set.iter().map(|a| a.0.height_prior(self.data_ref.height_dist())+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn ln_likelihood(&self) -> f64 {
@@ -4259,7 +4041,7 @@ impl<'a> MotifSet<'a> {
 
         let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
 
-        let new_mot = Motif::from_motif(motif_choice, rng); //There may not always be a place with decent propensities
+        let new_mot = Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
         //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
@@ -4272,7 +4054,7 @@ impl<'a> MotifSet<'a> {
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -4310,7 +4092,7 @@ impl<'a> MotifSet<'a> {
             let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -4334,7 +4116,7 @@ impl<'a> MotifSet<'a> {
 
         let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
 
-        let new_mot = Motif::from_motif_alt(motif_choice, rng); //There may not always be a place with decent propensities
+        let new_mot = Motif::from_motif_alt(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
         //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
@@ -4346,7 +4128,7 @@ impl<'a> MotifSet<'a> {
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -4384,7 +4166,7 @@ impl<'a> MotifSet<'a> {
             let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
 
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -4561,7 +4343,7 @@ impl<'a> MotifSet<'a> {
         let unaccounted_trace = self.data_ref.data()-&new_set.signal;
 
         //Still have to specify types of peaky and unpeaky
-        //let (peaky, unpeaky): (Vec<_>, Vec<_>)  = unaccounted_trace.read_wave().into_iter().enumerate().partition(|(_, &a)| a >= MIN_HEIGHT); 
+        //let (peaky, unpeaky): (Vec<_>, Vec<_>)  = unaccounted_trace.read_wave().into_iter().enumerate().partition(|(_, &a)| a >= self.data_ref.min_height()); 
 
         let unaccounted_wave = unaccounted_trace.read_wave();
 
@@ -5071,7 +4853,7 @@ impl<'a> MotifSet<'a> {
 
         replacement.peak_height += NORMAL_DIST.sample(rng)*height_sd;
 
-        replacement.peak_height = replacement.peak_height.signum()*reflect_abs_height(replacement.peak_height.abs());
+        replacement.peak_height = replacement.peak_height.signum()*reflect_abs_height(replacement.peak_height.abs(), self.data_ref.min_height());
 
         let ln_post = new_set.replace_motif(replacement, c_id);
 
@@ -5085,9 +4867,9 @@ impl<'a> MotifSet<'a> {
 
         if c_id >= self.set.len() { return None; }
 
-        let height_len: usize = ((MAX_HEIGHT-MIN_HEIGHT)/0.5) as usize + 1;
+        let height_len: usize = ((MAX_HEIGHT-self.data_ref.min_height())/0.5) as usize + 1;
 
-        let heights: Vec<f64> = (0..height_len).map(|i| MIN_HEIGHT+0.5*(i as f64)).collect();
+        let heights: Vec<f64> = (0..height_len).map(|i| self.data_ref.min_height()+0.5*(i as f64)).collect();
 
         let mut try_set = self.derive_set();
 
@@ -5134,9 +4916,9 @@ impl<'a> MotifSet<'a> {
 
         if c_id >= self.set.len() { return None; }
 
-        let height_len: usize = ((MAX_HEIGHT-MIN_HEIGHT)/0.5) as usize + 1;
+        let height_len: usize = ((MAX_HEIGHT-self.data_ref.min_height())/0.5) as usize + 1;
 
-        let heights: Vec<f64> = (0..height_len).map(|i| MIN_HEIGHT+0.5*(i as f64)).collect();
+        let heights: Vec<f64> = (0..height_len).map(|i| self.data_ref.min_height()+0.5*(i as f64)).collect();
 
         let mut try_set = self.derive_set();
 
@@ -5260,7 +5042,7 @@ impl StrippedMotifSet {
         let mut revived = MotifSet {
 
             set: self.set.clone().into_iter().map(|a| {
-                let nulls = a.return_any_null_binds_by_hamming(data_ref.null_seq(), cutoff);
+                let nulls = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(), cutoff);
                 println!("set {:?}, nulls {:?}", a, nulls);
                 (a, nulls)
             }).collect(),
@@ -5288,14 +5070,14 @@ impl StrippedMotifSet {
         -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
 
-    pub fn ln_prior(&self, seq: &Sequence) -> f64 {
-        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior()+a.pwm_prior(seq)).sum::<f64>()
+    pub fn ln_prior(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>)) -> f64 {
+        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior(height_dist)+a.pwm_prior(seq)).sum::<f64>()
     }
 
     pub fn ln_posterior(&self) -> f64 { self.ln_post }
 
-    pub fn ln_likelihood(&self, seq: &Sequence) -> f64 {
-        self.ln_posterior()-self.ln_prior(seq)
+    pub fn ln_likelihood(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>)) -> f64 {
+        self.ln_posterior()-self.ln_prior(seq, height_dist)
     }
 
     pub fn set_iter(&self) -> Iter<'_, Motif> {
@@ -6252,7 +6034,8 @@ impl SetTraceDef {
 
     pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
 
-        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq())).collect::<Vec<f64>>()
+        let use_data = AllDataUse::new(&full_data, 0.0).expect("full_data must be valid");
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq(), use_data.height_dist())).collect::<Vec<f64>>()
 
     }
 
@@ -6346,8 +6129,8 @@ impl SetTraceDef {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_post.partial_cmp(&b.ln_post).expect("No NaNs allowed in posterior")).expect("trace should have at least one motif set")
     }
     
-    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, tail_start: usize) -> &StrippedMotifSet {
-        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(seq).partial_cmp(&b.ln_likelihood(seq)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
+    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>), tail_start: usize) -> &StrippedMotifSet {
+        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(seq, height_dist).partial_cmp(&b.ln_likelihood(seq, height_dist)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
 
     pub fn create_distance_traces(&self, reference_mots: &Vec<Motif>) -> Vec<Vec<f64>> {
@@ -6891,48 +6674,6 @@ impl<'a> TemperSetTraces<'a> {
 
 
         
-        /*for j in 0..self.parallel_traces.len(){
-            for (i, (motif, rec_binds)) in self.parallel_traces[j].0.active_set.set.iter().enumerate(){
-            
-                let binds = motif.return_any_null_binds_by_hamming(data_seq.null_seq(), self.parallel_traces[j].0.data_ref.background_ref().noise_spread_par() * 4.0);
-                if binds.len() >0{
-                //let binds_diffs = binds.windows(2).map(|a| a[0]-a[1]).collect::<Vec<_>>();
-                //let binds_ratio = binds.windows(2).map(|a| a[0]/a[1]).collect::<Vec<_>>();
-                println!("{j} {i} binds {} {} len {}", binds[0], binds.last().unwrap(), binds.len());
-                println!("{j} {i} recorded binds {} {} {}", rec_binds[0], rec_binds.last().unwrap(), rec_binds.len());
-                //println!("{:?} \n {:?}", binds_diffs, binds_ratio);
-                }else {println!("{j} {i} no extraneous");}
-            }
-        }*/
-
-        //We only guarentee that there are two parallel traces, hence this check and the other one for odd_attention_swaps
-        //Yes, we deliberately skip the first possible even swap: I want the beta = 1 chain to always pay attention to 
-        //ALL of the negative sequence
-        //if self.parallel_traces.len() >= 4  {
-            //let even_attention_swaps: Vec<([f64;2], bool)> = self.parallel_traces[2..].par_chunks_exact_mut(2).map(|x| {//} 
-            /*let even_attention_swaps: Vec<(_, bool)> = self.parallel_traces.par_chunks_exact_mut(2).map(|x| { 
-                let (c, d) = x.split_at_mut(1);
-                let (a, b) = (&mut c[0], &mut d[0]);
-                let mut rng = rng_maker();
-                let attention_0 = a.0.active_set.current_attention().clone();
-                let attention_1 = b.0.active_set.current_attention().clone();
-                let (mut swap_attention_a, swap_ln_post_a) = a.0.active_set.set_with_new_attention(attention_1.clone());
-                let (mut swap_attention_b, swap_ln_post_b) = b.0.active_set.set_with_new_attention(attention_0.clone());
-
-                let accept_swap = MotifSet::accept_test(a.0.thermo_beta*swap_ln_post_a+b.0.thermo_beta*swap_ln_post_b,
-                                                        a.0.thermo_beta*a.0.active_set.ln_posterior()+b.0.thermo_beta*b.0.active_set.ln_posterior(), 1.0, &mut rng);
-
-                if accept_swap {
-                    std::mem::swap(&mut a.0.active_set, &mut swap_attention_a);
-                    std::mem::swap(&mut b.0.active_set, &mut swap_attention_b);
-                }
-
-                //([a.0.thermo_beta, b.0.thermo_beta], accept_swap)
-                ([attention_0, attention_1], accept_swap)
-            }).collect();
-
-            println!("Even attention swaps: {:?}", even_attention_swaps.iter().map(|a| format!("{:?} att {}", a.0, a.1)).collect::<Vec<_>>() );
-        //}*/
                 
         println!("Ln posteriors of each trace before swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
 
@@ -7314,7 +7055,7 @@ mod tester{
     use rand::distributions::{Distribution};
     use crate::{DIRICHLET_PWM, PROPOSE_EXTEND};
     use crate::SymmetricBaseDirichlet;
-
+    const MIN_HEIGHT: f64 = 3.0;
 
 
 
@@ -8285,7 +8026,7 @@ mod tester{
 
 
 
-        println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
+        println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(motif_set.data_ref().height_dist()), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
 
         //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
         assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
@@ -8689,7 +8430,7 @@ mod tester{
             motif.peak_height = h as f64;
 
         let start_null = Instant::now();
-        let null_binds = motif.return_any_null_binds_by_hamming(&null_seq, 0.0);
+        let null_binds = motif.return_any_null_binds_by_hamming(&null_seq, data_seq.min_height(),0.0);
         let duration_null = start_null.elapsed();
 
         println!("height {} null binds {:?}", motif.peak_height(), null_binds);
@@ -8714,7 +8455,7 @@ mod tester{
 
         println!("{}", motif);
 
-        let random_motif = Motif::rand_mot(&sequence, &mut rng);
+        let random_motif = Motif::rand_mot(&sequence, data_seq.height_dist(), &mut rng);
 
         println!("Random motif\n{}", random_motif);
 
@@ -8754,7 +8495,7 @@ mod tester{
 
         let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MIN_HEIGHT, MAX_HEIGHT).unwrap();
 
-        let mut base_prior = motif.height_prior();
+        let mut base_prior = motif.height_prior(&dist);
         if motif.peak_height() > 0.0 {
             base_prior -= PROB_POS_PEAK.ln();
         } else {
@@ -8855,7 +8596,7 @@ mod tester{
        
         println!("Motif {:?}", motif);
 
-        let mut binds = motif.return_any_null_binds_by_hamming(&null_seq, 0.0);
+        let mut binds = motif.return_any_null_binds_by_hamming(&null_seq, data_seq.min_height(), 0.0);
         binds.sort_unstable_by(|b, a| a.partial_cmp(b).unwrap());
         let mut significant_binds: Vec<f64> = Vec::with_capacity(null_block_lens[0]*50);
 

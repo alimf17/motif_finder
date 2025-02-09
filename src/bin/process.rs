@@ -209,9 +209,9 @@ pub fn main() {
 
 //    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
 
-    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(data_ref.data().seq(), min_len)).collect::<Vec<_>>();
+    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(data_ref.data().seq(), data_ref.height_dist(), min_len)).collect::<Vec<_>>();
 
-    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(data_ref.data().seq()).partial_cmp(&b.ln_likelihood(data_ref.data().seq())).unwrap()).expect("The set traces should all have at least SOME elements");
+    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(data_ref.data().seq(), data_ref.height_dist()).partial_cmp(&b.ln_likelihood(data_ref.data().seq(), data_ref.height_dist())).unwrap()).expect("The set traces should all have at least SOME elements");
     
     best_single_motif_set.set_iter().enumerate().for_each(|(i,m)| {
         let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
@@ -222,8 +222,8 @@ pub fn main() {
     println!("Best motif set: {:?}", best_single_motif_set);
     let mut activated = best_single_motif_set.reactivate_set(&data_ref);
     for i in 0..best_single_motif_set.num_motifs(){
-        let mot = activated.get_nth_motif(i);
-        println!("null binds best {:?}", mot.return_any_null_binds_in_group(data_ref.null_seq(), data_ref.background_ref().noise_spread_par() * 5.0));
+        let (mot, nulls) = activated.get_nth_motif_and_scores(i).clone();
+        println!("null binds best {:?}", nulls) 
     }
 
     activated.sort_by_height();

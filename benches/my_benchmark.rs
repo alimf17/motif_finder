@@ -44,7 +44,7 @@ fn main() {
     let background = Background::new(0.25, 2.64, 20.);
 
 
-    let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background)};
+    let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0)};
 
     println!("{} gamma", gamma(4.));
     println!("{} gamma", ln_gamma(4.));
@@ -62,7 +62,7 @@ fn main() {
 
     let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
 
-    let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background) };
+    let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, 3.0) };
 
     let _noise: Noise = waveform.produce_noise(&data_seq_2);
 

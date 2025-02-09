@@ -34,17 +34,19 @@ fn main() {
     //9) The minimum thermodynamic beta for the chains. The absolute value of this will be taken, and if you give a number > 1.0, the reciprocal will be taken instead
     //10) The number of intermediate traces between the base inference chain and the minimum thermodynamic beta chain. Must be a non-negative integer
 
-    //11) A non negative double for how much to scale the cutoff for a data block
+    //11) The number of expected binding sites, approximately
+
+    //12) A non negative double for how much to scale the cutoff for a data block
     //   to be considered peaky: less than 1.0 is more permissive, greater than 1.0 
     //   is more strict. If this exists but can't parse to a double, it's turned into a 1.0
     //May also have the following arguments:
-    //12) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
+    //13) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
     //   extensions and contractions on a single motif Will only work if (9) included
-    //13) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
+    //14) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
     //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included
-    //14) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
+    //15) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
     //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included 
-    //15) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
+    //16) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
     //    being considered. Will only work if (9), (10), (11), and (12) included
     //
     //Penultimate argument) Either the word "meme" or the word "json". If one of these is not the argument,
@@ -75,6 +77,8 @@ fn main() {
 
     let num_intermediate_traces: usize = args[10].parse().expect("The number of intermediate traces must be a non-negative integer!");
 
+    let num_expect_binding: usize = args[11].parse().expect("The number of expected binding sites must be a non-negative integer!");
+
     min_thermo_beta = min_thermo_beta.abs();
 
     println!("pre min {min_thermo_beta}");
@@ -84,19 +88,19 @@ fn main() {
     }
     println!("post min {min_thermo_beta}");
 
-    let credibility: f64 = args[11].parse().expect("We need to know how much to punish additional motifs!");
+    let credibility: f64 = args[12].parse().expect("We need to know how much to punish additional motifs!");
 
     println!("c {credibility}");
     if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
     //SAFETY: This modification is made before any inference is done, preventing data races
     unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
 
-    let filter: f64 = match args.get(12) {
+    let filter: f64 = match args.get(13) {
         None => 0.0,
         Some(arg) => arg.parse::<f64>().unwrap_or(0.0),
     };
 
-    let max_tf: usize = args.get(13).map(|a| a.parse().ok()).flatten().unwrap_or(5);
+    let max_tf: usize = args.get(14).map(|a| a.parse().ok()).flatten().unwrap_or(5);
 
     //MAX_TF_NUM.set(max_tf).unwrap();
 
@@ -106,7 +110,7 @@ fn main() {
 
     let default_burn: usize = 10;
 
-    let (burn_in_after_swap,value): (usize, bool) = match args.get(14) {
+    let (burn_in_after_swap,value): (usize, bool) = match args.get(15) {
         None => (default_burn, false),
         Some(burn) => match burn.parse::<usize>(){
             Err(_) => (default_burn, false), 
@@ -116,7 +120,7 @@ fn main() {
 
 
 
-    let base_check_index: usize = if value {15} else {14};
+    let base_check_index: usize = if value {16} else {15};
     let mut init_check_index: usize = base_check_index+1;
 
 
@@ -155,7 +159,7 @@ fn main() {
 
     println!("output directory {output_dir}");
 
-    let (mut total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, &NULL_CHAR, peak_cutoff).unwrap();
+    let (mut total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, num_expect_binding, &NULL_CHAR, peak_cutoff).unwrap();
 
     total_data.clear_props();
 

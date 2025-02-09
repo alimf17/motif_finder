@@ -1838,7 +1838,7 @@ mod tests{
 
         let invented_propensities = vec![1.0/65536_f64; 65536];
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, &invented_propensities)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, &invented_propensities, 3.0)};
 
         let noise: Noise = signal.produce_noise(&data_seq);
 

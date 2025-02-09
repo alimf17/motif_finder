@@ -9,7 +9,7 @@ use std::error::Error;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, MIN_HEIGHT,MotifSet, Motif};
+use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MAX_HEIGHT,MotifSet, Motif, TruncatedLogNormal};
 
 
 use thiserror::Error;
@@ -65,7 +65,7 @@ pub struct AllData {
     start_genome_coordinates: Vec<usize>,
     start_nullbp_coordinates: Vec<usize>,
     background: Background,
-
+    min_height: f64,
 }
 
 #[derive(Clone)]
@@ -77,6 +77,8 @@ pub struct AllDataUse<'a> {
     start_nullbp_coordinates: &'a Vec<usize>,
     background: Background,
     offset: f64,
+    min_height: f64,
+    height_dist: TruncatedLogNormal,
 }
 
 struct FitTDist<'a> {
@@ -128,7 +130,7 @@ impl AllData {
     //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
+                                 fragment_length: usize, spacing: usize, approx_num_binding_sites: usize, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
 
 
         let file_out = if peak_scale.is_some() {
@@ -170,7 +172,7 @@ impl AllData {
             Err(e) => Err(e.clone()),
         };
 
-        let (pre_data, background, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, is_circular, peak_scale)?;
+        let (pre_data, background,min_height, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, approx_num_binding_sites, is_circular, peak_scale)?;
  
         println!("processed data");
 
@@ -182,7 +184,7 @@ impl AllData {
 
 
         println!("synchronized fasta and data");
-        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background};
+        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height,};
 
         let use_data = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
 
@@ -192,7 +194,7 @@ impl AllData {
 
         let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
 
-            let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), MIN_HEIGHT, KernelWidth::Wide, KernelVariety::Gaussian));
+            let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), min_height, KernelWidth::Wide, KernelVariety::Gaussian));
 
             
 
@@ -377,7 +379,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, is_circular: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background, Vec<Vec<(usize, f64)>>), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, approx_num_binding_sites: usize, is_circular: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>), AllProcessingError> {
        
         if spacing == 0 {
             let err = DataProcessError::BadSpacer(BadSpacerError);
@@ -395,7 +397,7 @@ impl AllData {
 
         let mut data_as_vec = file_string.split("\n").collect::<Vec<_>>();
        
-        if data_as_vec.last().unwrap() == &"" {
+        while data_as_vec.last() == Some(&"") {
             _ = data_as_vec.pop();
         }
 
@@ -403,6 +405,7 @@ impl AllData {
         //let mut data: Vec<f64> = Vec::with_capacity(data_as_vec.len());
 
         let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
+
         let mut data_iter = data_as_vec.iter().peekable();
 
         let check_header = data_iter.next();
@@ -481,6 +484,18 @@ impl AllData {
         let start_loc: usize = raw_locs_data[0].0;
         let last_loc: usize = raw_locs_data.last().unwrap().0;
 
+        let prob_binding_site: f64 = (approx_num_binding_sites as f64)/(raw_locs_data.len() as f64);
+
+        if prob_binding_site >= 1.0 { return Err(DataProcessError::NumBindingSitesTooLarge(TooManyBindingSites::new(approx_num_binding_sites, raw_locs_data.len())).collect_wrongdoing(possible_sequence_len)); }
+
+        let mut sorted_raw_data: Vec<f64> = raw_locs_data.iter().map(|(_,a)| *a).collect();
+
+        sorted_raw_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+        let index_min_height: usize = (prob_binding_site*(sorted_raw_data.len() as f64)).ceil() as usize;
+
+        //sorted_raw_data[index_min_height] is the normal min height. The max is just a guard against pathological data
+        let min_height = sorted_raw_data[index_min_height].max(1.0);
 
         //Note: this is the last possible place where possible_sequence_len can 
         //      possibly be live. If it died before this, we already returned.
@@ -888,8 +903,7 @@ impl AllData {
         let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.iter().map(|a| Self::trim_data_to_fulfill_data_seq_compatibility(a, spacing)).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        Ok((trimmed_data_blocks, background_dist, trimmed_ar_blocks))
-
+        Ok((trimmed_data_blocks, background_dist, min_height, trimmed_ar_blocks))
 
 
 
@@ -1375,6 +1389,8 @@ impl<'a> AllDataUse<'a> {
                start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
                background: reference_struct.background().clone(),
                offset: offset,
+               min_height: reference_struct.min_height,
+               height_dist: TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, reference_struct.min_height, MAX_HEIGHT).unwrap()
         })
 
     }
@@ -1383,7 +1399,7 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>) -> Self {
+    pub unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>, min_height: f64) -> Self {
         Self{
             data: data,
             propensities: propensities,
@@ -1392,6 +1408,8 @@ impl<'a> AllDataUse<'a> {
             start_nullbp_coordinates: start_nullbp_coordinates,
             background: background.clone(),
             offset: 0.0,
+            min_height: min_height.max(1.0),
+            height_dist: TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, min_height.max(1.0), MAX_HEIGHT).unwrap()
         }
     }
 
@@ -1442,6 +1460,14 @@ impl<'a> AllDataUse<'a> {
     }
     pub fn offset(&self) -> f64 {
         self.offset
+    }
+
+    pub fn min_height(&self) -> f64 {
+        self.min_height
+    }
+
+    pub fn height_dist(&self) -> &TruncatedLogNormal {
+        &self.height_dist
     }
 
     pub fn propensities(&self) -> &Vec<f64> {
@@ -1731,6 +1757,8 @@ pub enum DataProcessError {
     BadSpacer(#[from] BadSpacerError),
     #[error(transparent)]
     BadDataFormat(#[from] DataFileBadFormat),
+    #[error(transparent)]
+    NumBindingSitesTooLarge(#[from] TooManyBindingSites), 
 }
 
 impl DataProcessError {
@@ -1773,6 +1801,26 @@ impl DataFileBadFormat {
             no_data_lines: Vec::new(),
         }
     }
+}
+
+#[derive(Error, Debug)]
+pub struct TooManyBindingSites {
+    num_binding_sites: usize, 
+    data_length: usize,
+}
+impl TooManyBindingSites {
+    fn new(num_binding_sites: usize, data_length: usize) -> Self{ 
+
+        Self {
+            num_binding_sites,
+            data_length
+        }
+
+    }
+}
+
+impl std::fmt::Display for TooManyBindingSites {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "You approximated {} binding sites when you have to have less than {} binding sites.", self.num_binding_sites, self.data_length)}
 }
 
 trait UpgradeToErr {

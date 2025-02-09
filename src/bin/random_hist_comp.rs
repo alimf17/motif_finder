@@ -51,8 +51,8 @@ fn main() {
 
         let mut rng = rand::thread_rng();
 
-        let mot_0 = Motif::rand_mot(data.data().seq(), &mut rng);
-        let mot_1 = Motif::rand_mot(data.data().seq(), &mut rng);
+        let mot_0 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
+        let mot_1 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
 
         let binds_0 = mot_0.return_bind_score(data.data().seq());
         let binds_1 = mot_1.return_bind_score(data.data().seq());
