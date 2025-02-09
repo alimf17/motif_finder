@@ -134,9 +134,9 @@ impl AllData {
 
 
         let file_out = if peak_scale.is_some() {
-            format!("{}/{}_{}_custom_scale_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),peak_scale.expect("We only get here if peak_scale is Some"), spacing,DATA_SUFFIX)
+            format!("{}/{}_{}_custom_scale_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),peak_scale.expect("We only get here if peak_scale is Some"), spacing, approx_num_binding_sites, DATA_SUFFIX)
         } else {
-            format!("{}/{}_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,DATA_SUFFIX)
+            format!("{}/{}_{}_{}_estimate_{}_{}", output_dir,&Self::chop_file_name(fasta_file),&Self::chop_file_name(data_file),spacing,approx_num_binding_sites,DATA_SUFFIX)
         };
 
         println!("formatted");
@@ -492,7 +492,7 @@ impl AllData {
 
         sorted_raw_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
 
-        let index_min_height: usize = (prob_binding_site*(sorted_raw_data.len() as f64)).ceil() as usize;
+        let index_min_height: usize = ((1.0-prob_binding_site)*(sorted_raw_data.len() as f64)).ceil() as usize;
 
         //sorted_raw_data[index_min_height] is the normal min height. The max is just a guard against pathological data
         let min_height = sorted_raw_data[index_min_height].max(1.0);

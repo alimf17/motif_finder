@@ -79,6 +79,8 @@ fn main() {
 
     let num_expect_binding: usize = args[11].parse().expect("The number of expected binding sites must be a non-negative integer!");
 
+    println!("Num expect binding {num_expect_binding}");
+
     min_thermo_beta = min_thermo_beta.abs();
 
     println!("pre min {min_thermo_beta}");
