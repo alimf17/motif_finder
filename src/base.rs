@@ -69,22 +69,33 @@ pub const SQRT_3: f64 = 1.73205080757;
 pub const LN_2: f64 = 0.6931471805599453;
 pub const LB_E: f64 = 1.4426950408889634;
 
+///This lists the identity of DNA bases, associating them with integers
+///For those who want to modify this code, know that there are safety invariants
+///that rely on this being four elements long. 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
+
+///This is all the variants of Bp collected into an array for easy iteration
+pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
+
+///This is the number of possible bases in the sequence. For those who want to 
+///modify this code, there are safety invariants which rely on being 4. 
 pub const BASE_L: usize = BPS.len();
 
-pub const BASE_PRIOR_DENS: f64 = 6.; //Set to 1/Gamma(BASE_L)
-
-pub const VERTICES: [[f64; BASE_L-1]; BASE_L] = [[2.*SQRT_2/3., 0., -1.0/3.],[-SQRT_2/3., SQRT_2*SQRT_3/3., -1.0/3.], [-SQRT_2/3., -SQRT_2*SQRT_3/3., -1.0/3.],[0., 0., 1.0]];
-
-//This MUST be the transpose of VERTICES
-pub const SIMPLEX_VERTICES: [[f64; BASE_L]; BASE_L-1] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
-                                                           [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
-                                                           [-1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
-
+///This is an array of arrays which stores the vertex coordinates of a base 
+///vector in simplex space. Each element corresponds to having all the 
+///"probability" of that base being in a particular position concentrated
+///at the corresponding element of BPS. EG, [0.,0.,0.] is the coordinate
+///of a base position where all of the probability is at T. 
 pub const SIMPLEX_VERTICES_POINTS :  [[f64; BASE_L-1]; BASE_L] = [[2.*SQRT_2/3. , 0.               , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  , SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  ,-SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [0.0          , 0.0              , 1.0              ]];
+
+///This is the transpose of SIMPLEX_VERTICES_POINTS. 
+pub const SIMPLEX_VERTICES: [[f64; BASE_L]; BASE_L-1] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
+                                                           [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
+                                                           [-1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
+
 
 pub const SIMPLEX_ITERATOR: [&[f64; BASE_L-1]; (BASE_L-1)*(BASE_L-1)] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
                                                                             &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
@@ -103,44 +114,26 @@ pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -
 
 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
-        
+       
+///This is the maximum length of the null scores array. The larger this is, the 
+///more null binding we capture from motifs. Note that, in practical inference, 
+///the motifs inferred are not going to have much null binding
 pub const CAPACITY_FOR_NULL: usize = 1000;
 
-/*
-const MULT_TRAJ_COMP: fn([f64; BASE_L-1], f64) -> [f64; BASE_L-1] = mult_traj;
-const ADD_MULT_TRAJ_COMP: fn([f64; BASE_L-1], [f64; BASE_L-1], f64) -> [f64; BASE_L-1] = add_mult_traj;
-
-
-static SIMPLEX_CONFINING_NORMALS: Lazy<[[[f64; BASE_L-1]; BASE_L-1]; BASE_L]> = Lazy::new(|| {
-
-
-    let mut scn = [[[0_f64; BASE_L-1]; BASE_L-1]; (BASE_L)];
-    let div_mag = 1./(2.*SQRT_2/SQRT_3);
-    for i in 0..BASE_L {
-        for j in 0..BASE_L {
-            if j < i {
-                scn[i][j] = MULT_TRAJ_COMP(ADD_MULT_TRAJ_COMP(VERTICES[i], VERTICES[j], -1_f64),div_mag);
-            }
-            if j > i {
-                scn[i][j-1] = MULT_TRAJ_COMP(ADD_MULT_TRAJ_COMP(VERTICES[i], VERTICES[j], -1_f64),div_mag);
-            }
-        }
-    }
-
-    scn
-});
-*/
 
 const CLOSE: f64 = 1e-5;
 
-//SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
-//There are several safety guarentees that rely upon it being 8
-//NOTE AND WARNING: YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
+///MIN_BASE is the minimum length, in base vectors, that a PWM can be. 
+///If you are modifying this code, please notice the safety warning
+///SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
+///There are several safety guarentees that rely upon it being 8
+///YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
 pub const MIN_BASE: usize = 8;
-pub const MAX_BASE: usize = 20; //For a four base system, the hardware limit here is 32. 
-                                //To make sure this runs before the heat death of the universe
-                                //while also not taking more memory than every human brain combined,
-                                //We store many kmers as u64s. 
+
+///MAX_BASE is the maximum length, in base pairs, that a PWM can be. 
+///For a 4 base system like ours, the hardware limit on MAX_BASE is 32.
+///SAFETY: if modifying this code, do NOT set this above 32. 
+pub const MAX_BASE: usize = 20; 
 
 
 pub const MAX_HEIGHT: f64 = 15.;
@@ -234,7 +227,6 @@ const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 
 pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "New Motif Alt", "Kill Motif Alt"];//, "Split Motif", "Merge Motif"];
 
-pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
 pub const SCORE_THRESH: f64 = -1.0;
 
@@ -263,16 +255,14 @@ static BASE_CHOOSE_ALT: Lazy<DiscreteUniform> = Lazy::new(|| DiscreteUniform::ne
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
 const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
 const EXPONENT_WEIGHT_CONST: f64 = 1.4;
-
-//SAFETY: this is 2^(-15), but blah blah Rust doesn't like from_bits or exponents in const contexts
-//pub const BASE_RESOLUTION: f64 = unsafe { std::mem::transmute::<u64, f64>(0x3F00000000000000)};
+ 
+///This is the granularity of the energy penalties of bases
+///All energies are in binary energy units
 pub const BASE_RESOLUTION: f64 = 0.25;
 
-pub const BASE_RES_EXP: u64 = 2;
-
-//This is 1/BASE_RESOLUTION
-//pub const NUM_BASE_VALUES: usize = 1 << 15;
-
+///This is the number of possible values that energy penalties can take
+///It is equal to -SCORE_THRESH/BASE_RESOLUTION, but Rust does not have 
+///const time division
 pub const NUM_BASE_VALUES: usize = 4;
 
 //BEGIN BASE
@@ -1216,143 +1206,6 @@ fn reflect_abs_height(a: f64, min_height: f64) -> f64 {
     }
     //-reflect_cond*(MAX_HEIGHT-min_height)*a_sign*a.signum()+a_sign*a
 }
-                                 
-//Note that arrays of Copy are themselves Copy
-/*fn reflect_tetra(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> [f64; BASE_L-1] {
-    let mut end_start = start;
-    let mut end_push = Some(push);
-    //let mut count: usize = 0;
-    while let Some(push_vec) = end_push {
-        (end_start, end_push) = wall_collide(end_start, push_vec, confine_base);
-      //  count += 1;
-    //if end_push.is_some() {println!("cc {} {:?} {:?} {:?} {:?} {:?}", count, push, push_vec, start, end_start, end_push);}
-    }
-    end_start
-}
-
-fn wall_collide(start: [f64; BASE_L-1], push: [f64; BASE_L-1], confine_base: bool) -> ([f64; BASE_L-1], Option<[f64; BASE_L-1]>) {
-
-    //This checks our reflections across the regular tetrahedral walls
-    let mut min_stop: Option<f64> = None;
-    let mut vert_min: Option<[f64; BASE_L-1]> = None;
-    for i in 0..BASE_L {
-        let poss_stop = detect_reflect(start, push, VERTICES[i], VERTEX_DOT); //(VERTEX_DOT-VERTICES[i].iter().zip(start.iter()).map(|(&a, &b)| a*b).sum::<f64>())/(VERTICES[i].iter().zip(push.iter()).map(|(&a, &b)| a*b).sum::<f64>());
-        if let Some(stop) = poss_stop { 
-            (min_stop, vert_min) = match min_stop {
-                Some(ms) => if ms > stop { (Some(stop), Some(VERTICES[i])) } else {(min_stop, vert_min)},
-                None => (Some(stop), Some(VERTICES[i])),
-            }
-        }
-    }
-
-    //This reflects us towards maintaining the same best bast when necessary
-    if confine_base {
-        let mut close_base = 0_usize;
-        let mut close_dot = -f64::INFINITY;
-        for i in 0..BASE_L {
-            let alignment = dot_prod(start, VERTICES[i]);
-            if alignment > close_dot {
-                close_dot = alignment;
-                close_base = i;
-            }
-        }
-
-        for i in 0..(BASE_L-1) {
-
-            let poss_stop = detect_reflect(start, push, SIMPLEX_CONFINING_NORMALS[close_base][i], 0.0);
-            if let Some(stop) = poss_stop {
-                (min_stop, vert_min) = match min_stop {
-                    Some(ms) => if ms > stop { (Some(stop), Some(SIMPLEX_CONFINING_NORMALS[close_base][i])) } else {(min_stop, vert_min)},
-                    None => (Some(stop), Some(SIMPLEX_CONFINING_NORMALS[close_base][i])),
-                }
-            }
-        }
-        
-    }
-
-    //This DOES our reflection
-    match min_stop {
-        None =>  (add_traj(start, push), None), //(start.iter().zip(push.iter()).map(|(&a, &b)| a+b).collect::<Vec<f64>>().try_into().expect("Size is pinned down"), None),
-        Some(dot) => {
-            let vert = vert_min.expect("this should not be None if min_stop has a value");
-
-            //The 1e-6s that we subtract from dot are a numerical guard. If we let things go
-            //right up to the boundary, numerical errors can end with us outside of the
-            //tetrahedron.
-            let new_start: [f64; BASE_L-1] = add_mult_traj(start, push, dot-1e-6);//start.iter().zip(push.iter()).map(|(&a, &b)| a+(dot-1e-6)*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-            let mut remaining_trajectory: [f64; BASE_L-1] = mult_traj(push, 1.0-(dot-1e-6));//push.iter().map(|&b| (1.0-(dot-1e-6))*b).collect::<Vec<f64>>().try_into().expect("Size is pinned down");
-            let traj_dot = dot_prod(remaining_trajectory, vert); //remaining_trajectory.iter().zip(VERTICES[i].iter()).map(|(&a, &b)| a*b).sum::<f64>();
-            remaining_trajectory = add_mult_traj(remaining_trajectory, vert,-2.0*traj_dot); //remaining_trajectory.into_iter().zip(VERTICES[i].iter()).map(|(a, &b)| a-2.0*traj_dot*b).collect::<Vec<_>>().try_into().expect("Size is pinned down");
-            (new_start, Some(remaining_trajectory))
-        },
-    }
-
-}
-//Usage: Always pick normal so that the region you want to remain in has a dot product GREATER than boundary_dot_value
-fn detect_reflect(start: [f64; BASE_L-1], push: [f64; BASE_L-1], normal: [f64; BASE_L-1], boundary_dot_value: f64) -> Option<f64> {
-
-    //For our tetrahedral walls, using vertices as the normal vector of the plane means that outside
-    //the tetrahedron dots to a negative value with the normal, so we can only theoretically approach 
-    //if our push vector dotted with the normal is negative. This is an important check: the start
-    //vector is allowed to start ON a boundary, so this check keeps us from reflecting if we start 
-    //on the boundary but move away. For reflecting with bases, we choose the normal vector
-    //base_vertex_start-base_vertex_end to keep the same barrier. And in general, it is always
-    //possible to choose the normal such that the negative dot direction is the direction hitting
-    //the wall. If you picked the normal such that this direction is positive, take its negation.
-    let approach_wall = dot_prod(push, normal);
-
-    //If approach_wall is exactly 0, I'm moving parallel to the boundary, not crossing it.
-    if approach_wall >= 0.0 { return None; }
-
-    let stop = (boundary_dot_value-dot_prod(start, normal))/approach_wall;
-
-    //stop <= 0.0 means that we would hit the wall going backwards, which means that we're moving
-    //away from the wall. But we already checked this with approach_wall >= 0.0 returning None
-    if stop > 1.0 { //|| (stop <= 0.0)   {
-        return None;
-    }
-
-    Some(stop)
-}
-
-fn dot_prod(a: [f64; BASE_L-1], b: [f64; BASE_L-1]) -> f64 {
-
-    let mut dot: f64 = 0.0;
-
-    for i in 0..(BASE_L-1) {
-        dot += a[i]*b[i];
-    }
-
-    dot
-}
-
-fn add_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1]) -> [f64; BASE_L-1] {
-
-    let mut out = [0.0_f64; BASE_L-1];
-    for i in 0..(BASE_L-1) {
-        out[i] = a[i]+b[i];
-    }
-    out
-
-}
-
-fn mult_traj(a: [f64; BASE_L-1], lambda: f64) -> [f64; BASE_L-1] {
-    let mut out = [0.0_f64; BASE_L-1];
-    for i in 0..(BASE_L-1) {
-        out[i] = a[i] * lambda;
-    }
-    out
-}
-
-fn add_mult_traj(a: [f64; BASE_L-1], b: [f64; BASE_L-1], lambda: f64) -> [f64; BASE_L-1] {
-
-    let mut out = [0.0_f64; BASE_L-1];
-    for i in 0..(BASE_L-1) {
-        out[i] = a[i]+b[i] * lambda;
-    }
-    out
-
-}*/
 
 
 
@@ -1869,21 +1722,6 @@ impl Motif {
         } else {-f64::INFINITY}
     }
 
-    /*pub fn pwm_gen_prob(&self, seq: &Sequence) -> f64 {
-
-        if seq.kmer_in_seq(&self.best_motif()) {
-            //We have to normalize by the probability that our kmer is possible
-            //Which ultimately is to divide by the fraction (number unique kmers)/(number possible kmers)
-            //number possible kmers = BASE_L^k, but this actually cancels with our integral
-            //over the regions of possible bases, leaving only number unique kmers. 
-            let mut prior = -((seq.number_unique_kmers(self.len()) as f64).ln()); 
-
-            prior += (self.len() as f64) * BASE_PRIOR_DENS.ln();
-
-            prior
-
-        } else {-f64::INFINITY}
-    }*/
 
     pub fn height_prior(&self, height_dist: &(impl ::rand::distributions::Distribution<f64> + Continuous<f64,f64>)) -> f64 {
 
