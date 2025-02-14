@@ -4954,7 +4954,7 @@ impl StrippedMotifSet {
         Ok(savestate_file)
     }
 
-    pub fn generate_incremenet_pr(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn generate_increment_pr(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let over_add = self.over_additions();
 
