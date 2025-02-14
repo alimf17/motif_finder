@@ -76,7 +76,7 @@ fn main() {
 
     let num_intermediate_traces: usize = args[10].parse().expect("The number of intermediate traces must be a non-negative integer!");
 
-    let num_expect_binding: usize = args[11].parse().expect("The number of expected binding sites must be a non-negative integer!");
+    let min_height: f64 = args[11].parse().expect("The number of expected binding sites must be a non-negative integer!");
 
     min_thermo_beta = min_thermo_beta.abs();
 
@@ -138,7 +138,7 @@ fn main() {
     println!("Args parsed");
 
 
-    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, num_expect_binding, &NULL_CHAR, peak_cutoff).unwrap();
+    let (total_data,data_string): (AllData, String) = AllData::create_inference_data(fasta_file, data_file, output_dir, is_circular, fragment_length, spacing, min_height, &NULL_CHAR, peak_cutoff).unwrap();
 
     println!("have all data");
 
