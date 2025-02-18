@@ -924,6 +924,11 @@ pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (
 
 pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>, file_name: &str){
 
+    const SIMPLEX_ITERATOR: [&[f64; BASE_L-1]; (BASE_L-1)*(BASE_L-1)] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
+                                                                         &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
+                                                                         &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[3], &SIMPLEX_VERTICES_POINTS[2]];
+
+
     let (_ , num_bases, _) = samples.dim();
 
     let num_rows = if (num_bases & 3) == 0 {num_bases/4} else{ num_bases/4 +1 } as u32; 

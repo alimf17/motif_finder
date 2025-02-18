@@ -67,6 +67,8 @@ pub const SQRT_2: f64 = 1.41421356237;
 pub const SQRT_3: f64 = 1.73205080757;
 
 pub const LN_2: f64 = 0.6931471805599453;
+
+///This is 1/LN_2, the binary logarithm of Euler's number
 pub const LB_E: f64 = 1.4426950408889634;
 
 ///This lists the identity of DNA bases, associating them with integers
@@ -84,35 +86,35 @@ pub const BASE_L: usize = BPS.len();
 ///This is an array of arrays which stores the vertex coordinates of a base 
 ///vector in simplex space. Each element corresponds to having all the 
 ///"probability" of that base being in a particular position concentrated
-///at the corresponding element of BPS. EG, [0.,0.,0.] is the coordinate
+///at the corresponding element of BPS. EG, [0.,0.,1.0] is the coordinate
 ///of a base position where all of the probability is at T. 
 pub const SIMPLEX_VERTICES_POINTS :  [[f64; BASE_L-1]; BASE_L] = [[2.*SQRT_2/3. , 0.               , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  , SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  ,-SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [0.0          , 0.0              , 1.0              ]];
 
-///This is the transpose of SIMPLEX_VERTICES_POINTS. 
+///This is an array of arrays which stores the vertex coordinates of a base 
+///vector in simplex space. The sequence of same index elements correspond to having all the 
+///"probability" of that base being in a particular position concentrated
+///at the corresponding element of BPS. EG, [2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0]
+///is the x coordinate of each vertex where the probability is all A, C, G, T, respectively
+///This is also the transpose of SIMPLEX_VERTICES_POINTS. 
 pub const SIMPLEX_VERTICES: [[f64; BASE_L]; BASE_L-1] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
                                                            [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
                                                            [-1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
 
 
-pub const SIMPLEX_ITERATOR: [&[f64; BASE_L-1]; (BASE_L-1)*(BASE_L-1)] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
-                                                                            &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
-                                                                            &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[3], &SIMPLEX_VERTICES_POINTS[2]];
+///This inverts the simplex form of a base back to a set of probabilities of binding
+///To perform the inversion, multiply this matrix by the simplex vector appended
+///with 1.0 at the end. 
 pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2,  0.0             , -0.25, 0.25], 
                                                      [-SQRT_2/4.0,  SQRT_2*SQRT_3/4., -0.25, 0.25],
                                                      [-SQRT_2/4.0, -SQRT_2*SQRT_3/4., -0.25, 0.25],
                                                      [0.0        ,  0.0             ,  0.75, 0.25]];
 
 
-//Obviously, this should always be the transpose of INVERT_SIMPLEX. I'm just not good enough at compile time code to make it happen automatically
-pub const COL_PRIMARY_INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2, -SQRT_2/4.0, -SQRT_2/4.0, 0.0], 
-                                                                 [ 0.0           , SQRT_2*SQRT_3/4., -SQRT_2*SQRT_3/4.,   0.0          ],
-                                                                 [ -0.25          ,  -0.25           ,  -0.25            ,   0.75          ],
-                                                                 [  0.25          ,   0.25           ,   0.25            ,   0.25          ]];
-
-
+///This is the dot product of the vertices of a simplex form of base vector
+///In particular, this assumes the simplex is regular with unit vector vertices 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
        
 ///This is the maximum length of the null scores array. The larger this is, the 
@@ -136,7 +138,12 @@ pub const MIN_BASE: usize = 8;
 pub const MAX_BASE: usize = 20; 
 
 
+///MAX_HEIGHT is the maximum possible max peak height for a motif
+///In reality, this just needs to be set to a "big" value
+///I've never seen an log2(ratio of signal to input) over 15
 pub const MAX_HEIGHT: f64 = 15.;
+
+
 pub const LOG_HEIGHT_MEAN: f64 = 1.38629436112; //This is ~ln(4). Can't use ln in a constant, and this depends on no other variables
 pub const LOG_HEIGHT_SD: f64 = 0.25;
 
@@ -145,20 +152,12 @@ static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 
 pub static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
 
-//static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(20.0).unwrap());
-
-/*const L_SD_VECTOR_SPACE: f64 = 1.0;
-
-const SD_LEAST_MOVE: f64 = 1.0;
-
-const L_SD_VECTOR_SPACE_SINGLE: f64 = 1.0;
-
-const SD_LEAST_MOVE_SINGLE: f64 = 1.0;
-
-const HEIGHT_MOVE_SD: f64 = 1.0; */
-
 const PROB_POS_PEAK: f64 = 1.0;
 
+///This is the number of possible values that energy penalties can take
+///It is equal to -SCORE_THRESH/BASE_RESOLUTION, but Rust does not have 
+///const time division
+pub const NUM_BASE_VALUES: usize = 4;
 
 const BASE_RATIO_SDS: [f64; 3] = [0.01_f64, 0.05, 0.1];
 const BASE_LINEAR_SDS: [f64; 3] = [0.01_f64, 0.05, 0.1];
@@ -224,10 +223,13 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 */
 
-
+///These simply name the reversible jump moves for the purposes of tracking acceptance rates
 pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "New Motif Alt", "Kill Motif Alt"];//, "Split Motif", "Merge Motif"];
 
-
+///This is the worst possible energy penalty for a base mismatch, in binary 
+///energy units. It can be tinkered with for your applications, but must 
+///always be negative. I set it to -1.0 BEU, which correspond to a free energy
+///penalty of +0.4 kcal/mol
 pub const SCORE_THRESH: f64 = -1.0;
 
 //This needs to equal 1/(2^(-SCORE_THRESH)-1). Since our SCORE_THRESH is -1.0, 1/(2-1) = 1
@@ -260,10 +262,6 @@ const EXPONENT_WEIGHT_CONST: f64 = 1.4;
 ///All energies are in binary energy units
 pub const BASE_RESOLUTION: f64 = 0.25;
 
-///This is the number of possible values that energy penalties can take
-///It is equal to -SCORE_THRESH/BASE_RESOLUTION, but Rust does not have 
-///const time division
-pub const NUM_BASE_VALUES: usize = 4;
 
 //BEGIN BASE
 #[repr(usize)]
