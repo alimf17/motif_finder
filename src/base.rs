@@ -1,4 +1,3 @@
-//pub mod bases {
 
 use std::{f64, fmt, fs};
 
@@ -68,79 +67,79 @@ pub const SQRT_3: f64 = 1.73205080757;
 
 pub const LN_2: f64 = 0.6931471805599453;
 
-///This is 1/LN_2, the binary logarithm of Euler's number
+/// This is 1/LN_2, the binary logarithm of Euler's number
 pub const LB_E: f64 = 1.4426950408889634;
 
-///This lists the identity of DNA bases, associating them with integers
-///For those who want to modify this code, know that there are safety invariants
-///that rely on this being four elements long. 
+/// This lists the identity of DNA bases, associating them with integers
+/// For those who want to modify this code, know that there are safety invariants
+/// that rely on this being four elements long. 
 pub const BPS: [char; 4] = ['A', 'C', 'G', 'T'];
 
-///This is all the variants of Bp collected into an array for easy iteration
+/// This is all the variants of Bp collected into an array for easy iteration
 pub const BP_ARRAY: [Bp; BASE_L] = [Bp::A, Bp::C, Bp::G, Bp::T];
 
-///This is the number of possible bases in the sequence. For those who want to 
-///modify this code, there are safety invariants which rely on being 4. 
+/// This is the number of possible bases in the sequence. For those who want to 
+/// modify this code, there are safety invariants which rely on being 4. 
 pub const BASE_L: usize = BPS.len();
 
-///This is an array of arrays which stores the vertex coordinates of a base 
-///vector in simplex space. Each element corresponds to having all the 
-///"probability" of that base being in a particular position concentrated
-///at the corresponding element of BPS. EG, [0.,0.,1.0] is the coordinate
-///of a base position where all of the probability is at T. 
+/// This is an array of arrays which stores the vertex coordinates of a base 
+/// vector in simplex space. Each element corresponds to having all the 
+/// "probability" of that base being in a particular position concentrated
+/// at the corresponding element of BPS. EG, [0.,0.,1.0] is the coordinate
+/// of a base position where all of the probability is at T. 
 pub const SIMPLEX_VERTICES_POINTS :  [[f64; BASE_L-1]; BASE_L] = [[2.*SQRT_2/3. , 0.               , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  , SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [ -SQRT_2/3.  ,-SQRT_2*SQRT_3/3. , -1.0/3.          ],
                                                                     [0.0          , 0.0              , 1.0              ]];
 
-///This is an array of arrays which stores the vertex coordinates of a base 
-///vector in simplex space. The sequence of same index elements correspond to having all the 
-///"probability" of that base being in a particular position concentrated
-///at the corresponding element of BPS. EG, [2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0]
-///is the x coordinate of each vertex where the probability is all A, C, G, T, respectively
-///This is also the transpose of SIMPLEX_VERTICES_POINTS. 
+/// This is an array of arrays which stores the vertex coordinates of a base 
+/// vector in simplex space. The sequence of same index elements correspond to having all the 
+/// "probability" of that base being in a particular position concentrated
+/// at the corresponding element of BPS. EG, [2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0]
+/// is the x coordinate of each vertex where the probability is all A, C, G, T, respectively
+/// This is also the transpose of SIMPLEX_VERTICES_POINTS. 
 pub const SIMPLEX_VERTICES: [[f64; BASE_L]; BASE_L-1] = [[2.*SQRT_2/3. , -SQRT_2/3., -SQRT_2/3., 0.0], 
                                                            [0.              , SQRT_2*SQRT_3/3.   , -SQRT_2*SQRT_3/3., 0.0],
                                                            [-1.0/3.          , -1.0/3.           , -1.0/3.           , 1.0]];
 
 
-///This inverts the simplex form of a base back to a set of probabilities of binding
-///To perform the inversion, multiply this matrix by the simplex vector appended
-///with 1.0 at the end. 
+/// This inverts the simplex form of a base back to a set of probabilities of binding
+/// To perform the inversion, multiply this matrix by the simplex vector appended
+/// with 1.0 at the end. 
 pub const INVERT_SIMPLEX: [[f64; BASE_L]; BASE_L] = [[ 1.0/SQRT_2,  0.0             , -0.25, 0.25], 
                                                      [-SQRT_2/4.0,  SQRT_2*SQRT_3/4., -0.25, 0.25],
                                                      [-SQRT_2/4.0, -SQRT_2*SQRT_3/4., -0.25, 0.25],
                                                      [0.0        ,  0.0             ,  0.75, 0.25]];
 
 
-///This is the dot product of the vertices of a simplex form of base vector
-///In particular, this assumes the simplex is regular with unit vector vertices 
+/// This is the dot product of the vertices of a simplex form of base vector
+/// In particular, this assumes the simplex is regular with unit vector vertices 
 pub const VERTEX_DOT: f64 = -1.0/((BASE_L-1) as f64);
        
-///This is the maximum length of the null scores array. The larger this is, the 
-///more null binding we capture from motifs. Note that, in practical inference, 
-///the motifs inferred are not going to have much null binding
+/// This is the maximum length of the null scores array. The larger this is, the 
+/// more null binding we capture from motifs. Note that, in practical inference, 
+/// the motifs inferred are not going to have much null binding
 pub const CAPACITY_FOR_NULL: usize = 1000;
 
 
 const CLOSE: f64 = 1e-5;
 
-///MIN_BASE is the minimum length, in base vectors, that a PWM can be. 
-///If you are modifying this code, please notice the safety warning
-///SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
-///There are several safety guarentees that rely upon it being 8
-///YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
+/// MIN_BASE is the minimum length, in base vectors, that a PWM can be. 
+/// If you are modifying this code, please notice the safety warning
+/// SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
+/// There are several safety guarentees that rely upon it being 8
+/// YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
 pub const MIN_BASE: usize = 8;
 
-///MAX_BASE is the maximum length, in base pairs, that a PWM can be. 
-///For a 4 base system like ours, the hardware limit on MAX_BASE is 32.
-///SAFETY: if modifying this code, do NOT set this above 32. 
+/// MAX_BASE is the maximum length, in base pairs, that a PWM can be. 
+/// For a 4 base system like ours, the hardware limit on MAX_BASE is 32.
+/// SAFETY: if modifying this code, do NOT set this above 32. 
 pub const MAX_BASE: usize = 20; 
 
 
-///MAX_HEIGHT is the maximum possible max peak height for a motif
-///In reality, this just needs to be set to a "big" value
-///I've never seen an log2(ratio of signal to input) over 15
+/// MAX_HEIGHT is the maximum possible max peak height for a motif
+/// In reality, this just needs to be set to a "big" value
+/// I've never seen an log2(ratio of signal to input) over 15
 pub const MAX_HEIGHT: f64 = 15.;
 
 
@@ -150,13 +149,15 @@ pub const LOG_HEIGHT_SD: f64 = 0.25;
 
 static NORMAL_DIST: Lazy<Normal> = Lazy::new(|| Normal::new(0.0, 1.0).unwrap());
 
+/// This is a probability distribution which samples the amount a height should
+/// exceed the minimum possible height of the inference
 pub static HEIGHT_PROPOSAL_DIST: Lazy<Exp> = Lazy::new(|| Exp::new(4.0).unwrap());
 
 const PROB_POS_PEAK: f64 = 1.0;
 
-///This is the number of possible values that energy penalties can take
-///It is equal to -SCORE_THRESH/BASE_RESOLUTION, but Rust does not have 
-///const time division
+/// This is the number of possible values that energy penalties can take
+/// It is equal to -SCORE_THRESH/BASE_RESOLUTION, but Rust does not have 
+/// const time division
 pub const NUM_BASE_VALUES: usize = 4;
 
 const BASE_RATIO_SDS: [f64; 3] = [0.01_f64, 0.05, 0.1];
@@ -223,13 +224,13 @@ pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater tha
 const NECESSARY_MOTIF_IMPROVEMENT: f64 = 20.0_f64;
 */
 
-///These simply name the reversible jump moves for the purposes of tracking acceptance rates
+/// These simply name the reversible jump moves for the purposes of tracking acceptance rates
 pub const RJ_MOVE_NAMES: [&str; 6] = ["New motif", "Delete motif", "Extend motif", "Contract Motif", "New Motif Alt", "Kill Motif Alt"];//, "Split Motif", "Merge Motif"];
 
-///This is the worst possible energy penalty for a base mismatch, in binary 
-///energy units. It can be tinkered with for your applications, but must 
-///always be negative. I set it to -1.0 BEU, which correspond to a free energy
-///penalty of +0.4 kcal/mol
+/// This is the worst possible energy penalty for a base mismatch, in binary 
+/// energy units. It can be tinkered with for your applications, but must 
+/// always be negative. I set it to -1.0 BEU, which correspond to a free energy
+/// penalty of +0.4 kcal/mol
 pub const SCORE_THRESH: f64 = -1.0;
 
 //This needs to equal 1/(2^(-SCORE_THRESH)-1). Since our SCORE_THRESH is -1.0, 1/(2-1) = 1
@@ -258,12 +259,18 @@ const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
 const MULTIPLY_WEIGHT_CONST: f64 = 43000.0;
 const EXPONENT_WEIGHT_CONST: f64 = 1.4;
  
-///This is the granularity of the energy penalties of bases
-///All energies are in binary energy units
+/// This is the granularity of the energy penalties of bases
+/// All energies are in binary energy units
 pub const BASE_RESOLUTION: f64 = 0.25;
 
 
 //BEGIN BASE
+
+//NOTE: These bases being assigned to these values specifically is necessary.
+//If you add bases, in addition to safety considerations for conversions, 
+//you need to also ensure that reverse complements are assigned to values 
+//which are the ^ 3 duals of each other
+/// The type which indexes base pairs: a dependent usize with `BASE_L` variants. 
 #[repr(usize)]
 #[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Bp {
@@ -286,6 +293,7 @@ trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num + std::fmt::Debug>: Dis
 impl SampleToBase<u64> for Categorical {}
 impl SampleToBase<i64> for DiscreteUniform {}
 
+/// Bp is always aligned like usize
 impl From<Bp> for usize {
     fn from(bp: Bp) -> Self {
         //SAFETY: Bp is repr to a valid usize
@@ -293,6 +301,7 @@ impl From<Bp> for usize {
     }
 }
 
+/// Returns the Bp with value `bp` when bp < BASE_L. Otherwise, returns an error
 impl TryFrom<usize> for Bp {
     type Error = &'static str;
     fn try_from(bp: usize) -> Result<Self, Self::Error> {
@@ -308,6 +317,8 @@ impl TryFrom<usize> for Bp {
 
 
 impl Bp {
+
+    /// The complement operation. In unmodified DNA bps, A complements T, C complements G
     pub fn complement(&self) -> Bp {
         /*match self {
             Bp::A => Bp::T,
@@ -320,8 +331,10 @@ impl Bp {
         //SAFETY: enum never returns incorrect variant, which is always in bounds
         unsafe{std::mem::transmute::<usize, Bp>((*self as usize) ^ 3)}
     }
-
-    //Safety: must be ABSOLUTELY sure that usize is < BASE_L (4)
+ 
+    /// An unsafe conversion from usize to Bp
+    /// # SAFETY
+    /// Must be ABSOLUTELY sure that bp is < BASE_L (4). 
     pub unsafe fn usize_to_bp(bp: usize) -> Bp {
         std::mem::transmute::<usize, Bp>(bp)
     }
@@ -344,11 +357,14 @@ impl fmt::Display for Bp {
 }
 
 //This felt like a lot of operations, but because it relies exclusively on constants
-//(a binary power and -1 at that), it's about as fast as a single addition
+//(a binary power and -1 at that), it's about as fast as a single addition 
+/// This rounds an f64 to the nearest float that is an integer multiple 
+/// of SCORE_THRESH*BASE_RESOLUTION rounding ties. However, 
+/// if num != 0.0, it will not return 0.0, and instead give SCORE_THRESH*BASE_RESOLUTION
 pub fn base_ceil(num: f64) -> f64 { 
     let a = SCORE_THRESH*BASE_RESOLUTION*(num/(SCORE_THRESH*BASE_RESOLUTION)).round();
 
-    if (a == 0.0 && num != 0.0) { SCORE_THRESH*BASE_RESOLUTION } else {a} 
+    if a == 0.0 && num != 0.0 { SCORE_THRESH*BASE_RESOLUTION } else {a} 
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -356,6 +372,7 @@ pub struct Base {
    scores: [ f64; BASE_L],
 }
 
+/// This is the error type for attempting to initialize an invalid Base
 #[derive(Debug)]
 pub enum InvalidBase {
     NegativeBase,
@@ -365,8 +382,8 @@ pub enum InvalidBase {
 impl fmt::Display for InvalidBase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            InvalidBase::NegativeBase => "No negative bases allowed!",
-            InvalidBase::NoNonZeroBase => "You don't have any non zero bases!",
+            InvalidBase::NegativeBase => "No negative values allowed in a Base!",
+            InvalidBase::NoNonZeroBase => "Every Base needs one best value == 0.0!",
         };
         write!(f, "{}",message)?;
         Ok(())
@@ -703,7 +720,7 @@ impl Base {
             None => 4.0*self.scores.iter().map(|a| a.powi(2)).sum::<f64>()-self.scores.iter().map(|a| a).sum::<f64>().powi(2),
             Some(other) => {
                 //Remember, this is the DISTANCE. Which is the inner product OF THE DIFFERENCE. Not the inner product of the two 
-                (4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().zip(other.scores.iter()).map(|(a,b)| (a-b)).sum::<f64>()).powi(2))
+                4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().zip(other.scores.iter()).map(|(a,b)| (a-b)).sum::<f64>()).powi(2)
             },
         }
 
@@ -4831,7 +4848,7 @@ impl<'a> MotifSet<'a> {
 
 }
 
-
+/// An I/O error that is returned when a .meme file contains an invalid motif set
 pub enum MemeParseError {
     EmptyMatrix,
     InvalidAlphabet{ motif_num: usize},
@@ -5356,13 +5373,6 @@ impl MotifSetDef {
 */
 
 
-//Why this weird lifetime annotation?
-//If this is Set, the associated lifetime of Set matters.
-//But, if this is Rng, I can generate the random variable and Rng's life is irrelevant
-pub enum InitializeSet<'a,'b, R: Rng + ?Sized>{
-    Set(MotifSet<'a>),
-    Rng(&'b mut R),
-}
 
 
 //THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
@@ -6346,10 +6356,15 @@ fn quick_hist<'a, 'b, DB: DrawingBackend, N: Copy+Into<f64>>(raw_data: &[N], raw
 }
 
 
+/// This enum denotes how much tracking of move success rates we do
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TrackingOptions {
+    /// Indicates no move success rates need to be tracked
     NoTracking,
+    /// Indicates that only the beta = 1.0 trace move success rates need tracking.
+    /// Note that only one of these traces is tracked if there are multiple
     TrackTrueTrace,
+    /// Indicates that all traces have their move success rates tracked
     TrackAllTraces,
 }
 
@@ -6719,9 +6734,14 @@ impl<'a> TemperSetTraces<'a> {
     }
 }
 
+/// This is the error returned if parallel tempering is badly initialized. 
 pub enum InitializationError {
+    /// Parallel traces have an initial motif which points to the wrong AllDataUse
     UnsynchedData,
+    /// Parallel traces have a negative thermodynamic beta, which will mess up the inference
     NegativeTemperature, 
+    /// Parallel traces have a thermodyanmic beta greater than 1.0,
+    /// which we could technically infer with but which would be pointless to use.
     UselessBeta, 
 }
 
