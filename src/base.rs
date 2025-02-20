@@ -368,6 +368,11 @@ pub fn base_ceil(num: f64) -> f64 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+/// This is the struct which hold the negative free energies of binding in a position
+/// There are several invariants which must be maintained:
+/// * There must exist a unique Bp in Base which which has a negative free energy of 0.0
+/// * All other positions in the Base must have a value which is less than 0.0 but greater than or equal to SCORE_THRESH
+/// In general, functions which produce a Base will either statically guarentee this or return a Result
 pub struct Base {
    scores: [ f64; BASE_L],
 }
@@ -376,14 +381,14 @@ pub struct Base {
 #[derive(Debug)]
 pub enum InvalidBase {
     NegativeBase,
-    NoNonZeroBase,
+    NoSingleBestBase,
 }
 
 impl fmt::Display for InvalidBase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             InvalidBase::NegativeBase => "No negative values allowed in a Base!",
-            InvalidBase::NoNonZeroBase => "Every Base needs one best value == 0.0!",
+            InvalidBase::NoSingleBestBase => "Every Base needs one best value == 0.0!",
         };
         write!(f, "{}",message)?;
         Ok(())
@@ -422,7 +427,8 @@ impl IndexMut<Bp> for Base {
 //      The parameterizations are equivalent
 impl Base {
 
-    //Note: This will break if all the bindings are zeros, or any are negative
+    /// This creates a new Base by taking your scores, subtracting the maximum 
+    /// value from all values, and then capping any penalties smaller than SCORE_THRESH
     pub fn new(scores: [ f64; BASE_L]) -> Base {
 
         let mut scores = scores;
@@ -437,6 +443,8 @@ impl Base {
         Base { scores }
     }
 
+
+    /// This outputs the Base whose value is 0.0 in the best_bp position and SCORE_THRESH otherwise
     pub fn max_selective(best_bp: Bp) -> Base {
 
         let scores:  [ f64; BASE_L] = core::array::from_fn(|_| SCORE_THRESH);
@@ -449,6 +457,9 @@ impl Base {
 
     }
 
+    /// This takes a set of proposed scores, and ensures they follow the invariants
+    /// of base by reflection once the maximum is subtracted off, then ensures that
+    /// they are rounded to the nearest integer multiple of BASE_RESOLUTION*SCORE_THRESH
     pub fn new_by_reflections(scores: [f64; BASE_L]) -> Base {
 
         let mut scores = scores;
@@ -463,6 +474,7 @@ impl Base {
             if *pos < SCORE_THRESH { 
                 *pos = *pos - 2.0*SCORE_THRESH*((*pos+SCORE_THRESH)/(2.0*SCORE_THRESH)).floor();
                 if *pos > 0.0 { *pos = -*pos;}
+                if *pos == 0.0 { *pos += BASE_RESOLUTION*SCORE_THRESH; }
             }
             *pos = base_ceil(*pos)
         });
@@ -471,18 +483,32 @@ impl Base {
 
     }
 
+    /// This takes a set of probabilities of binding, and converts them to a Base 
+    /// by assuming the total sample number of props is counts, then adds
+    /// psuedo as a psuedocount before converting to scores
+    /// # Errors
+    ///   When props has a negative value or if there is no unique maximum prop
     pub fn new_with_pseudo(props: [f64; BASE_L], counts: f64, pseudo: f64) -> Result<Base, InvalidBase> {
 
         let mut props = props;
         
         let mut any_neg: bool = false;
 
+        let max_prop = Self::max(&props);
+
+        let mut count_max: usize = 0;
+
         for i in 0..props.len() {
             any_neg |= props[i] < 0.0 ;
+            if props[i] == max_prop { count_max += 1;}
         }
 
         if any_neg{
             return Err(InvalidBase::NegativeBase);
+        }
+
+        if count_max > 1 {
+            return Err(InvalidBase::NoSingleBestBase);
         }
 
         let sum = props.iter().sum::<f64>();
@@ -498,6 +524,11 @@ impl Base {
         Ok(Base::new(scores))
     }
 
+    /// This takes a set of probabilities of binding from a MEME PWM converts them to a Base
+    /// by multiplying by a background distribution. If discretize is true, 
+    /// penalties are rounded to the nearest integer multiple of BASE_RESOLUTION*SCORE_THRESH
+    /// # Errors
+    ///   When props or background_dist have a negative value or if there is no unique maximum prop
     pub fn from_pwm(props: [f64; BASE_L], background_dist: Option<[f64; BASE_L]>, discretize: bool) -> Result<Base, InvalidBase> {
 
         let mut props = props;
@@ -505,6 +536,9 @@ impl Base {
         let mut background = background_dist.unwrap_or([0.25; BASE_L]);
 
         let mut sum: f64 = 0.0;
+        
+
+        let mut too_many_max: bool = false;
 
         for prop in background {
             if prop <= 0.0 {
@@ -520,11 +554,13 @@ impl Base {
         for (i, prop) in props.iter_mut().enumerate() {
             if *prop < 0.0 { return Err(InvalidBase::NegativeBase); }
             *prop = *prop * background[i];
-            max = max.max(*prop);
+            if *prop >= max {
+                if *prop == max { too_many_max = true;} else { too_many_max = false; max = *prop;}
+            }
             sum += *prop
         }
 
-        if max == 0.0 { return Err(InvalidBase::NoNonZeroBase);}
+        if too_many_max { return Err(InvalidBase::NoSingleBestBase);}
         let scores: [f64; BASE_L] = core::array::from_fn(|a| {
             let mut val = (props[a]/sum + (max/sum)*PWM_CONVERTER).log2() - (2.0*(max/sum)*PWM_CONVERTER).log2();
 
@@ -535,6 +571,11 @@ impl Base {
 
     }
 
+    /// This takes a Base and converts it to set of probabilities of binding from a MEME PWM
+    /// by dividing out a background distribution. If discretize is true, 
+    /// penalties are rounded to the nearest integer multiple of BASE_RESOLUTION*SCORE_THRESH
+    /// # Errors
+    ///   When background_dist has a negative value 
     pub fn to_pwm(&self,background_dist: Option<[f64; BASE_L]> ) -> Result<[f64; BASE_L], InvalidBase> {
 
         let mut background = background_dist.unwrap_or([0.25; BASE_L]);
@@ -552,6 +593,7 @@ impl Base {
         let mut sum = 0_f64;
         let mut scores: [f64; BASE_L] = core::array::from_fn(|a| {
             let mut s = (self.scores[a]).exp2()*PWM_UNCONVERT-PWM_CONVERTER;
+            s /= background[a];
             sum += s;
             s
         });
@@ -561,37 +603,14 @@ impl Base {
               
     }
 
+    /// This generates a random base by sampling energy penalties 
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
+    /// favoring worse penalities, and then picking a best Bp uniformly
     pub fn rand_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
 
-        /*let mut samps = vec![0.0_f64; BASE_L+1];
-        samps[BASE_L] = 1.0;
-
-        let mut att: [f64; BASE_L] = [0.0; BASE_L];
-
-        for i in 1..(samps.len()-1) {
-            samps[i] = rng.gen();
-        }
-
-        samps.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-        
-        let mut max_p = -f64::INFINITY;
-        for i in 0..att.len() {
-            att[i] = (samps[i+1]-samps[i]).log2();
-            max_p = max_p.max(att[i]);
-        }
-        for i in 0..att.len() {
-            att[i] -=max_p;
-            if att[i] < SCORE_THRESH { att[i] = SCORE_THRESH;}
-        }*/
-
         let best = rng.gen_range(0..BASE_L);
         let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_CHOOSE_DIST.sample_energy(rng)); 
-
-        /*let samps: [f64; BASE_L-1] = core::array::from_fn(|_| {
-            let which = rng.gen::<f64>()+f64::EPSILON;
-            (-0.5*BASE_RESOLUTION+(BASE_RESOLUTION.powi(2)/4.0+(1.0+BASE_RESOLUTION)*which).sqrt())*SCORE_THRESH
-        });*/
 
         let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
 
@@ -603,6 +622,9 @@ impl Base {
         Base { scores: att}
     }
     
+    /// This generates a random base by uniformly sampling energy penalties 
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
+    /// then picking a best Bp uniformly
     pub fn rand_new_alt<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
         let best = rng.gen_range(0..BASE_L);
