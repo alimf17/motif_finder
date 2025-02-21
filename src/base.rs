@@ -603,7 +603,7 @@ impl Base {
               
     }
 
-    /// This generates a random base by sampling energy penalties 
+    /// This generates a random Base by sampling energy penalties 
     /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
     /// favoring worse penalities, and then picking a best Bp uniformly
     pub fn rand_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
@@ -622,7 +622,7 @@ impl Base {
         Base { scores: att}
     }
     
-    /// This generates a random base by uniformly sampling energy penalties 
+    /// This generates a random Base by uniformly sampling energy penalties 
     /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
     /// then picking a best Bp uniformly
     pub fn rand_new_alt<R: Rng + ?Sized>(rng: &mut R) -> Base {
@@ -640,53 +640,26 @@ impl Base {
         Base { scores: att}
     }
 
-    pub fn rand_dirichlet_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
-        let mut scores = DIRICHLET_PWM.get().expect("no writes expected now").sample(rng).scores;
-        scores = core::array::from_fn(|a| base_ceil(scores[a]));
-        Base { scores: scores }
-    } 
 
-    pub fn propose_safe_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
-
-        let mut scores = PROPOSE_EXTEND.get().expect("no writes expected now").sample(rng).scores;
-        scores = core::array::from_fn(|a| base_ceil(scores[a]));
-        Base { scores: scores }
-
-    }
-
+    /// This generates a random Base with best as its best Bp by sampling energy penalties 
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH, favoring 
+    /// worse penalities
     pub fn from_bp<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
         Base::rand_new(rng).make_best(best)
 
     }
 
+    /// This generates a random Base with best as its best Bp by uniformly sampling 
+    /// energy penalties from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH
     pub fn from_bp_alt<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
 
         Base::rand_new_alt(rng).make_best(best)
 
     }
 
-    pub fn from_bp_with_uniforms<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
-
-        let mut scores: [f64; BASE_L] = [0.; BASE_L];
-        
-        for i in 0..BASE_L{
-            if i == (best as usize) {
-                scores[i] = 1.0;
-            } else {
-                scores[i] = rng.gen();
-            }
-        }
-        
-        Base{ scores: scores }
-
-    }
-
-    pub fn from_bp_with_dirichlet<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
-        Base::rand_dirichlet_new(rng).make_best(best)
-    }
-
-
+    /// This takes Self and returns a Base with its current best Bp swapped with best
+    /// If best is its best Bp, returns a clone of Self
     pub fn make_best(&self, best: Bp) -> Base {
 
         let which_b = self.best_base();
@@ -700,6 +673,7 @@ impl Base {
 
     }
 
+    /// This takes Self and returns a copy with the values in bp1 and bp2 swapped
     pub fn swap_pair(&self, bp1: Bp, bp2: Bp) -> Base {
         
         let mut base2 = self.clone();
@@ -710,6 +684,7 @@ impl Base {
 
     }
 
+    /// This takes Self and returns which Bp has the best binding
     pub fn best_base(&self) -> Bp {
         //Safety: self.scores has a size of BASE_L, so this always produces a valid result
         unsafe{ std::mem::transmute::<usize, Bp>(Self::argmax(&self.scores))}
@@ -721,6 +696,7 @@ impl Base {
         best*/
     }
 
+    /// This takes self and returns an ordered array of every Bp which isn't best
     pub fn all_non_best(&self) -> [Bp; BASE_L-1] {
         let best = self.best_base();
 
@@ -735,6 +711,10 @@ impl Base {
 
     }
 
+    /// This function has two behaviors. 
+    /// If base is None, this returns the squared Aitchison magnitude of Self
+    /// If base is Some(&Base), it returns the squared Aitchison distance 
+    /// between it and self. 
     pub fn dist_sq(&self, base: Option<&Base>) -> f64 {
         
         match base {
@@ -749,6 +729,10 @@ impl Base {
 
     }
 
+    /// This function converts the scores to probabilities of binding. 
+    /// However, this does so directly, without any pseudocount. 
+    /// Thus, it should not be used for PWM generation, which assigns 
+    /// 0.0 weight to any location with penalty == SCORE_THRESH.
     pub fn as_probabilities(&self) -> [f64; BASE_L] {
 
         let mut props: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a].exp2());
@@ -761,12 +745,13 @@ impl Base {
         self.scores
     }
 
+    /// This converts a Base to the graphical representation of it as a simplex
     pub fn as_simplex(&self) -> [f64; BASE_L-1] {
         let probs = self.as_probabilities();
         Self::prob_slice_to_simplex(&probs)
     }
 
-    pub fn prob_slice_to_simplex(probs: &[f64; BASE_L]) -> [f64; BASE_L-1] {
+    fn prob_slice_to_simplex(probs: &[f64; BASE_L]) -> [f64; BASE_L-1] {
         let simplex: [f64; BASE_L-1] = SIMPLEX_VERTICES.iter().map(|a| a.iter().zip(probs.iter()).map(|(&s, &b)| s*b).sum::<f64>())
                                                        .collect::<Vec<f64>>().try_into().unwrap();
 
@@ -782,7 +767,7 @@ impl Base {
     //This vector space is isometric to R3 under the transformation specified in the functions
     //Where if p = 1/(2*(1+e)) and q = e*p
     //e1 = [p,q,q,p], e2 = [p,q,p,q], e3 = [p,p,q,q]
-    pub fn base_to_vect(&self) -> [f64; BASE_L-1] {
+    fn base_to_vect(&self) -> [f64; BASE_L-1] {
 
         //let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| (self.scores[a]+VEC_PAD_EPS).ln());
         /*let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| {
@@ -797,7 +782,7 @@ impl Base {
               self[Bp::T]+self[Bp::G]-(self[Bp::A]+self[Bp::C])])
     }
 
-    pub fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
+    fn vect_to_base(base_as_vec: &[f64; BASE_L-1]) -> Self {
 
 
 
@@ -815,93 +800,8 @@ impl Base {
         Base::new(unnormalized_base)
     }
 
-    //If ratio_sd and small_sd are negative, the move generated is just the opposite
-    //which gives a valid result. Hence, no erroring out. You SHOULDN'T use negatives
-    //because that's out of convention for no reason, but it won't break.
-    pub fn moved_base<R: Rng + ?Sized>(&self, ratio_sd: f64, small_sd: f64, rng: &mut R) -> Option<Base> {
 
-        let mut new_base = self.scores;
-
-        let mut largest_to_smallest: [(f64, usize); BASE_L] = core::array::from_fn(|a| (new_base[a], a));
-
-        largest_to_smallest.sort_unstable_by(|(a,_), (b, _)| b.partial_cmp(a).unwrap());
-
-        let old_second = largest_to_smallest[1].0;
-
-        let space = (old_second-SCORE_THRESH).max(0.01);
-
-        let ratios: [f64; BASE_L-2] = [(largest_to_smallest[2].0-SCORE_THRESH)/space, (largest_to_smallest[3].0-SCORE_THRESH)/space];
-
-        let second_place = rng.gen::<f64>()*SCORE_THRESH;
-
-        new_base[largest_to_smallest[1].1] = second_place;
-
-        let mut new_ratios = [ratios[0]+NORMAL_DIST.sample(rng)*ratio_sd, ratios[1]+NORMAL_DIST.sample(rng)*ratio_sd];
-
-        if new_ratios[0] > 1.0 || new_ratios[0] < 0.0 { 
-            let f = new_ratios[0].floor();
-            new_ratios[0] = if ((f as i8) & 1) == 1 { 1.0+f-new_ratios[0] } else {new_ratios[0] - f}
-        }
-        if new_ratios[1] > 1.0 || new_ratios[1] < 0.0 { 
-            let f = new_ratios[1].floor();
-            new_ratios[1] = if ((f as i8) & 1) == 1 { 1.0+f-new_ratios[1] } else {new_ratios[1] - f}
-        }
-        new_base[largest_to_smallest[2].1] = new_ratios[0]*(second_place-SCORE_THRESH)+SCORE_THRESH;
-        new_base[largest_to_smallest[3].1] = new_ratios[1]*(second_place-SCORE_THRESH)+SCORE_THRESH;
-
-        //new_base[largest_to_smallest[2].1] = rng.gen::<f64>()*(SCORE_THRESH-new_base[largest_to_smallest[1].1])+new_base[largest_to_smallest[1].1];
-        //new_base[largest_to_smallest[3].1] = rng.gen::<f64>()*(SCORE_THRESH-new_base[largest_to_smallest[1].1])+new_base[largest_to_smallest[1].1];
-
-
-
-        /*
-        let penalty_diffs: [f64; BASE_L-1] = core::array::from_fn(|i| largest_to_smallest[i+1].0-largest_to_smallest[i].0);
-
-        let ratios = [ratio_sd/(-SCORE_THRESH), ratio_sd/(-SCORE_THRESH), small_sd/(-SCORE_THRESH)];
-
-        let new_penalties: [f64; BASE_L-1] = core::array::from_fn(|i| penalty_diffs[i]*(NORMAL_DIST.sample(rng)*ratios[i]).exp());
-
-        let mut accumulate: f64 = 0.0;
-
-        for (i, (s, pos)) in largest_to_smallest.into_iter().enumerate() {
-            new_base[pos] = accumulate;
-            if i < new_penalties.len() { //remember, new_penalties is one shorter than largest_to_smallest
-                accumulate += (s+new_penalties[i]);
-            }
-        }
-
-        Some(Base::new_by_reflections(new_base))
-*/
-        Some(Base { scores: new_base})
-    }
-
-    pub fn move_manual<R: Rng + ?Sized>(&self, add: f64,  rng: &mut R) -> (Base, Bp) {
-
-        let mut new_base = self.clone();
-
-        let change_base = *(self.all_non_best().choose(rng).unwrap());
-
-
-        new_base[change_base] += add;
-
-        new_base = Base::new_by_reflections(new_base.scores);
-
-
-        (new_base, change_base)
-    }
-    
-    pub fn move_manual_bp(&self, add: f64,  change_base: Bp) -> Base {
-
-        let mut new_base = self.clone();
-
-        new_base[change_base] = add;
-
-        new_base = Base::new_by_reflections(new_base.scores);
-
-        new_base
-    }
-
-    pub fn rook_move<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
+    fn rook_move<R: Rng + ?Sized>(&self, rng: &mut R) -> Base {
 
         let mut new_base = self.clone();
         //SAFETY: all_non_best() never returns an empty value
@@ -913,51 +813,6 @@ impl Base {
 
         new_base
 
-    }
-
-    //Panic: if given a point outside of the base terahedron, this function will panic 
-    pub fn simplex_to_base(simplex_coords: &[f64; BASE_L-1]) -> Base {
-
-        let mut mod_simplex = simplex_coords.to_vec();
-        mod_simplex.push(1.0);
-
-        let mod_simplex = mod_simplex;
-
-        //let probs: [f64; BASE_L] = INVERT_SIMPLEX.iter().map(|a| a.iter().zip(mod_simplex.iter()).map(|(&b, &c)| b*c).sum::<f64>()).collect::<Vec<_>>().try_into().unwrap();
-
-        let mut probs = [0.0_f64; BASE_L];
-
-        for i in 0..BASE_L{
-            for j in 0..BASE_L {
-                probs[i] += INVERT_SIMPLEX[i][j]*mod_simplex[j];
-            }
-        }
-
-        let max = probs[Base::argmax(&probs)];
-
-        let b_form: [f64; BASE_L]  = core::array::from_fn(|a| base_ceil(probs[a]/max)); //probs.into_iter().map(|a| a/max).collect::<Vec<_>>().try_into().unwrap();
-
-        Base{scores : b_form}
-
-    }
-
-    pub fn simplex_to_vect(simplex_coords: &[f64; BASE_L-1]) -> [f64; BASE_L-1] {
-
-        let pre_ln_1p: [f64; BASE_L] = [2.*SQRT_2*simplex_coords[0]-simplex_coords[2], 
-                                         -SQRT_2*simplex_coords[0]+SQRT_2*SQRT_3*simplex_coords[1]-simplex_coords[2],
-                                         -SQRT_2*simplex_coords[0]-SQRT_2*SQRT_3*simplex_coords[1]-simplex_coords[2],
-                                         3.*simplex_coords[2] ];
-
-        let ln_vec: [f64; BASE_L] = core::array::from_fn(|a| pre_ln_1p[a].ln_1p());
-
-        [ -ln_vec[0]+ln_vec[1]+ln_vec[2]-ln_vec[3],
-          -ln_vec[0]+ln_vec[1]-ln_vec[2]+ln_vec[3],
-          -ln_vec[0]-ln_vec[1]+ln_vec[2]+ln_vec[3]]
-
-    }
-
-    pub fn vect_to_simplex(vect_coords: &[f64; BASE_L-1]) -> [f64; BASE_L-1] {
-        Self::vect_to_base(vect_coords).as_simplex()
     }
 
 
@@ -1082,7 +937,7 @@ impl Base {
         new_triple
 
     }
-
+/*
     pub fn add_in_vector_space(&self, addend: [f64; BASE_L-1], confine_base: bool) -> Self {
 
        let tetra = self.base_to_vect();
@@ -1132,9 +987,11 @@ impl Base {
        }
        Base::vect_to_base(&vec_res)
 
-    }
+    }*/
 
 
+
+    /// This clones the Base and reverses it. This also gives the complement of the base
     pub fn rev(&self) -> Base {
 
         let mut revved = self.scores.clone();
@@ -1145,38 +1002,13 @@ impl Base {
 
     }
 
-    pub fn show(&self) -> [f64; BASE_L] {
-        let prop_rep = self.scores.clone();
-        prop_rep
-    }
-
 
     
-    //SAFETY: bp MUST be less than the BASE_L, or else this will produce undefined behavior
-    //        Why do I do this in an unsafe way? My code is literally half again as fast when this
-    //        is unsafe. When we use the bases from the Sequence object, the initialization of Sequence
-    //        ensures that this is within bounds, but the compiler isn't smart enough to know that. 
-    pub unsafe fn rel_bind(&self, bp: usize) -> f64 {
-        *self.scores.get_unchecked(bp)
-    }
-    pub fn safe_bind(&self, bp: usize) -> f64 {
+    /// This returns the binding score of base bp
+    pub fn bind(&self, bp: usize) -> f64 {
         self.scores[bp]
     }
 
-    pub fn seqlogo_heights(&self) -> [(usize, f64); BASE_L] {
-        let probs = self.as_probabilities();
-        let information_content = 2.0_f64 + probs.iter().map(|&p| if p == 0.0 { 0.0_f64 } else { p*p.log2() } ).sum::<f64>();
-        let mut heights: [(usize, f64); BASE_L] = probs.iter().enumerate().map(|(i, &p)| (i, p*information_content)).collect::<Vec<_>>().try_into().expect("we know how big this is");
-        heights.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let mut cumulative_height: f64 = 0.0;
-        for i in 0..BASE_L {
-            heights[i].1 += cumulative_height;
-            cumulative_height = heights[i].1;
-        }
-
-        heights = heights.into_iter().rev().collect::<Vec<_>>().try_into().expect("it's always the same length");
-        heights
-    }
 
 }
 
@@ -1411,60 +1243,6 @@ impl Motif {
     }
 
 
-    pub fn from_motif_uniform<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
-
-        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_uniforms(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-best_bases.len());
-
-        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
-
-
-        let sign: f64 = rng.gen();
-        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
-
-        let peak_height: f64 = sign*height_dist.sample(rng);
-
-        let kernel_width: KernelWidth = rng.gen();
-        let kernel_variety: KernelVariety = rng.gen();
-
-        Motif {
-            peak_height: peak_height,
-            kernel_width: kernel_width,
-            kernel_variety: kernel_variety,
-            pwm: pwm,
-        }
-
-
-    }
-
-    pub fn from_motif_dirichlet<R: Rng + ?Sized>(best_bases: Vec<Bp>, min_height: f64, rng: &mut R) -> Motif {
-
-        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_with_dirichlet(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-best_bases.len());
-
-        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
-
-
-        let sign: f64 = rng.gen();
-        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
-
-        let peak_height: f64 = sign*(HEIGHT_PROPOSAL_DIST.sample(rng)+min_height);
-
-        let kernel_width: KernelWidth = rng.gen();
-        let kernel_variety: KernelVariety = rng.gen();
-
-        Motif {
-            peak_height: peak_height,
-            kernel_width: kernel_width,
-            kernel_variety: kernel_variety,
-            pwm: pwm,
-        }
-
-
-    }
-
-
-
     pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, height_dist: &impl ::rand::distributions::Distribution<f64>,rng: &mut R) -> Motif {
 
 
@@ -1491,46 +1269,6 @@ impl Motif {
 
     }
 
-    pub fn rand_mot_dirichlet<R: Rng + ?Sized>(seq: &Sequence, min_height: f64, rng: &mut R) -> Motif {
-
-
-        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
-
-        let mot = seq.random_valid_motif(num_bases, rng);
-
-        Self::from_motif_dirichlet(mot, min_height, rng)
-
-
-    }
-
-
-
-    pub fn rand_propensity_mot<R: Rng + ?Sized>(wave: &Waveform, height_dist: &impl ::rand::distributions::Distribution<f64>,rng: &mut R) -> Option<(Motif, f64)> {
-
-        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
-
-        let propensities = wave.kmer_propensities(num_bases);
-
-        let mut sum_prop: f64 = 0.0;
-
-        for p in propensities.iter() { sum_prop += *p; }
-
-        if sum_prop <= 0.0 {
-            return None;
-        }
-
-        let dist = WeightedIndex::new(&propensities).unwrap();
-
-        let selection = dist.sample(rng);
-
-        let mot = Sequence::u64_to_kmer(wave.seq().idth_unique_kmer(num_bases, selection), num_bases);
-
-        let motif = Self::from_motif_uniform(mot,height_dist, rng);
-
-        let dirichlet_like = motif.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
-
-        Some((motif, dirichlet_like+propensities[selection].ln()-sum_prop.ln()))
-    }
 
     pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence,rng: &mut R) -> Motif {
 
@@ -2910,7 +2648,7 @@ impl fmt::Display for Motif {
 
         for i in 0..self.pwm.len() {
 
-            let base = self.pwm[i].show();
+            let base = self.pwm[i].scores();
             let begin: bool = i == 0;
             let end: bool = i == (self.pwm.len()-1);
             let j = (begin, end);
@@ -2940,7 +2678,7 @@ impl fmt::Debug for Motif {
 
         for i in 0..self.pwm.len() {
 
-            let base = self.pwm[i].show();
+            let base = self.pwm[i].scores();
             let begin: bool = i == 0;
             let end: bool = i == (self.pwm.len()-1);
             let j = (begin, end);
@@ -3852,49 +3590,6 @@ impl<'a> MotifSet<'a> {
             let nulls = self.calc_motif_null_binds(self.nth_motif(i));
             self.set[i].1 = nulls;
         };
-    }
-
-    //NOT a monte carlo move
-    pub fn change_energy<R: Rng + ?Sized>(&self, energy: f64, rng: &mut R ) -> (Self, f64, usize, usize, Bp) {
-
-
-        let mut new_set = self.derive_set();
-
-        let c_id = rng.gen_range(0..self.set.len());
-
-        let mut replacement = new_set.nth_motif(c_id).clone();
-
-        let base_change = rng.gen_range(0..replacement.pwm.len());
-
-
-        let (attempt_new, base_pair) = replacement.pwm[base_change].move_manual(energy, rng);
-
-        replacement.pwm[base_change] = attempt_new;
-
-        let ln_post = new_set.replace_motif(replacement, c_id);
-
-        (new_set, ln_post, c_id, base_change,base_pair)
-
-
-    }
-    
-    pub fn manual_change_energy(&self, energy: f64, c_id: usize, pos: usize, bp: Bp ) -> (Self, f64) {
-
-        let mut new_set = self.derive_set();
-
-        let mut replacement = new_set.nth_motif(c_id).clone();
-
-        let base_change = pos;
-
-        let attempt_new  = replacement.pwm[base_change].move_manual_bp(energy, bp);
-
-        replacement.pwm[base_change] = attempt_new;
-
-        let ln_post = new_set.replace_motif(replacement, c_id);
-
-        (new_set, ln_post)
-
-
     }
 
     //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
@@ -7043,7 +6738,7 @@ mod tester{
         let safe_time = safe_access.elapsed();
 
         let unsafe_access = Instant::now();
-        let accessed_b: Vec<f64> = usize_vec.iter().map(|&b| unsafe{base.rel_bind(b)}).collect();
+        let accessed_b: Vec<f64> = usize_vec.iter().map(|&b| base.bind(b)).collect();
         let unsafe_time = unsafe_access.elapsed();
 
 
@@ -7054,7 +6749,7 @@ mod tester{
     }
 
 
-
+/*
     #[test]
     fn simplex_test() {
         println!("start");
@@ -7240,7 +6935,7 @@ mod tester{
 
 
 
-    }
+    }*/
 
     #[test]
     fn leap_test() {
@@ -8094,7 +7789,7 @@ mod tester{
         assert!(!(tc == try_base));
         assert!(b == b.clone());
 
-        let _b_mag: f64 = b.show().iter().sum();
+        let _b_mag: f64 = b.scores().iter().sum();
         let supposed_default_dist = (b.base_to_vect()).iter().map(|a| a.powi(2)).sum::<f64>();
 
         println!("{supposed_default_dist}, {}", b.dist_sq(None));
@@ -8136,7 +7831,7 @@ mod tester{
             assert!(dist_pwm < 1e-3, "dist {i} failed");
 
         }
-        //println!("Conversion dists: {:?}, {:?}, {}", b.show(),  b.to_gbase().to_base().show(), b.dist_sq(Some(&b.to_gbase().to_base())));
+        //println!("Conversion dists: {:?}, {:?}, {}", b.scores(),  b.to_gbase().to_base().scores(), b.dist_sq(Some(&b.to_gbase().to_base())));
         //assert!(b == b.to_gbase().to_base());
 
 
@@ -8347,7 +8042,7 @@ mod tester{
         let _nbases = matrix.len();
 
         for base in matrix {
-            println!("{:?}", base.show());
+            println!("{:?}", base.scores());
         }
 
         println!("{:?}", motif.best_motif());
@@ -8358,7 +8053,7 @@ mod tester{
         let matrix = motif.rev_complement();
 
         for base in &matrix {
-            println!("{:?}", base.show());
+            println!("{:?}", base.scores());
         }
 
         //assert!(((motif.pwm_prior()/gamma::ln_gamma(BASE_L as f64))+(motif.len() as f64)).abs() < 1e-6);
