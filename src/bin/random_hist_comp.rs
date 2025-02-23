@@ -54,11 +54,7 @@ fn main() {
         let mot_0 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
         let mot_1 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
 
-        let binds_0 = mot_0.return_bind_score(data.data().seq());
-        let binds_1 = mot_1.return_bind_score(data.data().seq());
-        
-        binds_0.into_iter().zip(binds_1.into_iter()).map(|(a,b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>()
-        //binds_0.into_iter().zip(binds_1.into_iter()).map(|(a,b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>().log2()
+        mot_0.dist_by_binding(&mot_1, data.data().seq())
 
     }).collect();
 

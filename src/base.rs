@@ -126,14 +126,19 @@ const CLOSE: f64 = 1e-5;
 
 /// MIN_BASE is the minimum length, in base vectors, that a PWM can be. 
 /// If you are modifying this code, please notice the safety warning
-/// SAFETY: Never, ever, ever, ever, EVER touch MIN_BASE. 
+/// # Safety 
+/// Never, ever, ever, ever, EVER touch MIN_BASE. 
 /// There are several safety guarentees that rely upon it being 8
 /// YOU WILL GET UNDEFINED BEHAVIOR IF YOU IGNORE THIS
 pub const MIN_BASE: usize = 8;
 
 /// MAX_BASE is the maximum length, in base pairs, that a PWM can be. 
 /// For a 4 base system like ours, the hardware limit on MAX_BASE is 32.
-/// SAFETY: if modifying this code, do NOT set this above 32. 
+/// # Safety 
+/// If modifying this code, do NOT set this above 32, ever. Furthermore, always
+/// regenerate the AllData and AllDataUse you use if you have changed this.
+/// A major part of how we can quickly and safely generate waveforms is that
+/// there are guanrantees on sequence block sizes which rely on this
 pub const MAX_BASE: usize = 20; 
 
 
@@ -728,6 +733,7 @@ impl Base {
 
 
     }
+
 
     /// This function converts the scores to probabilities of binding. 
     /// However, this does so directly, without any pseudocount. 
@@ -1734,19 +1740,13 @@ impl Motif {
 
     }
 
-    //TODO: START HERE WHEN YOU RESUME
-    pub fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
-    //pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
+    fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
         let block_starts = seq.block_u8_starts(); //stored index space
 
 
-        //let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
-        //let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
-
-        //let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
 
         let mut ind: usize;
@@ -1754,49 +1754,6 @@ impl Motif {
         let mut store: [Bp; BP_PER_U8];
 
 
-        /*{
-            let uncoded_seq = uncoded_seq.as_mut_slice();
-            for i in 0..(block_starts.len()) {
-
-
-                for jd in 0..(block_lens[i]/BP_PER_U8) {
-
-                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
-                    for k in 0..BP_PER_U8 {
-                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
-                    }
-
-                }
-
-
-                for j in 0..=((block_lens[i])-self.len()) {
-
-                    ind = BP_PER_U8*block_starts[i]+(j as usize);
-
-
-                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
-                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
-                    (bind_scores[ind], _) = unsafe {self.prop_binding(binding_borrow) };
-
-                }
-
-            }
-        }
-*/
-
-
-        /*let max_ind = BP_PER_U8*coded_sequence.len();
-        if block_starts.len() >= rayon::max_num_threads() {
-        (0..block_starts.len()).into_par_iter().map(|i| {
-
-            let uncoded_seq = seq.return_bases(i, 0, block_lens[i]);
-            //println!("should hit {} hits {}", block_lens[i], uncoded_seq.len());
-            let mut collector = uncoded_seq.windows(self.len()).map(|binding_borrow| unsafe{self.prop_binding(binding_borrow).0}).collect::<Vec<_>>();
-            collector.append(&mut vec![-f64::INFINITY;self.len()-1]);
-            collector
-        }).flatten().collect()
-        } else {
-*/
             let mut bind_scores: Vec<f64> = vec![-f64::INFINITY; BP_PER_U8*coded_sequence.len()];
             let mut rev_comp: Vec<bool> = vec![false; BP_PER_U8*coded_sequence.len()];
 
@@ -1831,13 +1788,13 @@ impl Motif {
                 }
             }
 
+
             bind_scores
-
-
 
     }
 
-    pub fn return_best_bind_inds(&self, seq: &Sequence) -> Vec<(usize, usize)> {
+
+    fn return_best_bind_inds(&self, seq: &Sequence) -> Vec<(usize, usize)> {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -1890,7 +1847,7 @@ impl Motif {
     }
 
 
-    pub fn return_bind_score_alt(&self, seq: &Sequence) -> Vec<(f64,bool)> {
+    fn return_bind_score_alt(&self, seq: &Sequence) -> Vec<(f64,bool)> {
 
         let coded_sequence = seq.seq_blocks();
         let block_lens = seq.block_lens(); //bp space
@@ -1946,7 +1903,7 @@ impl Motif {
 
     }
 
-    pub fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
+    fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
         let cutoff = -min_height-distribution_cutoff;
 
@@ -2094,7 +2051,7 @@ impl Motif {
 
     }
     
-    pub fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
+    fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
 
         let cutoff = -min_height-distribution_cutoff;
 
@@ -2215,155 +2172,15 @@ impl Motif {
 
     }
     
-    pub fn return_any_null_binds_by_hamming_with_kmers(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<(Vec<Bp>,f64)> {
 
-        let cutoff = -min_height-distribution_cutoff;
-
-        let standin_height = self.peak_height+distribution_cutoff;
-        
-        let mut check_cutoff = cutoff;
-
-        const CHECK_CUTOFF_INDEX: usize = CAPACITY_FOR_NULL-1;
-
-        let len = self.len();
-
-        
-        let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
-
-        for sixmer in 0_u64..=0b11_11_11_11_11_11 {
-
-            let forward_score = self.calc_6mer_prefix_binding(sixmer);
-            if forward_score >= cutoff { forward_checks.push((sixmer, forward_score)); }
-        }
-
-
-        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-
-        if forward_checks.len() > CAPACITY_FOR_NULL {
-        check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-6) as f64)*SCORE_THRESH;
-        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
-        if forward_partition < forward_checks.len() {
-            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-        }
-        }
-
-        forward_checks = forward_checks.into_iter().map(|(sixmer, score)| {
-            (0_u64..=0b11_11).filter_map(move |twomer| {
-                let eightmer = (twomer << 12) + sixmer;
-                if seq.kmer_count(eightmer, 8).is_none() {return None;};
-                //SAFETY: two bits can only add up to 3 at most
-                let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
-                let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
-                //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
-                let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
-                if new_score >= cutoff { Some((eightmer, new_score))} else {None}
-            })
-        }).flatten().collect();
-        
-        let mut accounted_length: usize = 8;
-
-        while accounted_length < len {
-
-
-            if forward_checks.len() == 0 {
-                return Vec::new();
-            }
-
-            check_cutoff = cutoff;
-            
-            forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-            if forward_checks.len() > CAPACITY_FOR_NULL {
-                check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-accounted_length) as f64)*SCORE_THRESH;
-
-            let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
-            if forward_partition < forward_checks.len() {
-                _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-            }
-            }
-            
-            forward_checks = forward_checks.into_iter().map(|(kmer, score)| {
-                BP_ARRAY.iter().filter_map(move |&base| {
-                    
-                    let kplus1mer = ((base as usize as u64) << (2*accounted_length)) + kmer;
-                    if seq.kmer_count(kplus1mer, accounted_length+1).is_none() {return None;};
-                    //SAFETY: two bits can only add up to 3 at most
-                    //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
-
-                    let new_score = unsafe {score + self.pwm.get_unchecked(accounted_length)[base]};
-                    
-
-                    if new_score >= cutoff { Some((kplus1mer, new_score))} else {None}
-                })
-            }).flatten().collect();
-
-            accounted_length+=1;
-        }
-
-        if forward_checks.len() == 0 { return Vec::new();}
-
-        check_cutoff = cutoff;
-        
-        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
-
-        if forward_checks.len() > CAPACITY_FOR_NULL {
-            let potential_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1;
-            check_cutoff = cutoff.max(potential_cutoff);
-        }
-
-
-        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
-        if forward_partition < forward_checks.len() {
-            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
-        }
-
-        
-        let mut final_binds: Vec<(Vec<Bp>,f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
-        let mut accounted_kmers: HashSet<u64> = HashSet::with_capacity(CAPACITY_FOR_NULL);
-
-
-        while final_binds.len() < CAPACITY_FOR_NULL {
-
-            match forward_checks.get(0) {
-
-                None => break,
-                Some(t) => {
-                    //Notice: I don't seem to care if accounted_kmers contains the reverse complement
-                    //That's because it _can't_: we only store any particular kmer in one direction
-                    //And we check for the reverse complement through the reverse complement MATRIX
-                    //If we get the SAME kmer, it happens because both directions happened to have acceptable scores
-                    //Which corresponds to both forward and reverse binding happening to seem fine
-                    //But we already have the score which is actually the better one, and thus we ignore the other
-                    if accounted_kmers.contains(&t.0) {
-                        _ = forward_checks.drain(0..1).collect::<Vec<_>>();
-                        continue;
-                    } else {
-                    
-                        accounted_kmers.insert(crate::sequence::reverse_complement_u64_kmer(t.0, len));
-                    }
-                    let times_to_add = seq.kmer_count(t.0, len).expect("We only get here because this kmer exists");
-                    for _ in 0..times_to_add { final_binds.push((Sequence::u64_to_kmer(t.0, self.len()),t.1+standin_height)); }
-                    _ = forward_checks.drain(0..1).collect::<Vec<_>>();
-                },
-            };
-
-        }
-            
-
-        //This can technically happen if we add more than one element at the end
-        if final_binds.len() > CAPACITY_FOR_NULL { 
-            _ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
-        }
-
-
-
-        final_binds
-
-
-    }
-
-
+    /// This generates the occupancy trace of `self` onto the data from `data_ref`.
+    /// It does this by calculating adding the energy penalties of each position, 
+    /// and if the energy penalty `> -data_ref.min_height()`, it draws a binding 
+    /// kernel of height `self.peak_height()+` the energy penalty.
+    /// There is a particular quirk when we draw the occupancy trace. 
+    /// If the penalty to the draw is less than 2.0 BASE_RESOLUITON*SCORE_THRESH, 
+    /// we revert to drawing the Gaussian kernel, on the assumption that the binding
+    /// is not strong enough to generate a more distinct shape
     pub fn generate_waveform<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
 
         let data = data_ref.data();
@@ -2396,7 +2213,7 @@ impl Motif {
                 let bind = unsafe{*bind_score_floats.get_unchecked(starts.get_unchecked(i)*BP_PER_U8+j)};
                 if bind > thresh {
                     let actual_height = bind+self.peak_height;
-                    actual_kernel = if actual_height/self.peak_height > 0.9 {unit_kernel*(actual_height) } else {unit_gaussian*(actual_height)};
+                    actual_kernel = if (actual_height-self.peak_height) < (2.0*BASE_RESOLUTION*SCORE_THRESH) {unit_kernel*(actual_height) } else {unit_gaussian*(actual_height)};
 
                     unsafe {occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);} 
 
@@ -2411,6 +2228,10 @@ impl Motif {
 
     }
 
+    /// This generates the occupancy trace of `self` onto the data from `data_ref`.
+    /// It does this by calculating adding the energy penalties of each position, 
+    /// and if the energy penalty `> -data_ref.min_height()`, it draws a binding 
+    /// kernel of height `self.peak_height()+` the energy penalty.
     pub fn generate_waveform_alt<'a>(&self, data_ref: &'a AllDataUse) -> Waveform<'a> {
 
         let data = data_ref.data();
@@ -2456,51 +2277,17 @@ impl Motif {
 
     }
 
-    //Safety: You MUST ensure that the binding score and reverse complement is valid for this particular motif, because you can technically use 
-    //        ANY binding score here, and this code won't catch it, especially if the dimensions check out. We code this primarily for speed of calculation in the gradient calculation
-    #[allow(dead_code)]
-    unsafe fn generate_waveform_from_binds<'a>(&self, binds: &(Vec<f64>, Vec<bool>), data_ref: &'a AllDataUse) -> Waveform<'a> {
-
-        let data = data_ref.data();
-        let unit_kernel = data_ref.unit_kernel_ref(self.kernel_width, self.kernel_variety);
-
-        let mut occupancy_trace: Waveform = data.derive_zero();
-
-        let mut actual_kernel: Kernel;
-
-        let starts = data.seq().block_u8_starts();
-
-        let lens = data.seq().block_lens();
-
-        let h = self.peak_height;
-
-        let cutoff = -h;
 
 
-        for i in 0..starts.len() { //Iterating over each block
-            for j in 0..(lens[i]-self.len()) { //-self.len() is critical for maintaining safety of place_peak. 
-                                               //It's why we don't allow sequence blocks unless they're bigger than the max motif size
-                //if binds.0[starts[i]*BP_PER_U8+j] > *THRESH.read().expect("no writes expected now") { //}
-                //SAFETY: THRESH is never modified at this point
-                if binds.0[starts[i]*BP_PER_U8+j] > cutoff {
-                    actual_kernel = unit_kernel*(binds.0[starts[i]*BP_PER_U8+j]+h) ;
-                    //println!("{}, {}, {}, {}", i, j, lens[i], actual_kernel.len());
-                    occupancy_trace.place_peak(&actual_kernel, i, j+(self.len()-1)/2);//SAFETY Note: this technically means that we round down if the motif length is even
-                                                                                      //This looks like we can violate the safety guarentee for place peak, but return_bind_score()
-                                                                                      //has zeros where we can be going over the motif length. Because THRESH forbids trying
-                                                                                      //to place peaks under a certain strength, this preserves our safety guarantees
-
-                                                                                      //println!("peak {} {} {}", starts[i]*BP_PER_U8+j, bind_score_floats[starts[i]*BP_PER_U8+j], occupancy_trace.read_wave()[(starts[i]*BP_PER_U8+j)/data.spacer()]);
-                }
-            }
-        }
-
-        occupancy_trace
-
-    }
-
-
-    /// #Example
+    /// This generates distance between two motifs, based on their `Base`s. 
+    /// In particular, it tries every possible overlapping offset of the motifs,
+    /// along with reverse complementing, and calculates the sum of the squared
+    /// Aitchison distances between them. If a Base does not have a corresponding 
+    /// partner, it add its squared Aitchison metric to the total. Then, the minimum
+    /// such distance is found. The function returns both the distance and whether
+    /// the best such distance needed reverse complementing.
+    /// 
+    /// # Example
     /// ```
     /// use motif_finder::base::{Motif, Bp, Base};
     /// let mut rng = rand::thread_rng();
@@ -2577,111 +2364,16 @@ impl Motif {
         if distance > 0.0 { distance.sqrt() } else {0.0}
     }
 
-    /* fn sum_motifs(&self, other_mot: &Motif) -> (Self, f64) {
+    /// This calculates motif distances by the RMSD of their binding scores, 
+    /// without considering differences from heights
+    pub fn dist_by_binding(&self, other_mot: &Motif, seq: &Sequence) -> f64 {
 
-        let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
+        let binds_0 = self.return_bind_score(seq);
+        let binds_1 = other_mot.return_bind_score(seq);
 
-        let total_len = pwm_long.len();
-
-        let short_len = pwm_short.len();
-
-        let (_, rc) = pwm_long.distance_function(pwm_short);
-        
-        let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
-
-        //sum_bases_and_lb_max
-
-        let mut correction: f64 = 0.0;
-
-        //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
-        //        The specific values here are also unimportant
-        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| Base::new([0.0; BASE_L])).collect();
-
-        if off_center > 0 { 
-            for i in 0..off_center {
-                //TODO: change this to get_unchecked if there's a performance benefit
-                new_pwm[i] =  pwm_long.pwm[i].clone();
-            }
-        }
-        
-        if (short_len+off_center) < total_len {
-            for i in (short_len+off_center)..total_len {
-                new_pwm[i] = pwm_long.pwm[i].clone();
-            }
-        }
-
-        for ind in 0..short_len {
-
-            let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
-            let b2 = &pwm_long.pwm[off_center+ind];
-
-            let (b,s) = b2.sum_bases_and_lb_max(&b1);
-            
-            new_pwm[off_center+ind] = b;
-
-            correction += s;
-        }
-
-        //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
-        //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
-        let new_height = self.peak_height()+other_mot.peak_height-correction;
-
-        (Motif::raw_pwm(new_pwm, new_height), correction)
+        binds_0.into_iter().zip(binds_1.into_iter()).map(|(a,b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>().sqrt()
 
     }
-    
-    fn diff_motifs(&self, other_mot: &Motif) -> (Self, f64) {
-
-        let (mut pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self, &other_mot)} else {(&other_mot, &self)};
-
-        let total_len = pwm_long.len();
-
-        let short_len = pwm_short.len();
-
-        let (_, rc) = pwm_long.distance_function(pwm_short);
-        
-        let off_center = ((pwm_long.len()-1)/2) - ((pwm_short.len()-1)/2);
-
-        //sum_bases_and_lb_max
-
-        let mut correction: f64 = 0.0;
-
-        //SAFETY: all 1.0 fulfills all the invariants of Base::new necessary not to cause an error
-        //        The specific values here are also unimportant
-        let mut new_pwm: Vec<Base> = (0..total_len).map(|_| Base::new([0.0; BASE_L])).collect();
-
-        if off_center > 0 { 
-            for i in 0..off_center {
-                //TODO: change this to get_unchecked if there's a performance benefit
-                new_pwm[i] =  pwm_long.pwm[i].clone();
-            }
-        }
-        
-        if (short_len+off_center) < total_len {
-            for i in (short_len+off_center)..total_len {
-                new_pwm[i] = pwm_long.pwm[i].clone();
-            }
-        }
-
-        for ind in 0..short_len {
-
-            let b1 = if rc { pwm_short.pwm[short_len-1-ind].rev() } else { pwm_short.pwm[ind].clone()};
-            let b2 = &pwm_long.pwm[off_center+ind];
-
-            let (b,s) = b2.subtract_bases_and_lb_max(&b1);
-        
-            new_pwm[off_center+ind] = b;
-            correction += s;
-
-        }
-
-        //"correction" is a sum of ln(proporition products), which makes it a negative dimensionless free energy
-        //We want to ADD the sum of dimensionless free energies, so we want to SUBTRACT correction
-        let new_height = pwm_long.peak_height()-pwm_short.peak_height+correction;
-
-        (Motif::raw_pwm(new_pwm, new_height), correction)
-
-    }*/
 
     fn for_meme(&self, background_dist: Option<[f64; BASE_L]>) -> Result<String, InvalidBase> {
 
