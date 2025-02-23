@@ -1080,6 +1080,17 @@ fn reflect_abs_height(a: f64, min_height: f64) -> f64 {
 
 //BEGIN MOTIF
 
+
+/// This contains a single motif, along with all of the information needed
+/// for that motif to generate its occupancy trace. This does not do checks
+/// on whether it is legal for this `Motif` to exist in a particular experiment. 
+/// Note that `Motif`s pre reserve the memory to contain `MAX_BASE` `Base`s.
+/// Also, note that if a `Motif` has a length less than `MIN_BASE`, it is legal 
+/// to construct, but will cause panics or errors when it is used in inference.
+/// # Safety
+/// It is a safety invariant that Motif NEVER has more than MAX_BASE `Base`s. 
+/// All methods which allow you to input custom motifs will automatically truncate
+/// to a maximum of MAX_BASE elements if you try to give it a longer motif. 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Motif {
 
@@ -1090,15 +1101,25 @@ pub struct Motif {
 
 }
 
+fn exact_capacity<T>(squish: &mut Vec<T>, capacity: usize) {
+    if capacity <= squish.len() {squish.shrink_to_fit(); return;}
+    if squish.capacity() > capacity {
+        squish.shrink_to(capacity);
+    } else {
+        squish.reserve_exact(capacity-squish.capacity())
+    }
+}
+
 impl Motif {
 
-    //GENERATORS
-    //PANIC: if any proposed PWM is made with a capacity greater than MAX_BASE, the program will panic
-    //NOTE: all pwm vectors are reserved with a capacity exactly equal to MAX_BASE. This is because motifs can only change size up to that point.        
-    //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
-    pub fn raw_pwm(mut pwm: Vec<Base>, peak_height: f64, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Motif {
 
-        pwm.reserve_exact(MAX_BASE-pwm.len());
+    pub fn raw_pwm(pwm: Vec<Base>, peak_height: f64, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Motif {
+
+        let mut pwm = pwm;
+        
+        pwm.truncate(MAX_BASE);
+       
+        exact_capacity(&mut pwm, MAX_BASE);
 
         let m = Motif {
             peak_height: peak_height,
@@ -1110,10 +1131,16 @@ impl Motif {
         m
     }
 
+    /// This takes a sequence of best bases and turns them into a `Motif` with that Bp
+    /// sequence as its best, with all energy penalties at SCORE_THRESH
     pub fn from_motif_max_selective(best_bases: Vec<Bp>, peak_height: f64, kernel_width: KernelWidth, kernel_variety: KernelVariety) -> Motif {
 
+        let mut best_bases = best_bases;
+        best_bases.truncate(MAX_BASE);
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::max_selective(*a)).collect();
+
+        exact_capacity(&mut pwm, MAX_BASE);
 
         let m = Motif {
             peak_height: peak_height,
@@ -1139,6 +1166,10 @@ impl Motif {
         }
 
         background = core::array::from_fn(|a| background[a]/sum);
+ 
+        let mut meme_pwm = meme_pwm;
+
+        meme_pwm.truncate(MAX_BASE);
 
         let try_pwm = meme_pwm.into_iter().map(|a| {
             Base::from_pwm(a, background_dist, true)
@@ -1146,7 +1177,7 @@ impl Motif {
 
         let mut pwm = try_pwm?;
 
-        pwm.reserve_exact(MAX_BASE-pwm.len());
+        exact_capacity(&mut pwm, MAX_BASE);
 
         Ok(Motif {
             peak_height: min_height, 
@@ -1159,6 +1190,11 @@ impl Motif {
 
     pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
+        let mut pwm = pwm;
+        pwm.truncate(MAX_BASE);
+
+        exact_capacity(&mut pwm, MAX_BASE);
+
         let sign: f64 = rng.gen();
         let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
 
@@ -1169,11 +1205,16 @@ impl Motif {
     }
 
 
-    //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
+    /// This generates a motif where best_bases is the sequence of `Bp`s with 
+    /// the best matches. Then, it generates energy penalties randomly, favoring
+    /// stricter penalties and using discretely spaced penalties
     pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
+        let mut best_bases = best_bases;
+        best_bases.truncate(MAX_BASE);
+        
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-best_bases.len());
+        exact_capacity(&mut pwm, MAX_BASE);
 
         //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
 
@@ -1196,11 +1237,17 @@ impl Motif {
 
     }
     
-    //TODO: make sure that this is used iff there's a guarentee that a motif is allowed
+    /// This generates a motif where best_bases is the sequence of `Bp`s with
+    /// the best matches. Then, it generates energy penalties randomly, uniformly
+    /// sampling the discretely spaced penalties
     pub fn from_motif_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
+        let mut best_bases = best_bases;
+        best_bases.truncate(MAX_BASE);
+
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-best_bases.len());
+        
+        exact_capacity(&mut pwm, MAX_BASE);
 
         //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
 
@@ -1223,10 +1270,43 @@ impl Motif {
 
     }
 
+    /// This generates a motif where best_bases is the sequence of `Bp`s with 
+    /// the best matches. Then, it generates energy penalties randomly, favoring
+    /// stricter penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH
     pub fn from_motif_with_height<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
 
+        let mut best_bases = best_bases;
+        best_bases.truncate(MAX_BASE);
+
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-best_bases.len());
+        exact_capacity(&mut pwm, MAX_BASE);
+
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+        Motif {
+            peak_height: height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm,
+        }
+
+
+    }
+    
+    /// This generates a motif where best_bases is the sequence of `Bp`s with
+    /// the best matches. Then, it generates energy penalties randomly, uniformly
+    /// sampling penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH
+    pub fn from_motif_with_height_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
+
+        let mut best_bases = best_bases;
+        best_bases.truncate(MAX_BASE);
+
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
+        exact_capacity(&mut pwm, MAX_BASE);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1243,6 +1323,12 @@ impl Motif {
     }
 
 
+    /// This generates a random Motif that is valid for `seq`. To generate
+    /// the Motif, it first uniformly samples a length from MIN_BASE..=MAX_BASE,
+    /// then uniformly samples a random valid motif of that length from seq,
+    /// and finally generates energy penalties randomly, favoring stricter 
+    /// penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH. 
     pub fn rand_mot<R: Rng + ?Sized>(seq: &Sequence, height_dist: &impl ::rand::distributions::Distribution<f64>,rng: &mut R) -> Motif {
 
 
@@ -1256,6 +1342,12 @@ impl Motif {
 
     }
     
+    /// This generates a random Motif that is valid for `seq`. To generate
+    /// the Motif, it first uniformly samples a length from MIN_BASE..=MAX_BASE,
+    /// then uniformly samples a random valid motif of that length from seq,
+    /// and finally generates energy penalties randomly, uniformly sampling 
+    /// penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH. 
     pub fn rand_mot_alt<R: Rng + ?Sized>(seq: &Sequence,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
 
@@ -1270,6 +1362,12 @@ impl Motif {
     }
 
 
+    /// This generates a random Motif that is valid for `seq`. To generate
+    /// the Motif, it first uniformly samples a length from MIN_BASE..=MAX_BASE,
+    /// then uniformly samples a random valid motif of that length from seq,
+    /// and finally generates energy penalties randomly, favoring stricter 
+    /// penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH. 
     pub fn rand_mot_with_height<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence,rng: &mut R) -> Motif {
 
 
@@ -1280,17 +1378,38 @@ impl Motif {
         Self::from_motif_with_height(mot, peak_height, rng)
 
     }
+    
+    /// This generates a random Motif that is valid for `seq`. To generate
+    /// the Motif, it first uniformly samples a length from MIN_BASE..=MAX_BASE,
+    /// then uniformly samples a random valid motif of that length from seq,
+    /// and finally generates energy penalties randomly, uniformly sampling 
+    /// penalties that are integer multiples of BASE_RESOLUTION*SCORE_THRESH
+    /// and less than or equal to SCORE_THRESH. 
+    pub fn rand_mot_with_height_alt<R: Rng + ?Sized>(peak_height: f64, seq: &Sequence,rng: &mut R) -> Motif {
 
-    //Panics: if num_bases < MIN_BASE or num_bases > MAX_BASE
+
+        let num_bases = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+
+        let mot = seq.random_valid_motif(num_bases, rng);
+
+        Self::from_motif_with_height_alt(mot, peak_height, rng)
+
+    }
+
+    
+    /// This generates a random Motif that is valid for `seq`. To generate,
+    /// the Motif, it uniformly samples a random valid motif of length 
+    /// num_bases.min(MAX_BASE) from seq, then generates energy penalties randomly,
+    /// favoring stricter penalties that are integer multiples of 
+    /// BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH. 
     pub fn rand_mot_with_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
 
-        assert!((num_bases >= MIN_BASE) && (num_bases <= MAX_BASE), 
-                "Only motif lengths with a length between {MIN_BASE} and {MAX_BASE}, inclusive, are allowed. You tried to make a {num_bases} Base long motif.");
+        let num_bases = num_bases.min(MAX_BASE);
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
         let mut pwm: Vec<Base> = mot.iter().map(|a| Base::from_bp(*a, rng)).collect();
-        pwm.reserve_exact(MAX_BASE-pwm.len());
+        exact_capacity(&mut pwm, MAX_BASE);
 
         let kernel_width: KernelWidth = rng.gen();
         let kernel_variety: KernelVariety = rng.gen();
@@ -1306,23 +1425,36 @@ impl Motif {
 
     }
 
-    pub fn rand_mot_with_max_len<R: Rng + ?Sized>(max_bases: usize, seq: &Sequence,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
+    /// This generates a random Motif that is valid for `seq`. To generate,
+    /// the Motif, it uniformly samples a random valid motif of length
+    /// num_bases.min(MAX_BASE) from seq, then generates energy penalties randomly,
+    /// uniformly sampling penalties that are integer multiples of
+    /// BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH.
+    pub fn rand_mot_with_height_and_motif_len_alt<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
 
-        let mut weights = vec![2_usize; max_bases-MIN_BASE];
-        weights.push(1);
-
-        let len_dist = WeightedIndex::new(&weights).unwrap();
-
-        let num_bases = len_dist.sample(rng)+MIN_BASE;
+        let num_bases = num_bases.min(MAX_BASE);
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
+        let mut pwm: Vec<Base> = mot.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
+        exact_capacity(&mut pwm, MAX_BASE);
 
-        Self::from_motif(mot, height_dist, rng)
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+
+        Motif {
+            peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm,
+        }
+
+
 
     }
-    
-    pub fn make_opposite(&self) -> Motif {
+
+
+    fn make_opposite(&self) -> Motif {
 
         let mut opposite = self.clone();
 
@@ -1331,7 +1463,15 @@ impl Motif {
 
     }
 
-    pub fn scramble_to_close_random_valid<R: Rng + ?Sized>(&mut self, seq: &Sequence, randomizer: &mut Option<&mut R>) -> Option<usize> {
+    /// This takes `self` and compares it to the valid motifs in `seq`.
+    /// If `self`'s best kmer is valid in `seq`, it is unchanged and this 
+    /// returns `None`. If `self`'s best bases are not valid in `seq`, this
+    /// finds the smallest Hamming distance to the best motif of `self` in which
+    /// seq has valid motifs, then it randomly samples that pool to find a new
+    /// sequence of best bps. Then, each mismatched `Base` in `self` has their
+    /// penalties swapped to match the new best kmer, and 
+    /// `Some(`the minimum Hamming distance`)` is returned. 
+    pub fn scramble_to_close_random_valid<R: Rng + ?Sized>(&mut self, seq: &Sequence, rng: &mut R) -> Option<usize> {
 
         let best_motif = self.best_motif();
         if seq.kmer_in_seq(&best_motif) {return None;}
@@ -1344,16 +1484,13 @@ impl Motif {
             kmer_ids = seq.all_kmers_within_hamming(&best_motif, hamming);
         }
 
-        match randomizer {
-            Some(rng) => *self = self.scramble_by_id_to_valid(*kmer_ids.choose(rng).expect("We should never try this unless we have kmers to choose from"), false, seq),
-            None => *self = self.scramble_by_id_to_valid(kmer_ids[0], false, seq),
-        };
+        *self = self.scramble_by_id_to_valid(*kmer_ids.choose(rng).expect("We should never try this unless we have kmers to choose from"), false, seq);
 
         Some(hamming)
 
     }
 
-    pub fn scramble_by_id_to_valid(&self, id: usize, opposite: bool, seq: &Sequence) -> Motif {
+    fn scramble_by_id_to_valid(&self, id: usize, opposite: bool, seq: &Sequence) -> Motif {
 
         let mut new_mot: Motif = if opposite {self.make_opposite()} else {self.clone()};
         let new_best: u64 = seq.idth_unique_kmer(self.len(), id);
@@ -1375,6 +1512,10 @@ impl Motif {
 
     }
     
+    /// This returns `None` if `self` and `kmer` do not have the same length.
+    /// Otherwise, this takes each position `i` where `self`'s best kmer mismatches
+    /// `kmer`, and swaps the penalties of the 'i'th `Base` so that `kmer[i]` 
+    /// is its best Bp.
     pub fn scramble_by_kmer(&self, kmer: &[Bp]) -> Option<Motif> {
 
         if self.len() != kmer.len() { return None; }
@@ -1391,15 +1532,19 @@ impl Motif {
     }
 
 
+    /// This returns a vector of Motifs with all the values of `self`, but
+    /// where every position in `to_scramble` has each possible combination of 
+    /// pair wise swaps that do not alter the best kmer. If an element of 
+    /// `to_scramble` is `>= self.len()`, it is simply omitted
     pub fn scramble_secondaries(&self, to_scramble: &[usize]) -> Vec<Motif> {
 
+        let to_scramble: Vec<usize> = to_scramble.iter().filter_map(|&a| if a < self.len() {Some(a)} else {None}).collect();
         
-        let final_length = SHUFFLE_BASES.pow(to_scramble.len() as u32);
+        let final_length = (BASE_L-1).pow(to_scramble.len() as u32);
         
-        let swapped_bases: Vec<[Base; BASE_L-1]> = to_scramble.iter().map(|&a| {
+        let swapped_bases: Vec<[Base; ((BASE_L-1)*(BASE_L-2))/2]> = to_scramble.iter().map(|&a| {
             let non_best = self.pwm[a].all_non_best();
-            [self.pwm[a].swap_pair(non_best[0], non_best[1]), 
-            self.pwm[a].swap_pair(non_best[1], non_best[2]), self.pwm[a].swap_pair(non_best[0], non_best[2])]
+            non_best.into_iter().combinations(2).map(|n| self.pwm[a].swap_pair(n[0], n[1])).collect::<Vec<_>>().try_into().expect("Should always be the correct length")
         }).collect();
 
 
@@ -1522,7 +1667,7 @@ impl Motif {
         let l = self.len();
         //
 
-        for i in 0..l { //}
+        for i in 0..l { 
             let bf = *kmer.get_unchecked(i);
             bind_forward += self.pwm[i][bf];
             let br = *kmer.get_unchecked(l-1-i);
@@ -1535,40 +1680,16 @@ impl Motif {
 
         let bind: f64 = if reverse {bind_reverse} else {bind_forward};
 
-        return (bind, reverse)
-
+        return (bind, reverse);
     }
-/*
-    fn prop_binding_u64(&self, kmer: u64) -> (f64, bool) {
-
-        let mut bind_forward: f64 = 0.0;
-        let mut bind_reverse: f64 = 0.0;
-
-        for i in 0..l {
-
-            let bf: Bp = unsafe{ Bp::usize_to_bp(((kmer & (3 << 2*i)) >> (2*i)) as usize) };
-            let brc: Bp = unsafe{ Bp::usize_to_bp(((kmer ^ (3 << (2*(l-1-i)))) >> (2*(l-1-i))) as usize)};
-            bind_forward += self.pwm[i][bf];
-            bind_reverse += self.pwm[i][brc];
-
-        }
-
-        let reverse: bool = bind_reverse > bind_forward;
-
-        let bind: f64 = if reverse {bind_reverse} else {bind_forward};
-
-        return (bind, reverse)
 
 
-    }
-  */  
+
     unsafe fn cut_prop_binding(&self, kmer: &[Bp], max_compensation: f64) -> Option<f64> { 
-    //unsafe fn cut_prop_binding(&self, kmer: *const Bp, max_compensation: f64) -> Option<f64> { 
 
         let cutoff = max_compensation;
         let l = self.len();
 
-        //let kmer: Vec<usize> = kmer_slice.to_vec();
 
         let mut bind_forward: f64 = 0.0;
         let mut bind_reverse: f64 = 0.0;
@@ -1578,46 +1699,11 @@ impl Motif {
 
 
         
-        /*for i in 0..l {
-            if try_forward {
-                let bf = *kmer.get_unchecked(i);
-                bind_forward += self.pwm[i][bf];
-                if bind_forward < cutoff { try_forward = false;}
-            }
-            if try_reverse {
-                let br = *kmer.get_unchecked(l-1-i);
-                let brc = br.complement();
-                bind_reverse += self.pwm[i][brc];
-                if bind_reverse < cutoff { try_reverse = false;}
-            }
-            if !try_forward && !try_reverse {return None;}
-        }
-
-        let reverse: bool = bind_reverse > bind_forward;
-
-        let bind: f64 = if reverse {bind_reverse} else {bind_forward};
-
-        Some(bind)
-       */ 
-        /*let for_bind = (0..l).map(|i|{                       
-            //let bf = *kmer.add(i);
-            let bf = *kmer.get_unchecked(i);
-            self.pwm.get_unchecked(i)[bf]
-        }).sum::<f64>();
-
-        let rev_bind = (0..l).map(|i| {
-            //let br = *kmer.add(i);
-            let br = *kmer.get_unchecked(l-1-i);
-            let brc = br.complement();
-            self.pwm.get_unchecked(i)[brc]
-        }).sum::<f64>();
-        */
 
         let mut for_bind: f64 = 0.0;
         let mut rev_bind: f64 = 0.0;
 
-        for (i, base) in self.pwm.iter().enumerate() { //}
-        //for i in 0..MIN_BASE{
+        for (i, base) in self.pwm.iter().enumerate() { 
             let base = self.pwm.get_unchecked(i);
             let bf = *kmer.get_unchecked(i);
             let brc = kmer.get_unchecked(l-1-i).complement();
@@ -1625,28 +1711,12 @@ impl Motif {
             rev_bind += base[brc];
         }
         
-        /*let bind = for_bind.max(rev_bind);
-        if bind <= cutoff { return None;}
-        if l == MIN_BASE { 
-            return Some(bind); 
-        }
-
-        for i in MIN_BASE..l {
-            let base = self.pwm.get_unchecked(i);
-            let bf = *kmer.get_unchecked(i);
-            let brc = kmer.get_unchecked(l-1-i).complement();
-            for_bind += base[bf];
-            rev_bind += base[brc];
-
-        }
-        */
-
         let bind = for_bind.max(rev_bind);
         if bind <= cutoff {None} else {Some(bind)}
 
     }
 
-    pub fn calc_6mer_prefix_binding(&self, kmer: u64) -> f64 {
+    fn calc_6mer_prefix_binding(&self, kmer: u64) -> f64 {
 
         let mut kmer_track = kmer;
 
@@ -1664,6 +1734,7 @@ impl Motif {
 
     }
 
+    //TODO: START HERE WHEN YOU RESUME
     pub fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
     //pub fn return_bind_score(&self, seq: &Sequence) -> (Vec<f64>, Vec<bool>) {
 
@@ -2861,7 +2932,7 @@ impl<'a> MotifSet<'a> {
             let mut motif = Motif::raw_pwm(base_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
 
             if make_poss {
-                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
+                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), rng);
 
                 match poss_hamming {
                     Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
@@ -2949,7 +3020,7 @@ impl<'a> MotifSet<'a> {
             let mut motif = Motif::from_motif_max_selective(bp_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
 
             if make_poss {
-                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), &mut Some(rng));
+                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), rng);
 
                 match poss_hamming {
                     Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),

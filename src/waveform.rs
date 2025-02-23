@@ -427,13 +427,6 @@ impl<'a> Waveform<'a> {
        
         let zerdat: usize = *self.start_dats.get_unchecked(block); //This will ensure the peak is in the correct block
 
-        //let _min_kern_bp: usize = max(0, place_bp) as usize;
-        //let _nex_kern_bp: usize = min(peak.len() as isize, ((self.spacer*self.point_lens[block]) as isize)+place_bp) as usize; //This is always positive if you uphold the center safety invariant 
- 
-        //let which_bps = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize)));;
-        //let kern_values: Vec<f64> = (min_kern_bp..nex_kern_bp).filter(|&bp| ((bp % self.spacer) == (cc as usize))).map(|f| peak.get_curve()[f as usize]).collect();
-        
-       
 
         let completion: usize = ((cc-((peak.len() % self.spacer) as isize)).rem_euclid(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
                                                                             //of the kernel to hit the next base in the cc
@@ -445,15 +438,7 @@ impl<'a> Waveform<'a> {
 
 
         let kern_change = self.wave.get_unchecked_mut((min_data+zerdat)..(nex_data+zerdat));
-/*
-        if kern_values.len() > 0 {
-            //println!("{} {} {} {} {} peak",min_data+zerdat, nex_data+zerdat, kern_values.len(), kern_change.len(), w);
-            for i in 0..kern_change.len(){
-                kern_change[i] += kern_values[i];
-            }
-        } 
         
-  */
         let kern_start = min_kern_cc as usize;
         for i in 0..kern_change.len() {
             *kern_change.get_unchecked_mut(i) += peak.kernel.get_unchecked(kern_start+i*self.spacer);
