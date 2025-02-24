@@ -1,5 +1,6 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Range};
 use std::cmp::{max, min};
+use std::error::Error;
 
 //use std::time::{Duration, Instant};
 
@@ -319,11 +320,15 @@ impl<'a> Waveform<'a> {
 
         if k == 0 { return None; }
 
-        let begin = if base < k { 0_usize } else { base+1-k };
+        if base < k { return None;}
 
         let block_len = self.seq.ith_block_len(block);
+        
+        if base+k >= block_len {return None;}
 
-        let end = if (base+k) >= block_len { block_len-k } else { base } ;
+        let begin = base+1-k;
+
+        let end = base; 
 
         Some((block, begin..(end+1)))
 
@@ -856,7 +861,7 @@ impl<'a> Waveform<'a> {
 
     }
     
-    pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str) {
+    pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let current_resid = data_ref.data()-&self;
 
@@ -873,11 +878,14 @@ impl<'a> Waveform<'a> {
 
         let total_dir = format!("{}/{}", signal_directory,signal_name);
 
+        /*
         if let Err(creation) = std::fs::create_dir_all(&total_dir) {
             warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
             println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
             return;
-        };
+        };*/
+
+        std::fs::create_dir_all(&total_dir)?;
 
         for i in 0..blocked_locs_and_signal.len() {
 
@@ -932,14 +940,9 @@ impl<'a> Waveform<'a> {
 
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
 
-
-
-
-
-
-
         }
-    
+
+        Ok(())
 
     }
 

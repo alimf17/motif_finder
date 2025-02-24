@@ -1094,9 +1094,12 @@ fn reflect_abs_height(a: f64, min_height: f64) -> f64 {
 /// Also, note that if a `Motif` has a length less than `MIN_BASE`, it is legal 
 /// to construct, but will cause panics or errors when it is used in inference.
 /// # Safety
-/// It is a safety invariant that Motif NEVER has more than MAX_BASE `Base`s. 
+/// It is a safety invariant that Motif NEVER has more than MAX_BASE `Base`s, 
+/// and never less than MIN_BASE `Base`s. 
 /// All methods which allow you to input custom motifs will automatically truncate
-/// to a maximum of MAX_BASE elements if you try to give it a longer motif. 
+/// to a maximum of MAX_BASE elements if you try to give it a longer motif, and 
+/// will pad your motif with `Bp::A` or `Base::max_selective(Bp::A)` if you 
+/// give it a smaller motif
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Motif {
 
@@ -1125,6 +1128,10 @@ impl Motif {
         
         pwm.truncate(MAX_BASE);
        
+        while pwm.len() < MIN_BASE {
+            pwm.push(Base::max_selective(Bp::A));
+        }
+
         exact_capacity(&mut pwm, MAX_BASE);
 
         let m = Motif {
@@ -1143,6 +1150,10 @@ impl Motif {
 
         let mut best_bases = best_bases;
         best_bases.truncate(MAX_BASE);
+
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::max_selective(*a)).collect();
 
@@ -1183,6 +1194,8 @@ impl Motif {
 
         let mut pwm = try_pwm?;
 
+        while pwm.len() < MIN_BASE { pwm.push(Base::max_selective(Bp::A));}
+
         exact_capacity(&mut pwm, MAX_BASE);
 
         Ok(Motif {
@@ -1197,6 +1210,7 @@ impl Motif {
     pub fn rand_height_pwm<R: Rng + ?Sized>(pwm: Vec<Base>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut pwm = pwm;
+        while pwm.len() < MIN_BASE { pwm.push(Base::max_selective(Bp::A));}
         pwm.truncate(MAX_BASE);
 
         exact_capacity(&mut pwm, MAX_BASE);
@@ -1217,6 +1231,10 @@ impl Motif {
     pub fn from_motif<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut best_bases = best_bases;
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
+
         best_bases.truncate(MAX_BASE);
         
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
@@ -1249,6 +1267,10 @@ impl Motif {
     pub fn from_motif_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>,height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
 
         let mut best_bases = best_bases;
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
+
         best_bases.truncate(MAX_BASE);
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
@@ -1283,6 +1305,10 @@ impl Motif {
     pub fn from_motif_with_height<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
 
         let mut best_bases = best_bases;
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
+
         best_bases.truncate(MAX_BASE);
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp(*a, rng)).collect();
@@ -1309,6 +1335,10 @@ impl Motif {
     pub fn from_motif_with_height_alt<R: Rng + ?Sized>(best_bases: Vec<Bp>, height: f64, rng: &mut R) -> Motif {
 
         let mut best_bases = best_bases;
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
+
         best_bases.truncate(MAX_BASE);
 
         let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_alt(*a, rng)).collect();
@@ -1405,12 +1435,12 @@ impl Motif {
     
     /// This generates a random Motif that is valid for `seq`. To generate,
     /// the Motif, it uniformly samples a random valid motif of length 
-    /// num_bases.min(MAX_BASE) from seq, then generates energy penalties randomly,
-    /// favoring stricter penalties that are integer multiples of 
-    /// BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH. 
+    /// num_bases.min(MAX_BASE).max(MIN_BASE) from seq, then generates energy 
+    /// penalties randomly, favoring stricter penalties that are integer multiples
+    /// of BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH. 
     pub fn rand_mot_with_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
 
-        let num_bases = num_bases.min(MAX_BASE);
+        let num_bases = num_bases.min(MAX_BASE).max(MIN_BASE);
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
@@ -1433,12 +1463,12 @@ impl Motif {
 
     /// This generates a random Motif that is valid for `seq`. To generate,
     /// the Motif, it uniformly samples a random valid motif of length
-    /// num_bases.min(MAX_BASE) from seq, then generates energy penalties randomly,
-    /// uniformly sampling penalties that are integer multiples of
-    /// BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH.
+    /// num_bases.min(MAX_BASE).max(MIN_BASE) from seq, then generates
+    /// energy penalties randomly,uniformly sampling penalties that are integer
+    /// multiples of BASE_RESOLUTION*SCORE_THRESH and less than or equal to SCORE_THRESH.
     pub fn rand_mot_with_height_and_motif_len_alt<R: Rng + ?Sized>(peak_height: f64, num_bases: usize, seq: &Sequence, rng: &mut R) -> Motif {
 
-        let num_bases = num_bases.min(MAX_BASE);
+        let num_bases = num_bases.min(MAX_BASE).max(MIN_BASE);
 
         let mot = seq.random_valid_motif(num_bases, rng);
 
@@ -2458,9 +2488,9 @@ impl fmt::Debug for Motif {
     }
 }
 
+/// This stores a single state of the inference
+/// Each Motif stored also comes with a vector of its matches to NullSequence
 #[derive(Clone)]
-//DEFINITELY CANNOT BE DIRECTLY SERIALIZED
-//
 pub struct MotifSet<'a> {
 
     set: Vec<(Motif, Vec<f64>)>, 
@@ -2471,6 +2501,7 @@ pub struct MotifSet<'a> {
 
 impl<'a> MotifSet<'a> {
 
+    /// This generates a single Motif MotifSet, along with its ancillaries
     pub fn manual_set(data_ref: &'a AllDataUse<'a>, mot: Motif) -> Self {
 
         let signal = mot.generate_waveform(data_ref);
@@ -2489,7 +2520,7 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
     
-    pub fn manual_set_null_free(data_ref: &'a AllDataUse<'a>, mot: Motif) -> Self {
+    pub(crate) fn manual_set_null_free(data_ref: &'a AllDataUse<'a>, mot: Motif) -> Self {
 
         let signal = mot.generate_waveform(data_ref);
 
@@ -2505,6 +2536,7 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
 
+    /// This randomly generates a single Motif MotifSet with a valid motif for data_ref
     pub fn rand_with_one<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
         let mut valid: bool;
@@ -2534,6 +2566,8 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
 
+    /// This randomly generates a single Motif MotifSet with
+    /// with height peak_height and a random valid motif for data_ref
     pub fn rand_with_one_height<R: Rng+?Sized >(peak_height: f64, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
         let set = vec![Motif::rand_mot_with_height(peak_height, data_ref.data().seq(), rng)];
@@ -2553,6 +2587,9 @@ impl<'a> MotifSet<'a> {
         mot_set
     }
 
+    /// This randomly generates a single Motif MotifSet with
+    /// with height peak_height and a random valid motif for data_ref
+    /// of length peak_height.min(MAX_BASE)
     pub fn rand_with_one_height_and_motif_len<R: Rng + ?Sized>(peak_height: f64, motif_len: usize, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
 
@@ -2573,7 +2610,15 @@ impl<'a> MotifSet<'a> {
     }
     
     
- 
+
+    /// This attempts to generate a MotifSet based on input from a meme file
+    /// If a motif it reads is not valid for data_ref, it transforms it
+    /// into a valid motif with the nearest possible Hamming distance. 
+    /// # Errors
+    /// If the meme file is not correctly formatted. This can be for a variety
+    /// of reasons, from an empty matrix, an alphabet of the wrong length, 
+    /// a column of the wrong length, an inability to parse floats from the meme
+    /// file, or a negative value in the PWM.
     pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
@@ -2661,6 +2706,15 @@ impl<'a> MotifSet<'a> {
 
     }
     
+    /// This attempts to generate a MotifSet based on input from a meme file
+    /// But instead of respecting proportionality, it makes all `Base`s as 
+    /// selective as possible. f a motif it reads is not valid for data_ref, it
+    /// transforms it into a valid motif with the nearest possible Hamming distance. 
+    /// # Errors
+    /// If the meme file is not correctly formatted. This can be for a variety
+    /// of reasons, from an empty matrix, an alphabet of the wrong length, 
+    /// a column of the wrong length, an inability to parse floats from the meme
+    /// file, or a negative value in the PWM.
     pub fn set_from_meme_max_selective<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
@@ -2778,6 +2832,11 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// This calculates, from scratch, the total occupancy trace for a MotifSet
+    /// Note: we don't actually use this in the inference: because occupancy 
+    /// traces are assumed linear and they are also the major time suck of the
+    /// inference, we generally calculate occupancy traces by taking the difference
+    /// between the new MotifSet and some prior MotifSet
     pub fn recalced_signal(&self) -> Waveform {
         let mut signal = self.data_ref.data().derive_zero();
         for (mot, _) in self.set.iter() {
@@ -2804,10 +2863,13 @@ impl<'a> MotifSet<'a> {
         mot.return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0)
     }
 
+    /// This takes the current MotifSet and sorts its motifs in descending `peak_height()` order
     pub fn sort_by_height(&mut self) {
         self.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
     }
 
+    /// This takes the current MotifSet and gives the set with only the `n` 
+    /// largest `peak_height()` `Motif`s
     pub fn only_n_strongest(&'a self, n: usize) -> MotifSet<'a> {
 
         let mut sort_set = self.clone();
@@ -2835,6 +2897,8 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// This takes the MotifSet and outputs the ln posterior densities
+    /// `self.only_n_strongest(n)` for `n=1..=self.len()`, in order.
     pub fn ln_posts_by_strength(&self) -> Vec<f64> {
 
         let mut motif_set = self.clone();
@@ -2851,7 +2915,7 @@ impl<'a> MotifSet<'a> {
 
             let mut cumulative_set = MotifSet {
 
-                set: (0..i).map(|a| motif_set.set[a].clone()).collect(),
+                set: (0..=i).map(|a| motif_set.set[a].clone()).collect(),
                 signal: cumulative_signal.clone(),
                 ln_post: None,
                 data_ref: self.data_ref,
@@ -2867,6 +2931,9 @@ impl<'a> MotifSet<'a> {
 
     }
     
+    /// This takes the MotifSet and outputs the Euclidean distances of 
+    /// the occupancy traces of `self.only_n_strongest(n)` for `n=1..=self.len()`,
+    /// in order.
     pub fn distances_by_strength(&self) -> Vec<f64> {
 
         let mut motif_set = self.clone();
@@ -2899,6 +2966,18 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// This takes the current MotifSet and attempt to save a series of files to
+    /// the directory `dir={output_dir}/{file_name}_new_occupancy`, creating it if
+    /// necessary. The files are:
+    /// - `{dir}/motif_set.bin`, which is a serialized binary of a skinny version of self
+    /// - `{dir}/total/from_{start}_to_{end}.png`, the portions of the occupancy trace base pair `start` to `end`
+    /// - `{dir}/Motif_{i}/from_{start}_to_{end}.png`, the portions of the occupancy trace where the `i`th strongest motif generated positive occupancy from base pair `start` to `end`
+    /// - `{dir}/Strongest_{i}_Motifs/from_{start}_to_{end}.png`, the portions of the occupancy trace where the sum of the `i` strongest motifs generated positive occupancy from base pair `start` to `end`
+    /// - `{dir}/from_{start}_to_{end}/total.png`, the total occuapncy from base pair `start` to `end`
+    /// - `{dir}/from_{start}_to_{end}/Motif_{i}.png`, the occupancy from base pair `start` to `end` for the `i`th strongest motif, generated only if the `i`th strongest motif had positive occupancy there. 
+    /// - `{dir}/from_{start}_to_{end}/Strongest_{i}_motifs.png`, the sum of occupancy from base pair `start` to `end` for the set of the `i`th strongest motifs, generated only if the sum has positive occupancy
+    /// # Errors
+    /// If `dir` does not exist and cannot be created
     pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let mut motif_set = self.clone();
@@ -2923,7 +3002,7 @@ impl<'a> MotifSet<'a> {
 
         let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
 
-        outfile_handle.write(&buffer).expect("buffer should write");
+        outfile_handle.write(&buffer).expect("We just created this file");
 
         
         signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false);
@@ -2951,200 +3030,25 @@ impl<'a> MotifSet<'a> {
         Ok(())
     }
 
-    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str) {
+    /// This takes `self` and `other_set` and plots both of their occupancy 
+    /// traces in each location in the directory 
+    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let self_sig = self.recalced_signal();
         let alter_sig = other_set.recalced_signal();
 
         let signal_directory: String = format!("{}/{}_{}_occupancy_compare",output_dir,file_name, other_name);
 
-       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::PINK_600, &plotters::prelude::full_palette::BLUE_A200,self_name, other_name);
+       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::PINK_600, &plotters::prelude::full_palette::BLUE_A200,self_name, other_name)?;
+
+       Ok(())
 
     }
-/*
-    //I deliberately chose not to scale anything by peak heights here
-    pub fn generate_set_binding_report(&self, data_ref:&AllDataUse) -> Vec<(usize, usize, usize, f64)> {
-
-        let mut binding = self.nth_motif(0).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>();
-
-        if self.set.len() > 1 { for i in 1..self.set.len() {
-
-            let new_binding = self.nth_motif(i).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(i).len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
-
-            for j in 0..binding.len() {
-                if new_binding[j].2 > binding[j].2 {
-                    binding[j] = new_binding[j];
-                }
-            }
-
-        }}
-
-        binding
-
-    }
-
-    pub fn generate_set_binding_report_with_omission(&self, data_ref:&AllDataUse, omit: usize) -> Vec<(usize, usize, usize, f64)>  {
-
-        if self.set.len() == 1 { return Vec::new();} 
-
-        if omit >= self.set.len() { return self.generate_set_binding_report(data_ref); }
-
-        let mut binding = if omit == 0 {
-            self.nth_motif(1).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
-        } else {
-            self.nth_motif(0).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(0).len(), 0, c)).collect::<Vec<(usize, usize, usize, f64)>>()
-        };
-
-        if self.set.len() == 2 { return binding;}
-
-        let start_id = if omit == 1 {2_usize} else {1};
-
-        for i in start_id..self.set.len() {
-
-            if i != omit {
-                let new_binding = self.nth_motif(i).gen_single_mot_binding_report(data_ref).into_iter().map(|(a,_,c)| (a, a + self.nth_motif(i).len(), i, c)).collect::<Vec<(usize, usize, usize, f64)>>();
-
-                for j in 0..binding.len() {
-                    if new_binding[j].2 > binding[j].2 {
-                        binding[j] = new_binding[j];
-                    }
-                }
-            }
-        }
-
-        binding
-
-
-    }
-
-    //This gives a vector of precisions for each peak recalled
-    //If somehow, nothing pings on a peak that should be recalled, there will be a zero entry
-    //So for example, if this gives vec![1.0, 0.5, 0.6, 0.0, 0.0], there were five peaks that 
-    //should have been recalled: one was found at the top, one was found in position 4, 
-    //one was found in position 5, and the other two were never found somehow (this is probably an error)
-    pub fn precision_for_each_recall(&self, data_ref:&AllDataUse, peak_locations: &[((usize, usize), f64)]) -> Vec<f64> {
-
-        let mut binding_scores = self.generate_set_binding_report(data_ref);
-        binding_scores.sort_by(|(_,_,_,f), (_,_,_,g)| g.partial_cmp(f).unwrap());
-
-        let mut precisions: Vec<f64> = vec![0.0; peak_locations.len()];
-
-        let mut try_hits: f64 = 0.0;
-        let mut hits: f64 = 0.0; 
-        let mut hit_id: usize = 0;
-
-        for (start_loc, end_loc, _, _) in binding_scores {
-            
-            try_hits += 1.0;
-
-            let mut found = false;
-
-            for ((kern_start, kern_end), _) in peak_locations {
-
-                if start_loc >= *kern_end { break; }
-
-                if (start_loc >= *kern_start) && (end_loc <= *kern_end) {
-                    found = true;
-                }
-
-            }
-
-            if found {
-                hits += 1.0;
-                precisions[hit_id] = hits/try_hits;
-                hit_id += 1;
-            }
-
-        }
-
-        precisions
-    }
-
-    pub fn precision_for_each_recall_omit_motif(&self, data_ref:&AllDataUse, peak_locations: &[((usize, usize), f64)], omit: usize) -> Vec<f64> {
-
-        let mut binding_scores = self.generate_set_binding_report_with_omission(data_ref, omit);
-        binding_scores.sort_by(|(_,_,_,f), (_,_,_,g)| g.partial_cmp(f).unwrap());
-
-        let mut precisions: Vec<f64> = vec![0.0; peak_locations.len()];
-
-        let mut try_hits: f64 = 0.0;
-        let mut hits: f64 = 0.0;
-        let mut hit_id: usize = 0;
-
-        for (start_loc, end_loc, _, _) in binding_scores {
-
-            try_hits += 1.0;
-
-            let mut found = false;
-
-            for ((kern_start, kern_end), _) in peak_locations {
-
-                if start_loc >= *kern_end { break; }
-
-                if (start_loc >= *kern_start) && (end_loc <= *kern_end) {
-                    found = true;
-                }
-
-            }
-
-            if found {
-                hits += 1.0;
-                precisions[hit_id] = hits/try_hits;
-                hit_id += 1;
-            }
-
-        }
-
-        precisions
-
-    }
-
-    /*pub fn generate_pr_curve(&self, data_ref: &AllDataUse, omit_weakest: bool, base_file_name: &str) {
-
-        let file = format!("{}{}", base_file_name,"_pr_curve.png");
-        
-        let area = BitMapBackend::new(&file, (8000, 4000)).into_drawing_area();
-
-        let mut pr = ChartBuilder::on(&area);
-
-        pr.margin(10).y_label_area_size(200).x_label_area_size(200);
-
-        pr.caption("Precision vs recall", ("Times New Roman", 80));
-
-        let peak_locations = data_ref.basic_peak(MIN_HEIGHT);
-
-        let recall: Vec<f64> = (0..peak_locations.len()).map(|a| ((a+1) as f64)/(peak_locations.len() as f64)).collect();
-
-        let precision: Vec<f64> = self.precision_for_each_recall(data_ref, &peak_locations);
-
-        let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
-
-        pr_context.configure_mesh().x_label_style(("serif", 70))
-            .y_label_style(("serif", 70))
-            .x_label_formatter(&|v| format!("{:.0}", v))
-            .axis_desc_style(("serif",90))
-            .x_desc("Recall")
-            .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
-
-        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Total Motif Set");
-
-        if omit_weakest && self.set.len() > 1 {
-
-            let weakest = self.set.iter().map(|a| a.0.peak_height()).enumerate().min_by(|(_, a), (_,b)| a.partial_cmp(b).unwrap()).unwrap().0;
-
-            let precision_weakest: Vec<f64> = self.precision_for_each_recall_omit_motif(data_ref,&peak_locations, weakest);
-
-            pr_context.draw_series(LineSeries::new(precision_weakest.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), &BLUE)).unwrap().label("Omit Weakest Motif");
-
-        }
-
-
-    }*/
-*/
+    
     //Note: It is technically allowed to have a negative thermodynamic beta
     //      This will invert your mechanics to find your LOWEST likelihood region
     //      Which is bad for most use cases! So be warned. 
-    pub fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, thermo_beta: f64, rng: &mut R) -> bool {
+    fn accept_test<R: Rng + ?Sized>(old: f64, new: f64, thermo_beta: f64, rng: &mut R) -> bool {
 
         let diff_ln_like = (new-old)*thermo_beta;
 
@@ -3206,14 +3110,14 @@ impl<'a> MotifSet<'a> {
         self.set.iter().map(|a| a.0.clone()).collect()
     }
 
-    //This is our prior on the number of motifs
-    //We do not justify this with a maximum entropy prior
-    //Instead, we only want to consider an additional motif if 
-    //it brings an improvement of at least NECESSARY_MOTIF_IMPROVEMENT to the ln posterior
-    //This amounts to a geometric prior with positive integer support 
-    //and p = 1-(-NECESSARY_MOTIF_IMPROVEMENT).exp().
-    //NOTE: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
-    //for the motif set prior, and would obfuscate the true point of this prior
+    /// This is our prior on the number of motifs
+    /// We do not justify this with a maximum entropy prior
+    /// Instead, we only want to consider an additional motif if 
+    /// it brings an improvement of at least NECESSARY_MOTIF_IMPROVEMENT to the ln posterior
+    /// This amounts to a geometric prior with positive integer support 
+    /// and p = 1-(-NECESSARY_MOTIF_IMPROVEMENT).exp().
+    /// Note: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
+    /// for the motif set prior, and would obfuscate the true point of this prior
     pub fn motif_num_prior(&self) -> f64 {
         if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
         -((self.set.len()-1) as f64)* unsafe{ NECESSARY_MOTIF_IMPROVEMENT } 
@@ -3236,12 +3140,14 @@ impl<'a> MotifSet<'a> {
     }
                     
 
+    /// This checks if we have calculated the ln posterior for `self`. 
+    /// If we have not, it sets and returns it. If we have, it just returns it.
+    /// If you only have a `&MotifSet` and wish to get its ln posterior
+    /// without mutation, use `self.calc_ln_post()`
     pub fn ln_posterior(&mut self) -> f64 { //By using this particular structure, I always have the ln_posterior when I need it and never regenerate it when unnecessary
         match self.ln_post {
             None => {
                 let ln_prior = self.ln_prior();
-                //println!("prior {}", ln_prior);
-                //self.recalc_negatives();
                 if ln_prior > -f64::INFINITY { //This short circuits the noise calculation if our motif set is somehow impossible
                     self.ln_post = Some(ln_prior+self.ln_likelihood());
                 } else{
@@ -3252,7 +3158,11 @@ impl<'a> MotifSet<'a> {
         }
     }
 
-    pub fn calc_ln_post(&self) -> f64 { //ln_posterior() should be preferred if you can mutate self, since it ensures the calculation isn't redone too much
+    /// This checks if we have calculated the ln posterior for `self`. 
+    /// If we have not, it calculates and returns it. If we have, it just returns it.
+    /// If you have a `&mut MotifSet` and wish to save the results of the 
+    /// calculation, use `self.ln_posterior()`
+    pub fn calc_ln_post(&self) -> f64 { 
         match self.ln_post {
             None => {
                 let mut ln_post: f64 = self.ln_prior();
@@ -3266,11 +3176,6 @@ impl<'a> MotifSet<'a> {
        
     }
 
-    pub fn median_data_dist(&self) -> f64 {
-        self.signal.median_distance_between_waves(self.data_ref.data())
-    }
-
-   
 
     fn add_motif(&mut self, new_mot: Motif) -> f64 {
 
@@ -3311,7 +3216,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
+    fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.nth_motif(rem_id).clone();
         //println!("rep 1");
         self.signal -= &rem_mot.generate_waveform(self.data_ref);
@@ -3330,7 +3235,7 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    pub fn replace_motif_entire(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
+    fn replace_motif_entire(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.nth_motif(rem_id).clone();
         //println!("rep 1");
         self.signal -= &rem_mot.generate_waveform(self.data_ref);
@@ -3348,14 +3253,24 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn recalc_negatives(&mut self) {
+    fn recalc_negatives(&mut self) {
         for i in 0..self.set.len() {
             let nulls = self.calc_motif_null_binds(self.nth_motif(i));
             self.set[i].1 = nulls;
         };
     }
 
-    //This proposes a new motif for the next motif set, but does not do any testing vis a vis whether such a move will be _accepted_
+    /// This proposes a new motif for the motif set by the following process:
+    /// 1. We pick `prefix`, a `MIN_BASE-mer` based on the propensities in `self.data_ref()`
+    /// 2. We sample a motif length `k` uniformly from `MIN_BASE` to `MAX_BASE`
+    /// 3. We uniformly sample from all the possible `k`-mers that start with `prefix`
+    /// 4. We randomly generate a `Motif` with the best match of the `k`-mer from step 3, 
+    ///    using `Base::from_bp()`, which favors more selective `Base`s
+    /// Returns `[None]` if there are no `k`-mers which start with `prefix`
+    /// (which can happen if `prefix` is generated from the edge of a sequence 
+    /// block, albeit rarely), or if `self` has the maximum number of `Motif`s.
+    /// Otherwise, returns a tuple of a `MotifSet` with the new `Motif` added, 
+    /// followed by the ln posterior density - ln proposal probability
     pub fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
 
@@ -3395,8 +3310,11 @@ impl<'a> MotifSet<'a> {
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
     }
 
-    //This proposes removing an old motif for the next motif set
-    //It does no testing save for checking if removing a motif would produce a possible set
+    /// This reverses `propose_new_motif()`. 
+    /// Returns `[None]` if `self` only has one `Motif`. 
+    /// Otherwise, returns a tuple of a `MotifSet` with 
+    /// the new `Motif` added, followed by the ln posterior density 
+    /// + ln proposal probability for the reverse `propose_new_motif()`.
     pub fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
         if self.set.len() <= 1 { //We never want to propose a set with no motifs, ever
@@ -3433,6 +3351,17 @@ impl<'a> MotifSet<'a> {
         }
     }
     
+    /// This proposes a new motif for the motif set by the following process:
+    /// 1. We pick `prefix`, a `MIN_BASE-mer` based on the propensities in `self.data_ref()`
+    /// 2. We sample a motif length `k` uniformly from `MIN_BASE` to `MAX_BASE`
+    /// 3. We uniformly sample from all the possible `k`-mers that start with `prefix`
+    /// 4. We randomly generate a `Motif` with the best match of the `k`-mer from step 3, 
+    ///    using `Base::from_bp_alt()`, which uniformly samples `Base` penalties
+    /// Returns `[None]` if there are no `k`-mers which start with `prefix`
+    /// (which can happen if `prefix` is generated from the edge of a sequence 
+    /// block, albeit rarely), or if `self` has the maximum number of `Motif`s.
+    /// Otherwise, returns a tuple of a `MotifSet` with the new `Motif` added, 
+    /// followed by the ln posterior density - ln proposal probability
     pub fn propose_new_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
         if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return None; } };
@@ -3469,8 +3398,11 @@ impl<'a> MotifSet<'a> {
         Some((new_set, ln_post-ln_gen_prob)) //Birth moves subtract the probability of their generation
     }
 
-    //This proposes removing an old motif for the next motif set
-    //It does no testing save for checking if removing a motif would produce a possible set
+    /// This reverses `propose_new_motif_alt()`. 
+    /// Returns `[None]` if `self` only has one `Motif`. 
+    /// Otherwise, returns a tuple of a `MotifSet` with 
+    /// the new `Motif` added, followed by the ln posterior density 
+    /// + ln proposal probability for the reverse `propose_new_motif_alt()`.
     pub fn propose_kill_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
         if self.set.len() <= 1 { //We never want to propose a set with no motifs, ever
@@ -3509,9 +3441,15 @@ impl<'a> MotifSet<'a> {
     
 
 
-    //I'm only extending motifs on one end
-    //This saves a bit of time from not having to reshuffle motif vectors
-    fn propose_extend_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+    /// This proposes to extend a `Motif` in `self` by the following process: 
+    /// 1. Uniformly sample a `Motif` in `self`.
+    /// 2. Take the best matching kmer of this motif, and uniformly sample 
+    ///    from all of its valid single `Bp` 3' extensions
+    /// 3. Generate a new `Base` matching the `Bp` using `Base::from_bp()`
+    /// Returns `[None]` if the sampled motif has length `MAX_BASE`.
+    /// Otherwise, returns a tuple of the `MotifSet` with the extended `Motif`, 
+    /// followed by the ln posterior density - ln proposal probability
+    pub fn propose_extend_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
 
         let extend_id = rng.gen_range(0..self.set.len());
@@ -3549,9 +3487,12 @@ impl<'a> MotifSet<'a> {
         }
     }
 
-    //I'm only extending motifs on one end
-    //This saves a bit of time from not having to reshuffle motif vectors
-    fn propose_contract_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
+    /// This reverses `self.propose_extend_motif()`.
+    /// Returns `[None]` if the `Motif` selected for contraction has length 
+    /// `MIN_BASE`. Otherwise, returns a tuple of the `MotifSet` with the contracted
+    /// `Motif`, followed by the ln posterior density + ln proposal probability
+    /// of the corresponding forward extension. 
+    pub fn propose_contract_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
         let mut new_set = self.derive_set();
 
         let contract_id = rng.gen_range(0..self.set.len());
@@ -3580,6 +3521,12 @@ impl<'a> MotifSet<'a> {
     //And I can't have it do it here
     //If you use this on a motif without such a likelihood, it will panic
     // (rmse, likelihood_diff, pwm_dists_and_height_diffs)
+    /// Runs a randomly selected reversible jump move. 
+    /// Returns a tuple of (the next `MotifSet` in the Monte Carlo chain, 
+    /// a `[usize]` indicating which reversible jump move was attempted, 
+    /// `true` (`false`) if the reversible jump move was accepted (rejected))
+    /// # Panics
+    /// If `self` has not had its ln posterior generated yet
     pub fn run_rj_move<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> (Self, usize, bool) {
 
         let which_rj = rng.gen_range(0..RJ_MOVE_NAMES.len());
@@ -3651,6 +3598,20 @@ impl<'a> MotifSet<'a> {
         }
     }
 
+
+    /// This proposes to change the best `Bp`s of a `Motif` in `self` by swapping.
+    /// The proposed best bases are generated by the following random generation:
+    /// 1. A `Motif` is randomly selected out of `self`.
+    /// 2. The occupancy of the selected `Motif` is subtracted from `self`'s total trace
+    /// 3. The remaining trace is subtracted from the data
+    /// 4. Locations are divided up into two classes: residual `>= cutoff` and `< cutoff`.
+    /// 5. 99% of the time, we uniformly choose a kmer that is under the first class. 
+    ///    1% of the time, we uniformly choose a kmer that is under the second class.
+    /// 6. We shuffle the `Motif` to have a best `kmer` equal to the kmer we chose. 
+    /// 
+    /// Returns `[None]` when we attempt an impossible move. Otherwise, returns the
+    /// tuple (Proposed `MotifSet`, ln posterior of propoosal + ln probability we 
+    /// propose the reverse move - ln probability we propose the forward move)
     pub fn propose_resid_leap<R: Rng + ?Sized>(&self, cutoff: f64, rng: &mut R) -> Option<(Self, f64)> {
 
 
@@ -3715,10 +3676,8 @@ impl<'a> MotifSet<'a> {
             let Some(cho) = peaky_locs.choose(rng) else { return None;};
             cho
         };
-        //SAFETY: intersect_kmer_start_range only returns None if kmer length is 0 or if the data index is out of range
-        //        MIN_BASES == 8, and all elements of (un)peaky_locs are fundamentally valid indices of the backing vector for the occupancy trace
         
-        let (block, start_range) = unsafe { self.data_ref.data().intersect_kmer_start_range(choice, num_bases).unwrap_unchecked() };
+        let (block, start_range) = self.data_ref.data().intersect_kmer_start_range(choice, num_bases)?;
 
         //This should basically never return None, but in case, there's this short circuit
         //
@@ -3768,6 +3727,17 @@ impl<'a> MotifSet<'a> {
         Some((new_set, modded_like))
     }
 
+    /// This proposes to change the best `Bp`s  of a `Motif` in `self` by swapping.
+    /// The proposed best bases are generated by the following random generation:
+    /// 1. A `Motif` is randomly selected out of `self`.
+    /// 2. A kmer of a maximum Hamming distance of `d` from the best kmer is chosen.
+    ///    `d` is a function of the kmer length, and grows with it. The kmer is chosen
+    ///    with weight equal to the propensity of its starting `MIN_BASE`mer
+    /// 3. We shuffle the `Motif` to have a best `kmer` equal to the kmer we chose. 
+    /// 
+    /// Returns `[None]` when we attempt an impossible move. Otherwise, returns the
+    /// tuple (Proposed `MotifSet`, ln posterior of propoosal + ln probability we 
+    /// propose the reverse move - ln probability we propose the forward move)
     pub fn propose_base_leap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> { 
 
         const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
@@ -3820,6 +3790,12 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// This proposes to change the secondary `Bp`s  of a `Motif` in `self` by swapping.
+    /// It first picks a `Motif` uniformly from `self`, then picks `SHUFFLE_BASES` 
+    /// positions from that motiif without replacement. From the set of all
+    /// pairwise secondary swaps of those positions, we randomly pick one as out proposal.
+    /// Despite returning an `Option`, this never returns `[None]`: it always returns
+    /// a tuple of the proposed motif followed by its ln posterior density
     pub fn propose_secondary_shuffle<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -3838,6 +3814,10 @@ impl<'a> MotifSet<'a> {
         Some((new_set, ln_post))
 
     }
+    /// This proposes to change the kernel shape and size of a `Motif` in `self`
+    /// by uniformly smapling the possible kernel shapes and widths. This returns 
+    /// `[None]` if we propose to swap to the same exact Kernel. Otherwise, it 
+    /// returns a tuple of the proposed motif followed by its ln posterior density
     pub fn propose_kernel_swap<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -3863,7 +3843,7 @@ impl<'a> MotifSet<'a> {
 
     }
     //MOVE TO CALL
-    pub fn base_leap<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
+    fn base_leap<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
@@ -3932,8 +3912,8 @@ impl<'a> MotifSet<'a> {
         current_set
 
     }
-    
-    pub fn secondary_shuffle<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
+     
+    fn secondary_shuffle<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
@@ -3993,7 +3973,7 @@ impl<'a> MotifSet<'a> {
     }
     
     
-    pub fn randomize_motifs<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
+    fn randomize_motifs<R: Rng + ?Sized>(&self, thermo_beta: f64, rng: &mut R) -> Self {
 
 
         //We want to shuffle this randomly, in case there is some kind of codependency between particular TFs
@@ -4113,6 +4093,10 @@ impl<'a> MotifSet<'a> {
 
     }*/
 
+    /// This proposes to change one of the penalties of one position 
+    /// of one `Motif` in `self` by simply scrambling it to another 
+    /// possible penalty. This never returns `[None]`: it always returns
+    /// a tuple of the proposed motif followed by its ln posterior density
     pub fn propose_rook_move<R: Rng + ?Sized>(&self, rng: &mut R)  -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -4176,6 +4160,10 @@ impl<'a> MotifSet<'a> {
     }*/
 
 
+    /// This proposes to change the peak height of one `Motif` in `self` by adding 
+    /// a normally distributed variable, with reflection. This never returns 
+    /// `[None]`: it always returns a tuple of the proposed motif followed by 
+    /// its ln posterior density
     pub fn propose_height_move_custom<R: Rng + ?Sized>(&self, rng: &mut R, height_sd: f64 ) -> Option<(Self, f64)> {
 
         let mut new_set = self.derive_set();
@@ -4196,6 +4184,12 @@ impl<'a> MotifSet<'a> {
 
 
 
+    /// This tries to crudely optimize the height of the `c_id`th `Motif`
+    /// by minimizing the Euclidean distance between it and the data trace.
+    /// It is not appropriate for inferential purposes: it is very crude. 
+    /// Returns `[None]` if `c_id` is not less than the number of `Motif`s 
+    /// in `self`. Otherwise, returns a tuple of `MotifSet` with the `c_id`th
+    /// height optimized, followed by the Euclidean distance. 
     pub fn best_height_set_from_rmse(&self, c_id: usize) -> Option<(Self, f64)> {
 
         if c_id >= self.set.len() { return None; }
@@ -4245,6 +4239,13 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// This tries to crudely optimize the height of the `c_id`th `Motif`
+    /// by minimizing the Euclidean distance between it and the data trace,
+    /// accounting for matches in the `NullSequence` of `self.data_ref()`.
+    /// It is not appropriate for inferential purposes: it is very crude. 
+    /// Returns `[None]` if `c_id` is not less than the number of `Motif`s 
+    /// in `self`. Otherwise, returns a tuple of `MotifSet` with the `c_id`th
+    /// height optimized, followed by the Euclidean distance. 
     pub fn best_height_set_from_rmse_noise(&self, c_id: usize) -> Option<(Self, f64)> {
 
         if c_id >= self.set.len() { return None; }
@@ -5370,9 +5371,6 @@ impl SetTraceDef {
     }
 
 
-    pub fn wave_dist_trace(&self, waypost: &AllDataUse) -> Vec<f64> {
-        self.trace.par_iter().map(|a| a.reactivate_set(waypost).median_data_dist()).collect()
-    }
 
     pub fn wave_rmse_trace(&self, waypost: &AllDataUse, number_samps: usize) -> Vec<(usize, f64)> {
 
@@ -5663,6 +5661,7 @@ impl MoveTracker {
             println!("Contract motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
+            ind += 1;
             println!("New motif move alt. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
@@ -5672,7 +5671,6 @@ impl MoveTracker {
                      self.attempts_per_move[ind], self.successes_per_move[ind], self.immediate_failures_per_move[ind],
                      (self.successes_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64), (self.immediate_failures_per_move[ind] as f64)/(self.attempts_per_move[ind] as f64));
 
-            ind += 1;
 
             /*ind += 1;
             println!("Split motif move. Attempts: {}. Successes {}. Immediate failures {}. Rate of success {}. Rate of immediate failures {}.",
