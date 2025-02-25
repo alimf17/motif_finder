@@ -4856,9 +4856,7 @@ impl MotifSetDef {
 
 
 
-//THIS SHOULD BE (DE)SERIALIZABLE WITH A CUSTOM IMPLEMENTATION
-//SINCE ALL MOTIFS IN THE SET AND THE WAVEFORM SHOULD POINT TO seq
-//AND THE MOTIF_SET ITSELF SHOULD ALSO POINT TO data AND background
+/// This is a single Monte Carlo trace, for a given thermodynamic beta
 pub struct SetTrace<'a> {
     trace: Vec<StrippedMotifSet>,
     active_set: MotifSet<'a>,
@@ -4873,6 +4871,18 @@ pub struct SetTrace<'a> {
 impl<'a> SetTrace<'a> {
 
     //All three of these references should be effectively static. They won't be ACTUALLY, because they're going to depend on user input, but still
+    /// This initializes a trace
+    /// - `capacity` sets the number of `[StrippedMotifSet]`s that the trace 
+    ///   should remember in its monte carlo trace before outputting and deleting
+    ///   them so that we can save memory
+    /// - If `initial_condition` is `[None]`, we initialize with a random single Motif MotifSet.
+    /// - `all_data_file` allows the saved trace to remember where `data_ref` 
+    ///    should be: it is not necessary for inference, but it is for the saved trace
+    ///    to reconstitute its occupancy traces. 
+    /// - `thermo_beta` is the thermodynamic beta of the inference, but we 
+    ///   automatically take the absolute value of it. 
+    /// - The trace saves every `sparse`th `[MotifSet]` into its trace. If 
+    ///   `sparse` is `[None]`, the default value is `30`. 
     pub fn new_trace<R: Rng + ?Sized>(capacity: usize, initial_condition: Option<MotifSet<'a>>, all_data_file: String,data_ref: &'a AllDataUse<'a>, mut thermo_beta: f64, sparse: Option<usize>, rng: &mut R) -> SetTrace<'a> {
 
         thermo_beta = thermo_beta.abs();
@@ -4902,6 +4912,7 @@ impl<'a> SetTrace<'a> {
 
     pub fn thermo_beta(&self) -> f64 { self.thermo_beta }
 
+    ///This runs the monte carlo move for an individual trace
     pub fn advance<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, burning_in: bool, rng: &mut R) { 
 
         let which_move = PICK_MOVE.sample(rng);
@@ -4913,14 +4924,6 @@ impl<'a> SetTrace<'a> {
         
         let potential_set_and_accept = match which_move {
         
-            /*0 =>  {
-                let [ratio_s, liney_s] = RATIO_LINEAR_SD_COMBO[which_variant];
-                self.active_set.propose_ordered_base_move_custom(rng, ratio_s, liney_s).map(|(new_mot, modded_ln_like)| { 
-                    let accepted = MotifSet::accept_test(self.active_set.ln_posterior(), modded_ln_like, self.thermo_beta, rng); 
-                    (new_mot, accepted)
-                })
-            },*/
-
             0 =>  {
            
                 self.active_set.propose_rook_move(rng).map(|(new_mot, modded_ln_like)| { 
@@ -5580,6 +5583,7 @@ type Output = StrippedMotifSet;
 //                                    attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
 //                                    distances_per_attempted_move: &mut [Vec<([f64; 4], bool)>]
 
+///This tracks move sizes and ratios, for diagnostic purposes
 #[derive(Clone)]
 pub struct MoveTracker {
 
@@ -5592,6 +5596,8 @@ pub struct MoveTracker {
 
 impl MoveTracker {
 
+    /// This initializes the move tracker. `likely_steps` should be an estimate
+    /// of how many steps should be saved in the move tracker
     pub fn new(likely_steps: usize) -> Self {
 
         let distances_per_attempted_move: [Vec::<([f64; 4], bool)>; NUM_MOVES] = core::array::from_fn(|_a| Vec::<([f64; 4], bool)>::with_capacity(likely_steps));
@@ -5623,6 +5629,7 @@ impl MoveTracker {
     }
 
 
+    /// This yields the results of the move acceptance rates
     pub fn give_status(&self) {
         let mut ind: usize = 0;
 
@@ -5726,7 +5733,7 @@ impl MoveTracker {
 
     }
 
-    pub fn all_move_hists(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
+    fn all_move_hists(&self, base_file_name: &str, num_bins: usize) -> Result<(), Vec<String>> {
         
         let v: Vec<String> = (0..NUM_MOVES).map(|i|
                                                 {
