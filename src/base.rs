@@ -2619,7 +2619,7 @@ impl<'a> MotifSet<'a> {
     /// of reasons, from an empty matrix, an alphabet of the wrong length, 
     /// a column of the wrong length, an inability to parse floats from the meme
     /// file, or a negative value in the PWM.
-    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -2715,7 +2715,7 @@ impl<'a> MotifSet<'a> {
     /// of reasons, from an empty matrix, an alphabet of the wrong length, 
     /// a column of the wrong length, an inability to parse floats from the meme
     /// file, or a negative value in the PWM.
-    pub fn set_from_meme_max_selective<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_meme_max_selective<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -2804,7 +2804,7 @@ impl<'a> MotifSet<'a> {
     }
 
 
-    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, json_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_json<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, json_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
         let json_string: String = fs::read_to_string(json_file)?;
 
@@ -2816,7 +2816,7 @@ impl<'a> MotifSet<'a> {
 
     }
  
-    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error>> {
+    pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
 
         let mut bincode_file_handle = fs::File::open(bincode_file)?;
@@ -4360,6 +4360,12 @@ impl Debug for MotifSet<'_> {
     }
 }
 
+/// This is a MotifSet, freed from data that it was inferred from and its 
+/// occupancy trace. It is mainly just a `Vec<[Motif]>`, but it also saves its
+/// ln unnormalized posterior density. Note that there are no checks that the 
+/// saved density is correct. When this is created from a `[MotifSet]`, the 
+/// density is correct then, but this can be created from an entirely different
+/// `[AllDataUse]` than what you're trying to run on, and can be mutated. 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrippedMotifSet {
     set: Vec<Motif>,
@@ -4368,7 +4374,10 @@ pub struct StrippedMotifSet {
 
 impl StrippedMotifSet {
 
-    //Yes, self, not &self. I'm destroying the stripped motif set whenever I make the active motif set
+   
+    /// This revives a `[StrippedMotifSet]` into a form suitable for inference. 
+    /// Note that while `[StrippedMotifSet]` saved an unnormalized posterior density, 
+    /// we don't actually believe it when we revive it. It's only for recording
     pub fn reactivate_set<'a>(&self, data_ref: &'a AllDataUse) -> MotifSet<'a> {
 
         let cutoff = data_ref.offset()*2.0;
@@ -4388,13 +4397,13 @@ impl StrippedMotifSet {
 
         revived.recalc_signal();
 
-                                                                                //I only have this struct save a ln posterior because I want to record it for post processing
 
         revived
     }
 
     pub fn num_motifs(&self) -> usize { self.set.len() }
     
+    /// This sorts `[Motif]`s in the set in descending order of peak height
     pub fn sort_by_height(&mut self) {
         self.set.sort_unstable_by(|a, b| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
     }
@@ -4417,12 +4426,15 @@ impl StrippedMotifSet {
     pub fn set_iter(&self) -> Iter<'_, Motif> {
         self.set.iter()
     }
-    //If you use this, the ln posterior that we save is no longer valid
+    /// If you use this, the ln density is almost definitely no longer valid
     pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
         self.set.iter_mut()
     }
 
 
+    /// This prints the StrippedMotifSet in descending height order into a meme 
+    /// file `{output_dir}/{run_name}_savestate.meme`. The header of each motif
+    /// is `Motif motif_{index} {motif_height}`. 
     pub fn output_to_meme(&self, background_dist: Option<[f64; BASE_L]>, output_dir: &str, run_name: &str) -> std::io::Result<String> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.meme";
@@ -4435,9 +4447,13 @@ impl StrippedMotifSet {
 
         outfile_handle.write(&alphabet.into_bytes())?;
 
-        for (i, mot) in self.set_iter().enumerate() {
+        let mut a = self.clone();
+
+        a.sort_by_height();
+
+        for (i, mot) in a.set_iter().enumerate() {
             
-            let header_str = format!("MOTIF motif_{i} {i}\n");
+            let header_str = format!("MOTIF motif_{i} {}\n", mot.peak_height());
             outfile_handle.write(&header_str.into_bytes())?;
 
             let body_str = match mot.for_meme(background_dist) {
@@ -4450,7 +4466,10 @@ impl StrippedMotifSet {
         Ok(savestate_file)
     }
 
-    pub fn generate_increment_pr(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    /// Generates many fimo runs, one for each `[StrippedMotifSet]` in 
+    /// `self.over_additions()`, saving the result of the `i`th element of this
+    /// vector to `{output_dir}/{run_name}_{i}_savestate.meme`.
+    pub fn generate_ascending_fimo(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let over_add = self.over_additions();
 
@@ -4458,7 +4477,7 @@ impl StrippedMotifSet {
         for (i, set) in over_add.into_iter().enumerate() {
 
             let run_mod = format!("{}_{}", run_name, i);
-            set.generate_pr_curve(data_ref, background_dist, fasta_file, output_dir, &run_mod)?;
+            set.generate_fimo(data_ref, background_dist, fasta_file, output_dir, &run_mod)?;
         }
 
         Ok(())
@@ -4466,6 +4485,9 @@ impl StrippedMotifSet {
     }
 
     //Note: do NOT trust the ln posteriors that come out of this. They are explicitly erroneous
+    /// This takes `self` and outputs a `Vec<[StrippedMotifSet]>` such that its
+    /// `i`th element contains a `[StrippedMotifSet]` with the `i+1` highest 
+    /// peaked `[Motif]`s in `self`
     pub fn over_additions(&self) -> Vec<StrippedMotifSet> {
 
         let mut clone = self.clone();
@@ -4478,11 +4500,12 @@ impl StrippedMotifSet {
 
     }
 
-    pub fn generate_pr_curve(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
-
-        let mut peak_locations = data_ref.basic_peak(5.0);
-        
-        peak_locations.sort_by(|((a, _), _), ((b, _), _)| a.cmp(b));
+    /// This outputs `self` to the meme file `{output_dir}/{run_name}_savestate.meme`,
+    /// then runs fimo with an output directory of `{output_dir}/{run_name}_fimo`.
+    /// # Errors
+    /// If the needed directories or files cannot be generated or written to,
+    /// or if the MEME suite is not installed on your machine
+    pub fn generate_fimo(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
        
         let meme_file = match self.output_to_meme(background_dist, output_dir, run_name) {
@@ -4503,101 +4526,19 @@ impl StrippedMotifSet {
 
         println!("ran fimo");
 
-        /*
-        let fimo_tsv = format!("{}/fimo.tsv", fimo_output);
-
-
-        let tsv_file_handle = std::fs::File::open(&fimo_tsv)?;
-
-        println!("tsv read");
-
-        let mut reader = csv::ReaderBuilder::new().has_headers(true)
-                                           .delimiter(b'\t')
-                                           .comment(Some(b'#'))
-                                           .from_reader(tsv_file_handle);
-
-        type Record = (String, String, String, usize, usize, char, f64, f64, f64, String);
-
-        let mut number_hits: f64 = 0.0;
-        let mut number_correct_hits: f64 = 0.0;
-
-        let mut precision: Vec<f64> = Vec::with_capacity(peak_locations.len());
-        let mut recall: Vec<f64> = Vec::with_capacity(peak_locations.len());
-        let mut hit_peaks: HashSet<usize> = HashSet::new();
-
-        let mut number_hit_peaks: f64 = 0.0;
-        let number_peaks = peak_locations.len() as f64;
-
-        for line in reader.deserialize() {
-            let record: Record = line?;
-            number_hits+=1.0;
-            let start = record.3;
-            let end = record.4;
-            for (i, ((start_check, end_check), _)) in peak_locations.iter().enumerate() {
-                println!("Record start and end {} {} locs start and end {} {}", start, end, start_check, end_check);
-                if *start_check > end {break;}
-                if (start >= *start_check) && (end <= *end_check) {
-                    number_correct_hits += 1.0;
-                    precision.push(number_correct_hits/number_hits);
-                    if hit_peaks.insert(i) { //This returns true if this is a new insertion
-                        number_hit_peaks += 1.0;
-                    }
-                    recall.push(number_hit_peaks/number_peaks);
-                    println!("Success {} {}", start, end);
-                    break;
-                }
-                println!("Start {} End {}", start_check, end_check);
-            }
-            println!("Fail {} {}", start, end);
-        }
-
-        for i in 0..peak_locations.len() {
-            if hit_peaks.contains(&i) {
-                println!("Hit peak {:?}", peak_locations[i].0);
-            } else {
-                println!("Miss peak {:?}", peak_locations[i].0);
-            }
-        }
-    
-        println!("Precision {:?} Recall {:?}", precision, recall);
-        
-        let file = format!("{}/{}{}", output_dir, run_name,"_pr_curve.png");
-
-        let area = BitMapBackend::new(&file, (4000, 4200)).into_drawing_area();
-
-        area.fill(&full_palette::WHITE).unwrap();
-
-        let mut pr = ChartBuilder::on(&area);
-
-        pr.margin(10).y_label_area_size(200).x_label_area_size(200);
-
-        pr.caption("Precision vs recall", ("Times New Roman", 80));
-
-
-
-        
-        let mut pr_context = pr.build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
-
-        pr_context.configure_mesh().x_label_style(("serif", 70))
-            .y_label_style(("serif", 70))
-            .x_label_formatter(&|v| format!("{:.0}", v))
-            .axis_desc_style(("serif",90))
-            .x_desc("Recall")
-            .y_desc("Precision").disable_x_mesh().disable_y_mesh().x_label_formatter(&|x| format!("{:.04}", *x)).draw().unwrap();
-
-        pr_context.draw_series(LineSeries::new(precision.iter().zip(recall.iter()).map(|(&k, &i)| (i, k)), BLUE.filled().stroke_width(10))).unwrap().label("Total Motif Set");
-
-        */
 
         Ok(())
     }
 
-    //The ith position of the vector is:
-    //  Some(j), if the ith set in the reference set was matched to the jth set in self
-    //  None, if the ith set in the reference set failed to match
-    //The vector has length equal to reference_set.num_motifs()
-    //Notice that the lifetime of the potential &Motif also matches the lifetime of &self. This is also intentional
-    pub fn pair_to_other_set(&self, reference_set: &StrippedMotifSet) -> Vec<Option<(f64, bool, &Motif)>>/*Some type here */ {
+    /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
+    /// and `reference_set`, using the minimum squared Aitchison metric * 4
+    /// as the distance metric. This outputs a vector with length `self.num_motifs()`.
+    /// An element of the vector is `None` only if `self.num_motifs() > reference_set.num_motifs()`
+    /// and thus that element does not have a match. Otherwise, the elements are
+    /// are tuples of the distance followed by a bool which is true if minimizing 
+    /// the Aitchison metric required reverse complementing, followed by a reference
+    /// to the Motif in `reference_set`
+    pub fn pair_to_other_set<'a>(&self, reference_set: &'a StrippedMotifSet) -> Vec<Option<(f64, bool, &'a Motif)>>/*Some type here */ {
     
         let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self.get_nth_motif(j).distance_function(&reference_set.get_nth_motif(i)).0);
         let rev_comp_by_index = |(i, j): (usize, usize)| self.get_nth_motif(j).distance_function(reference_set.get_nth_motif(i)).1;
@@ -4607,18 +4548,30 @@ impl StrippedMotifSet {
         let rev_c_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), rev_comp_by_index);
 
         if self.num_motifs() >= reference_set.num_motifs() {
-            let (_, matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
-            matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(), *rev_c_matrix.get((i,x)).unwrap(),self.get_nth_motif(x)))).collect()
+            let mut matches: Vec<Option<(f64, bool, &Motif)>> = vec![None; self.num_motifs()];
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), *rev_c_matrix.get((i,j)).unwrap(), reference_set.get_nth_motif(i)));
+            }
+            matches
         } else {
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
             let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; reference_set.num_motifs()];
             for (i, j) in pre_matches.into_iter().enumerate() {
-                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), self.get_nth_motif(i)));
+                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), reference_set.get_nth_motif(j)));
             }
             matches
         }
     }
+
+    /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
+    /// and `reference_set`, using the Euclidean distance of the occpuancy
+    /// traces on the parts of the sequence with captured binding for
+    /// the distance metric. This outputs a vector with length `self.num_motifs()`.
+    /// An element of the vector is `None` only if `self.num_motifs() > reference_set.num_motifs()`
+    /// and thus that element does not have a match. Otherwise, the elements are
+    /// are tuples of the RMSE followed by a reference to the Motif in `reference_set`
     pub fn pair_to_other_set_rmse_data<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
    
         let self_waves: Vec<Waveform> = self.set_iter().map(|a| {let mut b = a.clone(); b.peak_height = 5.0; b.generate_waveform(&data_seq)}).collect();
@@ -4661,6 +4614,13 @@ impl StrippedMotifSet {
         }
     }
 
+    /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
+    /// and `reference_set`, using the Euclidean distance of the base 2 exponentiated
+    /// binding scores on the parts of the sequence with captured binding for
+    /// the distance metric. This outputs a vector with length `self.num_motifs()`.
+    /// An element of the vector is `None` only if `self.num_motifs() > reference_set.num_motifs()`
+    /// and thus that element does not have a match. Otherwise, the elements are
+    /// are tuples of the RMSE followed by a reference to the Motif in `reference_set`
     pub fn pair_to_other_set_binding<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
    
         let self_waves: Vec<Vec<f64>> = self.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
@@ -4705,11 +4665,12 @@ impl StrippedMotifSet {
     }
 
 
-
     pub fn get_nth_motif(&self, index: usize) -> &Motif {
         &self.set[index]
     }
-    
+   
+    /// This saves `self`'s occupancy traces in a file called `{output_dir}/{file_name}_new_occupancy`.
+    /// See `[MotifSet::save_set_trace_and_sub_traces]()` for more detail. 
     pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>>  {
 
         let current_active = &self.reactivate_set(data_ref);
@@ -5026,182 +4987,16 @@ impl<'a> SetTrace<'a> {
 
     }
 
-    pub fn serially_temper<R: Rng+?Sized>(&mut self, alter_beta: f64, track: &mut [MoveTracker; 3], steps_to_track: usize, steps_to_equilibrate: usize, rng: &mut R) {
-
-        self.thermo_beta = 1.0;
-
-        //This guarentees that our alter_beta is nonnegative and less than 1.0
-        //Note that, at least on x86, this compiles to basically two pieces of bitmath, as it should
-        let alter_beta_b = (-alter_beta.abs().ln().abs()).exp();
-
-        for _ in 0..steps_to_track {
-            self.advance(Some(&mut track[0]), false, rng);
-        }
-
-        let cooldown_target = self.active_set.ln_posterior();
-
-        println!("Beta = 1.0 when we're sampling: final Ln posterior {}", cooldown_target);
-
-
-        self.thermo_beta = alter_beta_b;
-
-        for _ in 0..(2*steps_to_equilibrate) {
-            self.advance(Some(&mut track[1]), true, rng);
-        }
-
-        println!("Beta = {alter_beta} when we're tempering. Final Ln posterior {}", self.active_set.ln_posterior());
-
-        self.thermo_beta = 10000.0;
-
-        for _ in 0..steps_to_equilibrate{
-            self.advance(Some(&mut track[1]), true, rng);
-        }
-
-        println!("Beta = 10000.0. Final Ln posterior {}", self.active_set.ln_posterior());
-
-        self.thermo_beta = 1.0;
-
-        let mut check_like = -f64::INFINITY;
-
-        let mut number_iter: usize = 0;
-
-        for _ in 0..steps_to_equilibrate {
-        //while check_like < cooldown_target {
-            self.advance(Some(&mut track[2]), true, rng);
-            number_iter += 1;
-            check_like = self.active_set.ln_posterior();
-        //}
-        }
-
-        println!("Beta = 1.0 when we're equilibrating. Iters to cool {number_iter}.  Final Ln posterior {}", self.active_set.ln_posterior());
-
-
-
-    }
-
-    pub fn advance_only_shuffles<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, do_base_leap: bool, burning_in: bool, rng: &mut R) {
-
-        let mut set = match do_base_leap {
-            true => self.active_set.base_leap(self.thermo_beta, rng),
-            false => self.active_set.secondary_shuffle(self.thermo_beta, rng),
-        };
-
-        if let Some(tracker) = track {
-            let tracked = self.active_set.measure_movement(&mut set);
-            let total_id = if do_base_leap { VARIANT_CUMULATIVE[4] } else { VARIANT_CUMULATIVE[5] };
-            tracker.document_motion(total_id, Some((tracked, true))).expect("We only track the proper moves");
-        }
-
-        if !burning_in{
-            self.sparse_count = (self.sparse_count+1) % self.sparse;
-
-            if self.sparse_count == 0 {
-
-                //This order INCLUDES the last possible motif set
-                //and specifically EXCLUDES the initial state
-                self.trace.push(StrippedMotifSet::from(&set));
-            }
-        }
-
-        self.active_set = set;
-
-    }
-
-    //WARNING: Be aware that this motif set WILL be coerced to follow the seq and data of the motif set
-    //         The ln posterior will also be recalculated if the motif set isn't correctly pointed
-    //         To ensure the safety of this function, there is a recalculation step that occurs if the 
-    //         sequence or data changes. I assure you, you do not want this recalculation to occur:
-    //         It's going to be very slow
-    pub fn push_set_to_active(&mut self, set: MotifSet<'a>) {
-
-
-        let mut repoint_set = set.clone();
-
-        let recalc_ln_post = !std::ptr::eq(self.data_ref, repoint_set.data_ref);
-
-        if recalc_ln_post {
-            repoint_set.data_ref = &self.data_ref;
-        }
-
-        if recalc_ln_post {
-            repoint_set.signal = self.data_ref.data().derive_zero();
-            for i in 0..repoint_set.set.len() {
-                repoint_set.signal += &repoint_set.nth_motif(i).generate_waveform(&self.data_ref);
-            }
-            repoint_set.ln_post = None;
-            repoint_set.ln_posterior();
-        }
-
-
-
-        self.active_set = repoint_set;
-
-
-    }
-
-
-
-    //Note: if the likelihoods are calculated off of a different sequence/data, this WILL 
-    //      just give you a wrong answer that seems to work
-    /*pub fn push_set_def<R: Rng+?Sized>(&mut self, always_recalculate: bool,validate_motif: bool, set: MotifSetDef, rng: &mut R) {
-        
-        let mut validate_randomizer = if validate_motif { Some(rng) } else {None};
-        let setter = set.get_motif_set(always_recalculate, validate_motif, &mut validate_randomizer,&self.data_ref);
-        self.push_set_to_active(setter);
-    }*/
-
-
-    /* pub fn try_replace_or_create_last<R: Rng + ?Sized>(&mut self, set: StrippedMotifSet) -> Result<(), String>{
-
-       let active_set = set.reactivate_set(self.data_ref);
-
-    //SAFETY: reactivate_set ALWAYS initializes the posterior
-    let Some(posterior) = active_set.ln_post else { unsafe {unreachable_unchecked()} };
-
-    if !(posterior > -f64::INFINITY) {
-    return Err("This motif set is impossible to have, and thus we reject it. The motif trace that called this is unchanged.".to_string());
-    }
-
-    if self.trace.len() == 0 {
-    self.trace.push(AnyMotifSet::Active(active_set));
-    } else {
-
-    //SAFETY: we only hit this branch if the trace has a last position with an element
-    let Some(last_pos) = self.trace.last_mut() else { unsafe {unreachable_unchecked()} };
-     *last_pos = AnyMotifSet::Active(active_set);
-     }
-
-     Ok(())
-     }*/
-
-
-    /*pub fn current_set(&self) -> MotifSet<'a> {
-      self.trace[self.trace.len()-1].give_activated(self.data_ref)
-      }
-
-      pub fn current_set_mut_ptr(&mut self) -> &mut MotifSet<'a> {
-
-      self.trace[self.trace.len()-1].activate(self.data_ref);
-      &mut self.trace[self.trace.len()-1]
-      }
-
-
-      pub fn quiet_last_set(&mut self) {
-
-      if let Some(set_mut_ref) = self.trace.last_mut() {
-      set_mut_ref.store();
-      }
-
-      }*/
 
     pub fn loan_active(&self) -> &MotifSet<'a> {
         &self.active_set
     }
 
-    pub fn current_set_to_print(&self) -> StrippedMotifSet {
+    pub fn stripped_current_set(&self) -> StrippedMotifSet {
         StrippedMotifSet::from(&self.active_set)
     }
-    pub fn save_initial_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
+
+    pub fn save_first_archived_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
 
@@ -5209,7 +5004,7 @@ impl<'a> SetTrace<'a> {
 
         let mot_to_save: StrippedMotifSet = match self.trace.get(0) {
             Some(set) => set.clone(), 
-            None => self.current_set_to_print(),
+            None => self.stripped_current_set(),
         };
 
         let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
@@ -5218,7 +5013,7 @@ impl<'a> SetTrace<'a> {
         Ok(())
     }
 
-    pub fn save_final_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_last_archived_state(&self, output_dir: &str, run_name: &str)-> Result<(), Box<dyn Error+Send+Sync>> {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.bin";
 
@@ -5236,7 +5031,7 @@ impl<'a> SetTrace<'a> {
     }
 
 /*
-    pub fn save_current_bedgraph(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error>> { 
+    pub fn save_current_bedgraph(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> { 
 
         //generate_bedgraph(&self, data_seq: &AllDataUse, chromosome_name: Option<&str>, file_name: &str)
 
@@ -5246,11 +5041,15 @@ impl<'a> SetTrace<'a> {
         }).collect::<Result<_,_>>()
     }
 */
+
     //We don't need to worry about saving any state in trace, since inference works on the ACTIVE state
     fn drop_history(&mut self) {
         self.trace.clear();
     }
 
+    /// This saves the trace as a binarray file 
+    /// `{output_dir}/{run_name}_trace_from_step_{zeroth_step}.bin', with 7 digits
+    /// This binarray file stores a `[SetTraceDef]` for reserialization
     pub fn save_and_drop_history(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let trace_file: String = format!("{}/{}_trace_from_step_{:0>7}.bin",output_dir,run_name,zeroth_step);
@@ -5273,9 +5072,12 @@ impl<'a> SetTrace<'a> {
 
         outfile_handle.write(&buffer)?;
 
-        self.save_initial_state(output_dir, run_name)
+        self.save_first_archived_state(output_dir, run_name)
     }
 
+    /// This saves the occupancy trace of the current active set in the directory 
+    /// `{output_dir}/{run_name}/{zeroth_step}_new_occupancy`. For more details, 
+    /// see `[MotifSet::save_set_trace_and_sub_traces]()`
     pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let current_active = &self.active_set;
@@ -5387,13 +5189,13 @@ impl SetTraceDef {
         self.trace.par_iter().enumerate().step_by(step_size).map(|(i, a)| (i, a.reactivate_set(waypost).magnitude_signal_with_noise())).collect()
     }
 
-    pub fn many_pr_track(&self, waypost: &AllDataUse, number_samps: usize, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn many_fimo_gen(&self, waypost: &AllDataUse, number_samps: usize, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
         let step_size: usize = self.trace.len()/number_samps;
         
         let m: Vec<Result<(), Box<dyn Error+Send+Sync>>> = self.trace.par_iter().step_by(step_size).enumerate().map(|(i, a)| {
          
             let save_file = format!("{}_{i}", run_name);
-            let b = a.generate_pr_curve(waypost,background_dist,fasta_file,output_dir, &save_file);
+            let b = a.generate_fimo(waypost,background_dist,fasta_file,output_dir, &save_file);
         
             b
         }).collect();
@@ -5947,51 +5749,8 @@ impl<'a> TemperSetTraces<'a> {
         Ok(TemperSetTraces { parallel_traces: parallel_traces, currently_tracking: 0, track: how_to_track })
     }
 
-    pub fn do_shuffles<R: Rng+?Sized>(&mut self, number_secondaries: usize, burning_in: bool, rng: &mut R) {
-
-        self.parallel_traces.iter_mut().for_each(|(set, track, _)| {
-            set.advance_only_shuffles(track.as_mut(), true, burning_in, rng);
-            for _ in 0..number_secondaries { set.advance_only_shuffles(track.as_mut(), false, burning_in, rng); } 
-        });
-
-    }
 
    
-    pub fn recalibrate_weights(&mut self) {
-
-        let thermo_step = (1_f64-self.parallel_traces[self.parallel_traces.len()-1].0.thermo_beta())/((self.parallel_traces.len()-1) as f64);
-
-        let mut current_like_list: Vec<f64> = self.parallel_traces[0].0.trace.iter().map(|a| a.ln_post).collect();
-        let mut median_ln_post = if current_like_list.len() == 0 { self.parallel_traces[0].0.active_set.ln_posterior() } else {
-                current_like_list.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
-                let len = current_like_list.len();
-                if (len & 1) == 1 {
-                    current_like_list[(len-1)/2]
-                } else {
-                    0.5*(current_like_list[len/2]+current_like_list[(len/2)-1])
-                }
-        };
-
-        let mut weight: f64 = 0.0;
-        for i in 1..self.parallel_traces.len() {
-            let mut current_like_list: Vec<f64> = self.parallel_traces[i].0.trace.iter().map(|a| a.ln_post).collect();
-            let med = if current_like_list.len() == 0 { self.parallel_traces[i].0.active_set.ln_posterior() } else {
-                current_like_list.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
-                let len = current_like_list.len();
-                if (len & 1) == 1 {
-                    current_like_list[(len-1)/2]
-                } else {
-                    0.5*(current_like_list[len/2]+current_like_list[(len/2)-1])
-                }
-            };
-
-            weight += -thermo_step*0.5*(median_ln_post+med);
-        
-            self.parallel_traces[i].2 = weight;
-            median_ln_post = med;
-        }
-
-    }
 
     pub fn iter_and_swap<R: Rng>(&mut self, iters_between_shuffles: usize, iters_before_swaps: usize, cooldown_iters: usize, rng_maker: fn() -> R) {
 
@@ -6138,37 +5897,6 @@ impl<'a> TemperSetTraces<'a> {
 
     }
 
-    pub fn serially_temper<R: Rng>(&mut self, iters_between_shuffles: usize, iters_before_swaps: usize, cooldown_iters: usize, rng: &mut R) {
-
-        let index = self.currently_tracking;
-
-        for _ in 0..(iters_between_shuffles*iters_before_swaps) { 
-            let (set, trace, _) = &mut self.parallel_traces[index];
-            set.advance(trace.as_mut(), false, rng); }
-
-        let attempt_index_up: bool = rng.gen();
-
-        let trace_len = self.parallel_traces.len();
-
-        if !attempt_index_up && (index == 0) { return;}
-        if attempt_index_up && (index == (self.parallel_traces.len()-1)) { return;}
-
-        let alter_index = if attempt_index_up { index + 1} else {index-1};
-
-        let current_ln_post = self.parallel_traces[index].0.active_set.ln_posterior();
-
-        let try_shift: f64 = rng.gen();
-
-        let shift_cutoff = (self.parallel_traces[index].0.thermo_beta()-self.parallel_traces[alter_index].0.thermo_beta())*current_ln_post
-                          -(self.parallel_traces[alter_index].2-self.parallel_traces[index].2);
-
-        if try_shift <= shift_cutoff {
-            self.currently_tracking = alter_index;
-            let (set, trace, _) = &mut self.parallel_traces[alter_index];
-            for _ in 0..(cooldown_iters*iters_before_swaps) { set.advance(trace.as_mut(), true, rng); }
-        }
-
-    }
 
     pub fn print_acceptances(&self, track: TrackingOptions) {
 

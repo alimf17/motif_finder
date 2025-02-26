@@ -246,9 +246,9 @@ pub fn main() {
     best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
 
    
-    let trial_a = best_single_motif_set.generate_pr_curve(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
+    let trial_a = best_single_motif_set.generate_fimo(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
 
-    let trial_x = best_single_motif_set.generate_increment_pr(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
+    let trial_x = best_single_motif_set.generate_ascending_fimo(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
 
     if trial_a.is_err() {
         println!("error in pr gen {:?}", trial_a);
@@ -261,7 +261,7 @@ pub fn main() {
 
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
-        let trial_b = trace.many_pr_track(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
+        let trial_b = trace.many_fimo_gen(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
         if trial_b.is_err() {
             println!("error in pr gen {i} {:?}", trial_b);
         }
