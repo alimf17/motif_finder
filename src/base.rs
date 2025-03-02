@@ -22,7 +22,7 @@ use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 
-use crate::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROVEMENT};
+use crate::{THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
 
 use itertools::Itertools;
@@ -218,9 +218,7 @@ const SHUFFLE_BASES: usize = 3;
 const REDUCE_MOTIF_SCALE_MOVE: [f64; MAX_BASE+1-MIN_BASE] = [0.024800, 0.021573, 0.019085, 0.017109, 0.015503, 0.014171, 0.013049, 0.012091, 0.011264, 0.010543, 0.0099079, 0.0093451, 0.0088427];
 
 /*
-static PROPOSE_EXTEND: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap());
 
-static DIRICHLET_PWM: Lazy<SymmetricBaseDirichlet> = Lazy::new(|| SymmetricBaseDirichlet::new(0.1_f64).unwrap()); 
 
 pub const THRESH: f64 = 1e-2; //SAFETY: This must ALWAYS be strictly greater than 0, or else we violate safety guarentees later.  
 
@@ -3291,7 +3289,6 @@ impl<'a> MotifSet<'a> {
 
         let new_mot = Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
-        //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
@@ -3380,7 +3377,6 @@ impl<'a> MotifSet<'a> {
 
         let new_mot = Motif::from_motif_alt(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
-        //let pick_prob = new_mot.pwm.iter().map(|a| DIRICHLET_PWM.get().expect("no writes expected now").ln_pdf(a)).sum::<f64>();
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
@@ -3508,7 +3504,7 @@ impl<'a> MotifSet<'a> {
             //println!("contract 2");
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             //println!("contract 3");
-            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-self.data_ref.data().seq().number_kmer_reextends(&new_mot_bps).ln();
+            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-self.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&new_mot_bps).ln();
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
@@ -5866,7 +5862,6 @@ mod tester{
     use rand::Rng;
     use crate::waveform::*;
     use rand::distributions::{Distribution};
-    use crate::{DIRICHLET_PWM, PROPOSE_EXTEND};
     use crate::SymmetricBaseDirichlet;
     const MIN_HEIGHT: f64 = 3.0;
 
@@ -5887,17 +5882,9 @@ mod tester{
             let scores: [f64; BASE_L] = [0.0, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH];
             let mut base_true_rand = Base { scores: scores};
 
-            for _ in 0..100 {
-                let moved_base = base_true_rand.moved_base(0.01,0.01, &mut rng).unwrap();
-                assert!(base_true_rand.scores.iter().all(|&a| a <= 0.0 && a >= SCORE_THRESH), "failure gen: {:?}", base_true_rand);
-                assert!(moved_base.scores.iter().all(|&a| a <= 0.0 && a >= SCORE_THRESH), "failure gen: {:?}", moved_base);
-                println!("try {:?} base {:?}", base_true_rand, moved_base);
-                base_true_rand = moved_base;
-            }
 
             let base_e = Base { scores: [0.0, SCORE_THRESH, SCORE_THRESH, SCORE_THRESH]};
 
-            println!("move bad {:?}", base_e.moved_base(0.01,0.01, &mut rng).unwrap());
         }
 
     }
@@ -6212,7 +6199,7 @@ mod tester{
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let background = Background::new(0.25, 2.64, 350./6.);
+        let background = Background::new(0.25, 2.64, 350./6.).unwrap();
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
@@ -6474,10 +6461,6 @@ mod tester{
     #[test]
     fn rj_manipulator_tests() {
 
-        {
-            DIRICHLET_PWM.try_insert(SymmetricBaseDirichlet::new(10.0_f64).expect("obviously valid")).ok();
-            PROPOSE_EXTEND.try_insert(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).ok();
-        }
         let mut rng = rand::thread_rng(); //fastrand::Rng::new();
 
         let block_n: usize = 5;
@@ -6509,7 +6492,7 @@ mod tester{
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let background = Background::new(0.25, 2.64, 350./6.);
+        let background = Background::new(0.25, 2.64, 350./6.).unwrap();
 
         let mut invented_propensities = vec![0.0_f64; 65536];
 
@@ -7158,7 +7141,7 @@ mod tester{
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
-        let background = Background::new(0.25, 2.64, 20.);
+        let background = Background::new(0.25, 2.64, 20.).unwrap();
 
         let invented_propensities = vec![1.0/65536_f64; 65536];
 
@@ -7479,7 +7462,7 @@ mod tester{
         let wave_start_bases: Vec<usize> = vec![0, 9324];
         let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
-        let wave_background = Background::new(0.25, 2.64, 1.0);
+        let wave_background = Background::new(0.25, 2.64, 1.0).unwrap();
 
 
         let null_zeros: Vec<usize> = vec![144, 813];

@@ -10,14 +10,18 @@ use wyhash2::WyHash;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
-pub const BITS_PER_BP: usize = 2; //ceiling(log2(BASE_L)), but Rust doesn't like logarithms in constants without a rigarmole
-                                  //Don't try to get cute and set this > 8.
-pub const BP_PER_U8: usize = 4; 
+// This is the number of bits it takes to represent a Bp
+// It should always be set to ceiling(log2(BASE_L))
+// Don't try to get cute and set this > 8
+pub(crate) const BITS_PER_BP: usize = 2;
+
+/// This is the number of Bp a u8 can encode. 
+pub const BP_PER_U8: usize = 8/BITS_PER_BP; 
 const PLACE_VALS: [u8; BP_PER_U8] = [1, 4, 16, 64]; //NOTICE: this only works when BASE_L == 4. 
                                             //Because a u8 contains 8 bits of information (duh)
                                             //And it requires exactly two bits disabmiguate 4 things. 
 const U8_BITMASK: u8 = 3; // 2.pow(BITS_PER_BP)-1, but Rust doesn't like exponentiation in constants either
-pub const U64_BITMASK: u64 = 3;
+pub(crate) const U64_BITMASK: u64 = 3;
 
 //I promise you, you only every want to use the constructors we have provided you
 //You do NOT want to try to initialize this manually. 
@@ -28,6 +32,7 @@ pub const U64_BITMASK: u64 = 3;
 //   3) I've developed this thing for 5 years over two different programming languages 
 //   4) I still screw it up when I have to do it manually. 
 //   5) Save yourself. 
+/// This is the struct which holds the sequence blocks with significant amounts of binding
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
@@ -49,8 +54,11 @@ pub struct Sequence {
 impl Sequence {
     
 
-    //PANICS: if a block has a length not divisible by BP_PER_U8 (4), a length shorter than MAX_BASE, or a usize not less than BASE_L (4)
-    //        This should not panic in our crate
+    /// Initializes a new Sequence from a vector of sequence blocks
+    /// # Panics
+    /// - If any of the vectors in `blocks` have a length  ` <= [MAX_BASE]`
+    /// - If any of the vectors in `blocks` have a length not divisible by `[BP_PER_U8]`
+    /// - If any element of any of the vectors in `blocks` is `>= BASE_L`
     pub fn new(blocks: Vec<Vec<usize>>) -> Sequence {
 
         let mut block_is: Vec<usize> = Vec::new();
@@ -129,21 +137,25 @@ impl Sequence {
 
     }
 
-    //Contract: block_lens.iter().sum() == seq_blocks.len(). block_lens[i] >= the max length of your motifs
-    //          Failure to uphold this will result in this panicking for your own good.
+    /// Initializes a new Sequence from a single vector with base pair lengths 
+    /// provides by `block_lens` 
+    /// # Panics
+    /// - If any element of `block_lens` is not divisible by `[BP_PER_U8]` 
+    /// - If any element of `block_lens` is not greater than `[MAX_BASE]`
+    /// - If the sum of `block_lens` is not equal to `[BP_PER_U8] * seq_blocks.len()`
     pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> Sequence {
 
         let mut block_u8_starts: Vec<usize> = vec![0];
 
         for i in 0..(block_lens.len()-1) {
-            if block_lens[i] >= MAX_BASE && block_lens[i] % BP_PER_U8 == 0{
+            if block_lens[i] > MAX_BASE && block_lens[i] % BP_PER_U8 == 0{
                 block_u8_starts.push(block_u8_starts[i]+block_lens[i]/BP_PER_U8);
             } else {
                 panic!("All blocks must be longer than your maximum possible motif size and divisible by {}!", BP_PER_U8);
             }
         }
 
-        if block_lens.iter().map(|b| b/4).sum::<usize>() != seq_blocks.len() {
+        if block_lens.iter().map(|b| b/BP_PER_U8).sum::<usize>() != seq_blocks.len() {
             panic!("stated block lengths do not equal the length of your data!");
         }
 
@@ -168,6 +180,7 @@ impl Sequence {
         seq
 
     }
+
 
     fn initialize_kmer_dicts(&mut self) {
 
@@ -197,10 +210,7 @@ impl Sequence {
 
     }
     
-    //NOTE: Pretty much any time anybody can access this array without automatically using the 
-    //      the correct len should be immediately considered incorrect, especially because it 
-    //      it will NOT fail: it will just give the wrong answer SILENTLY.
-    pub fn generate_kmers(&self, len: usize) -> Vec<u64> {
+    fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
         
 
@@ -232,11 +242,13 @@ impl Sequence {
 
     //Regular reader functions
 
-    //This can TECHNICALLY panic in debug mode and produce incorrect answers 
-    //when compiled with optimizations. For 32 bit platforms, I'd watch out
-    //if somehow operating on an entire human genome at once without any 
-    //omissions, but for 64 bit platforms (or more), there are no known genome 
-    //sizes on which this could be a concern.
+    /// # Panics
+    ///   On debug mode, if there are more base pairs represented than `usize::MAX/BP_PER_U8`
+    ///   On release mode, this will silently fail. 
+    ///   On a 32 bit platform, this can be a concern if your genome is much
+    ///   larger than a human genome, without omissions. On a 64 bit platform, 
+    ///   there is no known genome which should cause this to panic: _Paris japonica`
+    ///   has a genome size that is 100 million times smaller than usize::MAX
     pub fn number_bp(&self) -> usize {
         self.seq_blocks.len() << 2 //Each u8 contains four bp, so we multiply by 4
     }
@@ -270,45 +282,46 @@ impl Sequence {
     //Note: these are very much designed to minimize how much self.kmer_dict
     //      is directly accessed. 
 
-    //Panics: if k is not an element of [MIN_BASE, MAX_BASE]
+    /// #Panics
+    /// If `k` is not an element of `MIN_BASE..=MAX_BASE`
     pub fn number_unique_kmers(&self, k: usize) -> usize {
         self.kmer_nums[k-MIN_BASE]
     }
 
+    /// #Panics
+    /// If `k` is not an element of `MIN_BASE..=MAX_BASE`
     pub fn unique_kmers(&self, k: usize) -> Vec<u64> {
 
         self.kmer_dict[k-MIN_BASE].clone()
     }
 
-    pub fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
+    pub(crate) fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
         self.kmer_dict[k-MIN_BASE][id]
     }
 
-    pub fn idth_unique_kmer_vec(&self, k: usize, id: usize) -> Vec<Bp> {
+    pub(crate) fn idth_unique_kmer_vec(&self, k: usize, id: usize) -> Vec<Bp> {
         Self::u64_to_kmer(self.idth_unique_kmer(k, id), k)
     }
 
-    pub fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
+    pub(crate) fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
         self.kmer_id_dict[k-MIN_BASE].get(&kmer).copied()
     }
 
     //Panics: if kmer is not a valid u64 version of a k-mer represented in the sequence
-    pub fn id_of_u64_kmer_or_die(&self, k: usize, kmer: u64) -> usize {
+    pub(crate) fn id_of_u64_kmer_or_die(&self, k: usize, kmer: u64) -> usize {
         self.kmer_id_dict[k-MIN_BASE][&kmer]
     }
 
 
 
-    pub fn bases_to_code(bases: &[Bp ; BP_PER_U8]) -> u8 {
+    fn bases_to_code(bases: &[Bp ; BP_PER_U8]) -> u8 {
 
         bases.iter().zip(PLACE_VALS).map(|(&a, b)| (a as usize)*(b as usize)).sum::<usize>() as u8
     
     }
 
 
-    //SAFETY: THIS function is safe. But unsafe code relies on it always producing usizes < BASE_L
-    //        which it will since BASE_L = 4 and we always extract usizes two bits at a time (00, 01, 10, 11)
-    pub fn code_to_bases(coded: u8) -> [Bp ; BP_PER_U8] {
+    pub(crate) fn code_to_bases(coded: u8) -> [Bp ; BP_PER_U8] {
 
         let mut v: [Bp; BP_PER_U8] = [Bp::A; BP_PER_U8];
 
@@ -317,6 +330,8 @@ impl Sequence {
         for i in 0..BP_PER_U8 { 
 
             //SAFETY: U8_BITMASK always chops the last two bits from the u8, leaving a usize < BASE_L (4)
+            // BIG HUGE ENORMOUS SAFETY NOTE WARNING: IF YOU AT ANY POINT CHANGE THE NUMBER OF BPS THAT WE HAVE,
+            // THIS IS THE FUNCTION AND THE PLACE WHERE YOU WILL GET UB IF YOU ARE NOT EXTREMELY CAREFUL
             v[i] = unsafe{Bp::usize_to_bp((U8_BITMASK & reference) as usize)};
             reference = reference >> 2; 
 
@@ -328,12 +343,7 @@ impl Sequence {
 
 
     
-    pub fn kmer_to_u64(bases: &[Bp]) -> u64 {
-
-        /*
-        let ex_pval: Vec<u64> = (0..bases.len()).map(|a| (2u64.pow((a*BITS_PER_BP) as u32)) as u64).collect();
-
-        ex_pval.iter().zip(bases).map(|(a, &b)| a*(b as u64)).sum()*/
+    pub(crate) fn kmer_to_u64(bases: &[Bp]) -> u64 {
 
         let mut mot : u64 = 0;
 
@@ -350,7 +360,7 @@ impl Sequence {
     //        silently give you an incorrect result: if len is too long, then
     //        it will append your 0th base (A in DNA), which may not exist in
     //        in your sequence. If it's too short, it will truncate the kmer
-    pub fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<Bp> {
+    pub(crate) fn u64_to_kmer(coded_kmer: u64, len: usize) -> Vec<Bp> {
 
         let mut v: Vec<Bp> = vec![Bp::A; len];
 
@@ -367,7 +377,9 @@ impl Sequence {
 
     }
 
-    pub fn number_kmer_reextends(&self, bases: &Vec<Bp>) -> f64 {
+    // This is a helper function for motif contraction
+    // It counts the number of kmers that `self` has that differ only in their last bp from `bases`
+    pub(crate) fn number_kmers_neighboring_by_last_bp(&self, bases: &[Bp]) -> f64 {
 
         let k = bases.len();
 
@@ -379,10 +391,16 @@ impl Sequence {
 
         let mut check_u64 = Self::kmer_to_u64(bases);
         
+        //There is always at leasst one kmer that neighbors `bases` in its last Bp: itself
         let mut num: f64 = 1.0;
 
-        for _ in 0..3 {
+        for _ in 0..(BASE_L-1) {
 
+            // This effectively increments the last bp in bases,
+            // going from A -> C -> G -> T
+            // We only need to do this BASE_L-1 times because doing it 
+            // BASE_L times would loop us back to start.
+            // mask_offset basically is my way of correcting for potential carrying
             check_u64 = (check_u64+add_offset) & mask_offset;
 
             if self.id_of_u64_kmer(k, check_u64).is_some() {
@@ -395,10 +413,17 @@ impl Sequence {
 
     }
 
+    /// This returns the `num_bases` `[Bp]`s in the `block_id`th block, starting
+    /// from index `start_id`. 
+    /// # Panics
+    /// If `block_id` is not less than the number of sequence blocks, 
+    /// or `start_id+num_bases` is more than the number of bases in the `block_id`th sequence block 
     pub fn return_bases(&self, block_id: usize, start_id: usize, num_bases: usize) -> Vec<Bp> {
 
         let start_dec = self.block_u8_starts[block_id]+(start_id/BP_PER_U8);
         let end_dec = self.block_u8_starts[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
+
+        assert!(end_dec-start_dec <= self.block_lens[block_id]/BP_PER_U8, "Number of bases requested overflows the block");
 
         let all_coded = &self.seq_blocks[start_dec..end_dec];
 
@@ -439,19 +464,8 @@ impl Sequence {
         hamming == distance
 
     }
-    pub fn all_kmers_with_exact_hamming(&self, kmer: &Vec<Bp>, distance: usize) -> Vec<usize> {
 
-        let u64_kmer: u64 = Self::kmer_to_u64(kmer);
-
-        let len: usize = kmer.len();
-
-        self.kmer_dict[len-MIN_BASE].iter().enumerate()
-                           .filter(|(_, &b)| Self::u64_kmers_have_hamming(u64_kmer, b, distance))
-                           .map(|(a, _)| a).collect::<Vec<usize>>()
-
-    }
-
-    pub fn all_kmers_start_minmer(&self, minmer: u64, len: usize) -> Vec<usize> {
+    pub(crate) fn all_kmers_start_minmer(&self, minmer: u64, len: usize) -> Vec<usize> {
 
         const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
 
@@ -463,12 +477,13 @@ impl Sequence {
     //Returns the kmer id in position 0 if possible and the number of possible kmers in position 1
     //NOTE: Yes, it is possible to have a minmer that does not have a valid extension to a kmer: 
     //      Imagine a minmer that only appears once near the end of a sequence block
-    pub fn rand_kmer_start_minmer_and_number<R: Rng + ?Sized>(&self, minmer: u64, len: usize, rng: &mut R) -> (Option<usize>, usize) {
+    pub(crate) fn rand_kmer_start_minmer_and_number<R: Rng + ?Sized>(&self, minmer: u64, len: usize, rng: &mut R) -> (Option<usize>, usize) {
         let samp = self.all_kmers_start_minmer(minmer, len);
         (samp.choose(rng).copied(), samp.len())
     }
 
-    pub fn kmer_id_minmer_vec(&self, kmer_ids: &[usize], len: usize) -> Vec<u64> {
+
+    pub(crate) fn kmer_id_minmer_vec(&self, kmer_ids: &[usize], len: usize) -> Vec<u64> {
         const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
 
         kmer_ids.iter().map(|&a| self.kmer_dict[len-MIN_BASE][a] & MINMER_MASK).collect()
@@ -489,7 +504,7 @@ impl Sequence {
     }
 
     //This gives the id of the kmers in the HashMap vector that are under the hamming distance threshold
-    pub fn all_kmers_within_hamming(&self, kmer: &Vec<Bp>, threshold: usize) -> Vec<usize> {
+    pub(crate) fn all_kmers_within_hamming(&self, kmer: &Vec<Bp>, threshold: usize) -> Vec<usize> {
 
         let u64_kmer: u64 = Self::kmer_to_u64(kmer);
 
@@ -525,7 +540,7 @@ impl Sequence {
         id_set.into_iter().collect()
     }
 }
-
+/// This is the struct which holds the sequence blocks with no notable binding
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NullSequence {
     seq_blocks: Vec<u8>,
@@ -537,17 +552,14 @@ pub struct NullSequence {
 }
 
 
-/*Minor note: if your blocks total more bases than about 2 billion, you
-              will likely want to run on a 64 bit system, for hardware limitation
-              reasons. If you manage to reach those limitations on a 64 bit system, 
-              why on EARTH are you shoving in tens of millions of 
-              Paris japonica genome equivalents into this????
-*/
 impl NullSequence {
     
 
-    //PANICS: if a block has a length not divisible by BP_PER_U8 (4), a length shorter than MAX_BASE, or a usize not less than BASE_L (4)
-    //        This should not panic in our crate
+    /// Initializes a new NullSequence from a vector of sequence blocks
+    /// # Panics
+    /// - If any of the vectors in `blocks` have a length  ` <= [MAX_BASE]`
+    /// - If any of the vectors in `blocks` have a length not divisible by `[BP_PER_U8]`
+    /// - If any element of any of the vectors in `blocks` is `>= BASE_L`
     pub fn new(blocks: Vec<Vec<usize>>) -> NullSequence {
 
         let mut block_is: Vec<usize> = Vec::new();
@@ -622,8 +634,12 @@ impl NullSequence {
 
     }
 
-    //Contract: block_lens.iter().sum() == seq_blocks.len(). block_lens[i] >= the max length of your motifs
-    //          Failure to uphold this will result in this panicking for your own good.
+    /// Initializes a new Sequence from a single vector with base pair lengths 
+    /// provides by `block_lens` 
+    /// # Panics
+    /// - If any element of `block_lens` is not divisible by `[BP_PER_U8]` 
+    /// - If any element of `block_lens` is not greater than `[MAX_BASE]`
+    /// - If the sum of `block_lens` is not equal to `[BP_PER_U8] * seq_blocks.len()`
     pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>) -> NullSequence {
 
         let mut block_u8_starts: Vec<usize> = vec![0];
@@ -674,7 +690,7 @@ impl NullSequence {
     //NOTE: Pretty much any time anybody can access this array without automatically using the 
     //      the correct len should be immediately considered incorrect, especially because it 
     //      it will NOT fail: it will just give the wrong answer SILENTLY.
-    pub fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize, WyHash> {
+    fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize, WyHash> {
 
         let mut unel: Vec<u64> = Vec::new();
        
@@ -700,35 +716,16 @@ impl NullSequence {
       
     }
 
-    /*
-    pub fn u64_kmers_with_hamming(&self, u64_kmer: u64, len: usize, hamming: usize) -> Vec<u64> {
-        self.kmer_lists[len-MIN_BASE].iter()
-                           .filter_map(|&b| if Sequence::u64_kmers_have_hamming(u64_kmer, b, hamming){ Some(b)} else {None})
-                           .collect::<Vec<u64>>()
-    }
-
-    pub fn u64_kmers_with_unit_hamming(&self, u64_kmer: u64, len: usize) -> Vec<u64> {
-
-        let mut kmers = self.kmer_lists[len-MIN_BASE].iter()
-                            .filter_map(|&b| if true_have_hamming_u64_kmer(u64_kmer, b, len, 1) {
-                                Some(b)
-                            } else {None})
-                            .collect::<Vec<u64>>();
-
-
-    }
-
-    pub fn filter_u64_for_hamming(candidates: Vec<u64>, u64_kmer: u64, len: usize, target_hamming: usize) -> Vec<u64> {
-        candidates.into_iter().filter(|&a| Sequence::u64_kmers_have_hamming(u64_kmer, a, target_hamming)).collect()
-    }*/
 
     //Regular reader functions
 
-    //This can TECHNICALLY panic in debug mode and produce incorrect answers 
-    //when compiled with optimizations. For 32 bit platforms, I'd watch out
-    //if somehow operating on an entire human genome at once without any 
-    //omissions, but for 64 bit platforms (or more), there are no known genome 
-    //sizes on which this could be a concern.
+    /// # Panics
+    ///   On debug mode, if there are more base pairs represented than `usize::MAX/BP_PER_U8`
+    ///   On release mode, this will silently fail. 
+    ///   On a 32 bit platform, this can be a concern if your genome is much
+    ///   larger than a human genome, without omissions. On a 64 bit platform, 
+    ///   there is no known genome which should cause this to panic: _Paris japonica`
+    ///   has a genome size that is 100 million times smaller than usize::MAX
     pub fn number_bp(&self) -> usize {
         self.seq_blocks.len() << 2 //Each u8 contains four bp, so we multiply by 4
     }
@@ -782,7 +779,7 @@ impl NullSequence {
 }
 
 
-pub fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
+pub(crate) fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
 
     let mut track_kmer = kmer;
     let mut rev_kmer: u64 = 0;
@@ -795,7 +792,7 @@ pub fn reverse_complement_u64_kmer(kmer: u64, len: usize) -> u64 {
 
 }
 
-pub fn plain_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize) -> usize {
+pub(crate) fn plain_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize) -> usize {
     let mut kmer_check = (kmer_a ^ kmer_b);
     let mut hamming: usize = 0;
     for _ in 0..len {
@@ -805,7 +802,7 @@ pub fn plain_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize) -> usize {
     hamming
 }
 
-pub fn true_have_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize, hamming_thresh: usize) -> bool {
+pub(crate) fn true_have_hamming_u64_kmer(kmer_a: u64, kmer_b: u64, len: usize, hamming_thresh: usize) -> bool {
     let rc = reverse_complement_u64_kmer(kmer_a, len);
     let hamming = plain_hamming_u64_kmer(kmer_a, kmer_b, len).min(plain_hamming_u64_kmer(rc, kmer_b, len));
     hamming == hamming_thresh
@@ -950,7 +947,7 @@ mod tests {
 
             println!("For kmer size {}, all generated results are within hamming distance ({}) and exist in seq ({})", b_l, all_within_hamming, all_exist_in_seq);
 
-            let neighbors = sequence.number_kmer_reextends(&mot);
+            let neighbors = sequence.number_kmers_neighboring_by_last_bp(&mot);
 
             let mut neigh: f64 = 0.0;
 
@@ -967,7 +964,7 @@ mod tests {
 
                 let mot2 = sequence.random_valid_motif(b_l, &mut rng);
                 
-                let neighbors = sequence.number_kmer_reextends(&mot2);
+                let neighbors = sequence.number_kmers_neighboring_by_last_bp(&mot2);
 
                 let mut neigh: f64 = 0.0;
 

@@ -1,6 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Range};
 use std::cmp::{max, min};
 use std::error::Error;
+use std::fmt;
 
 //use std::time::{Duration, Instant};
 
@@ -38,7 +39,7 @@ use serde::{Serialize, Deserialize};
 use strum::{EnumCount, VariantArray as VariantArrayArr, IntoEnumIterator};
 use strum_macros::{EnumCount as EnumCountMacro, VariantArray, EnumIter};
 
-pub const WIDE: f64 = 3.0;
+pub(crate) const WIDE: f64 = 3.0;
 
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
@@ -46,7 +47,7 @@ use rand::seq::SliceRandom;
 
 //This is about the first point of equality for the fit functions
 //Technically, they cross again later, but based on visual inspection,
-//this is a nothingburger: the low tail just happens to osscilate and
+//this is a nothingburger: the low tail just happens to oscillate and
 //the high tail is more accurate throughout that range
 const A0: f64 = 1.97;
 
@@ -55,13 +56,15 @@ const A0: f64 = 1.97;
 const K: f64 = 16.0;
 
 //This is a constant that tells us when to stop computing the high tail because it literally doesn't matter, since it would be 2^(-53) times its value at most added to the function
-//It is equal to a round number greater than 2^(53/K). Since I chose K = 16, the cutoff is 10.0
+//It is equal to a round number greater than 2^(53/K). Since I chose K = 16, the cutoff is 20.0
 const HIGH_CUT: f64 = 20.0;
+
+/// This is an enum denoting how wide the Kernel should be
+/// It's a unit type in my code: I go with fragment length
+/// determining a single width. But if you are editing this code, 
+/// it's an option
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
 pub enum KernelWidth {
-     //Narrow = 0,
-     //Medium = 1,
-     //Wide = 2,
      Wide = 0,
 }
 
@@ -74,7 +77,9 @@ impl Distribution<KernelWidth> for Standard {
     }
 }
 
+/// This is an enum denoting the shape of the Kernel should be
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KernelVariety {
     Gaussian = 0,
   //  HalfLeft = 1,
@@ -92,6 +97,8 @@ impl Distribution<KernelVariety> for Standard {
         }
     }
 }
+
+/// This specifies the shape of a binding kernel
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Kernel{
 
@@ -196,7 +203,32 @@ impl Kernel {
 
 }
 
-//CANNOT BE SERIALIZED
+/// This is an error that results from failing to create a Waveform object
+#[derive(Clone, Debug)]
+pub enum WaveCreationError {
+    DumbSpacer,
+    MisalignedSequenceSpacer,
+    OverruningDataBlock,
+}
+
+impl std::fmt::Display for WaveCreationError {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+
+        match self {
+            Self::DumbSpacer => write!(f, "Your data has to increment in location."),
+            Self::MisalignedSequenceSpacer => write!(f, "Your data array and sequence are incompatible"),
+            Self::OverruningDataBlock => write!(f, "You have a data array which overruns one of your sequence blocks"),
+        }
+    }
+
+}
+
+impl Error for WaveCreationError {}
+
+/// This is the struct which holds occupancy traces. 
+/// This needs to uphold a lot of invariants, and thus initialization and usage
+/// are both quite finicky. 
 #[derive(Clone, Debug)]
 pub struct Waveform<'a> {
     wave: Vec<f64>,
@@ -219,33 +251,54 @@ impl<'a> Waveform<'a> {
        this wrong, your run will be memory safe, but it will give garbage and incorrect
        answers.
        */
-    pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
+
+    /// This initializes the Waveform object. This gets very finicky: pay close
+    /// attention to the errors you get if you even mildly screw this up.
+    /// # Invariants
+    /// - Every data block will have a length that is less than the length of 
+    /// its corresponding sequence block in `[Bp]`s/`spacer`. If `spacer >=
+    /// [BP_PER_U8]`, this length is number of base pairs minus 1/spacer. If
+    /// `spacer < [BP_PER_U8]`, this length is 1 + the length in the former case
+    /// # Errors
+    /// - If `spacer == 0`.
+    /// - If the length of data makes it impossible to reconcile `start_data` with
+    ///   `seq` and `spacer`. NOTE OF WARNING: if `start_data` is not partitioned 
+    ///   correctly but it is still possible to to reconcile the final length, this
+    ///   will simply mis-partition your waveform. 
+    /// - If the waveform blocks that result from this would overrun the sequence blocks.
+    pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Result<Waveform<'a>, WaveCreationError>  {
 
 
-        if spacer == 0 {panic!("Spacer has to be positive, or else we're going to divide by zero a bunch.");}
+        if spacer == 0 { return Err(WaveCreationError::DumbSpacer);}
 
         let (point_lens, start_dats) = Self::make_dimension_arrays(seq, spacer);
-       
-            println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
+
+        //println!("bl {:?}", seq.block_lens());
+        //println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
+        
         if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
            // println!("{:?} {:?}", &start_data[28910..28919], seq.block_lens());
             panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
         }
  
-        _ = seq.block_lens().iter().enumerate().map(|(i,a)| if(a/spacer < point_lens[i]) { panic!("failed");} else{ true}).collect::<Vec<_>>();
+        //This check needs to be point_lens[i]-1 because we need the last INDEX of point_lens
+        //to fall within the sequence, not length
+        if spacer >= BP_PER_U8 {
+            _ = seq.block_lens().iter().enumerate().map(|(i,a)| if(a/spacer < point_lens[i]-1) { panic!("failed");} else{ true}).collect::<Vec<_>>();
+        } else {
+            _ = seq.block_lens().iter().enumerate().map(|(i,a)| if(a/spacer < point_lens[i]) { panic!("failed");} else{ true}).collect::<Vec<_>>();
+        }
 
-
-
-        Waveform {
+        Ok(Waveform {
             wave: start_data,
             spacer: spacer,
             point_lens: point_lens,
             start_dats: start_dats,
             seq: seq,
-        }
+        })
     }
 
-    pub fn make_dimension_arrays(seq: &'a Sequence, spacer: usize) -> (Vec<usize>, Vec<usize>) {
+    pub(crate) fn make_dimension_arrays(seq: &'a Sequence, spacer: usize) -> (Vec<usize>, Vec<usize>) {
 
         /*We require that all data begin with the 0th base for mainly this reason
           We are using the usize round down behavior here to denote how many
@@ -261,7 +314,7 @@ impl<'a> Waveform<'a> {
           converted to index easily by just dividing by spacer. A bp with a 
           non-integer part in its representation is dropped in the waveform.
          */
-        let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| ((a-1)/spacer)).collect();
+        let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| if spacer >= BP_PER_U8 {1+((a-1)/spacer)} else {(a-1)/spacer}).collect();
 
         let mut size: usize = 1;
 
@@ -277,7 +330,7 @@ impl<'a> Waveform<'a> {
 
 
     //Returns None if data_ind is >= length of the backing vector
-    pub fn block_and_base(&self, data_ind: usize) -> Option<(usize, usize)> {
+    pub(crate) fn block_and_base(&self, data_ind: usize) -> Option<(usize, usize)> {
 
         if data_ind >= self.wave.len() { return None;}
 
@@ -291,7 +344,7 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn data_ind(&self, block: usize, base: usize) -> Option<usize> {
+    pub(crate) fn data_ind(&self, block: usize, base: usize) -> Option<usize> {
 
         if block >= self.start_dats.len() { return None; }
         let data_point = base/self.spacer;
@@ -300,13 +353,13 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn intersect_kmer_start_num(&self, data_ind: usize, k: usize) -> usize {
+    pub(crate) fn intersect_kmer_start_num(&self, data_ind: usize, k: usize) -> usize {
 
         self.intersect_kmer_start_range(data_ind, k).map(|a| a.1.len()).unwrap_or(0)
 
     }
 
-    pub fn intersect_kmer_start_range(&self, data_ind: usize, k: usize) -> Option<(usize, Range<usize>)>{
+    pub(crate) fn intersect_kmer_start_range(&self, data_ind: usize, k: usize) -> Option<(usize, Range<usize>)>{
 
         if k == 0 { return None; }
 
@@ -316,7 +369,7 @@ impl<'a> Waveform<'a> {
     
     }
 
-    pub fn intersect_kmer_start_range_block_and_base(&self, block: usize, base: usize, k: usize) -> Option<(usize, Range<usize>)> {
+    pub(crate) fn intersect_kmer_start_range_block_and_base(&self, block: usize, base: usize, k: usize) -> Option<(usize, Range<usize>)> {
 
         if k == 0 { return None; }
 
@@ -336,7 +389,7 @@ impl<'a> Waveform<'a> {
     }
 
    
-    pub fn intersect_data_start_range_block_and_base(&self, block: usize, base: usize, k: usize) ->  Option<Vec<usize>> {
+    pub(crate) fn intersect_data_start_range_block_and_base(&self, block: usize, base: usize, k: usize) ->  Option<Vec<usize>> {
 
         let (block, base_range) = self.intersect_kmer_start_range_block_and_base(block, base, k)?;
 
@@ -366,7 +419,7 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn intersect_kmer_data_block_and_base(&self, block: usize, base: usize, k: usize) -> Vec<f64> {
+    pub(crate) fn intersect_kmer_data_block_and_base(&self, block: usize, base: usize, k: usize) -> Vec<f64> {
 
         if k == 0 { return vec![]; }
 
@@ -384,6 +437,7 @@ impl<'a> Waveform<'a> {
 
     }
 
+    /// Creates a `Waveform` which is compatible with `seq` and `spacer`, but all `0.0`.
     pub fn create_zero(seq: &'a Sequence, spacer: usize) -> Waveform<'a> {
        
 
@@ -400,6 +454,7 @@ impl<'a> Waveform<'a> {
         }
     }
 
+    /// Creates a `Waveform` identical to self, except all data are `0.0`
     pub fn derive_zero(&self) -> Waveform {
 
         let tot_l: usize = self.point_lens.iter().sum();
@@ -415,10 +470,15 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn subtact_self(&mut self, offset: f64) {
+    pub(crate) fn subtact_self(&mut self, offset: f64) {
         self.wave = self.wave.iter().map(|&a| a-offset).collect();
     }
 
+    // NOTE: This is THE workhorse function of the code. It is the reason for 
+    //       all of the invariants I have, the place where I optimized most 
+    //       heavily, and where your code will explode with UB if you modify 
+    //       without checking all of the invariants I have on other parts of
+    //       the code
     //SAFETY: -block must be less than the number of blocks
     //        -center must be less than the number of bps in the blockth block
     //        -the length of peak MUST be strictly less than the number of base pairs represented in the smallest data block
@@ -430,13 +490,17 @@ impl<'a> Waveform<'a> {
         let place_bp = (((peak.len()-1)/2) as isize)-(center as isize); //This moves the center of the peak to where it should be, taking the rest of it with it
         let cc = (place_bp).rem_euclid(self.spacer as isize); // This defines the congruence class of the kernel indices that will be necessary for the signal
        
+        // If the function invariant is obeyed, this is always in bounds 
         let zerdat: usize = *self.start_dats.get_unchecked(block); //This will ensure the peak is in the correct block
 
 
         let completion: usize = ((cc-((peak.len() % self.spacer) as isize)).rem_euclid(self.spacer as isize)) as usize; //This tells us how much is necessary to add to the length 
                                                                             //of the kernel to hit the next base in the cc
-        
+       
+        // This max is my way of guarding against peak drawing that is outside of the sequence block on the 5' end
+        // `cc` is effectively the "0" point of the block with the given offset from `place_bp`
         let min_kern_cc = max(cc, place_bp);
+        // This min is my way of guarding against peak drawing that is outside of the sequence block on the 3' end
         let nex_kern_cc = min(((*self.point_lens.get_unchecked(block)*self.spacer) as isize)+place_bp, (peak.len()+completion) as isize);
         let min_data: usize = ((min_kern_cc-place_bp)/((self.spacer) as isize)) as usize;  //Always nonnegative: if place_bp > 0, min_kern_bp = place_bp
         let nex_data: usize = ((nex_kern_cc-place_bp)/((self.spacer) as isize)) as usize; //Assume nonnegative for the same reasons as nex_kern_bp
@@ -453,7 +517,7 @@ impl<'a> Waveform<'a> {
     }
 
 
-    pub fn kmer_propensities(&self, k: usize) -> Vec<f64> {
+    pub(crate) fn kmer_propensities(&self, k: usize) -> Vec<f64> {
 
         let coded_sequence = self.seq.seq_blocks();
         let block_lens = self.seq.block_lens(); //bp space
@@ -532,7 +596,9 @@ impl<'a> Waveform<'a> {
 
     }
 
-    //Panics: if other_wave doesn't point to the same AllDataUse as self
+    /// Yields the Euclidean distance between `self` and `other_wave` 
+    /// # Panics
+    ///   If `other_wave` doesn't point to the same AllDataUse as `self`
     pub fn rmse_with_wave(&self, other_wave: &Waveform) -> f64 {
 
         let residual = self-other_wave;
@@ -544,7 +610,8 @@ impl<'a> Waveform<'a> {
     }
 
 
-    pub fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
+
+    pub(crate) fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
 
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = f64::EPSILON;//4.0*background.noise_spread_par();
@@ -605,14 +672,14 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn produce_noise<'b>(&self, data_ref: &'b AllDataUse) -> Noise<'b> {
+    pub(crate) fn produce_noise<'b>(&self, data_ref: &'b AllDataUse) -> Noise<'b> {
         
         let residual = self-data_ref.data();
 
         return Noise::new(residual.wave, Vec::new(), data_ref.background_ref());
     }
 
-    pub fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64]) -> Noise<'b> {
+    pub(crate) fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64]) -> Noise<'b> {
 
         let mut noise = self.produce_noise(data_ref);
 
@@ -623,6 +690,9 @@ impl<'a> Waveform<'a> {
 
     }
 
+    /// Yields the median distance between `self` and `other_wave` 
+    /// # Panics
+    ///   If `data` doesn't point to the same AllDataUse as `self`
     pub fn median_distance_between_waves(&self, data: &Self) -> f64 {
         let residual = self-data;
         let mut abs_wave = residual.wave.iter().map(|&a| a.abs()).collect::<Vec<f64>>();
@@ -635,7 +705,7 @@ impl<'a> Waveform<'a> {
     }
    
 
-    pub fn generate_all_locs(&self) -> Vec<usize> {
+    pub(crate) fn generate_all_locs(&self) -> Vec<usize> {
 
         let mut length: usize = 0;
         for &a in self.point_lens.iter() { length += a; }
@@ -655,7 +725,8 @@ impl<'a> Waveform<'a> {
 
     }
 
-    pub fn generate_all_indexed_locs_and_data(&self, start_lens: &[usize]) -> Option<Vec<(Vec<usize>, Vec<f64>)>> {
+    pub(crate) fn generate_all_indexed_locs_and_data(&self, start_lens: &[usize]) -> Option<Vec<(Vec<usize>, Vec<f64>)>> {
+
 
         if self.start_dats.len() != start_lens.len() {
             return None;
@@ -675,6 +746,10 @@ impl<'a> Waveform<'a> {
 
     }
 
+    /// Saves an image set of occupancy traces compared to data twice: once to 
+    /// `{signal_directory}/{signal_name}/from_{start}_to_{end}.png, and once 
+    /// to `{signal_directory}/from_{start}_to_{end}/{signal_name}.png
+    /// If this fails, will simply warn you but won't return a hard error
     pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, only_sig: bool) {
 
         let current_resid = data_ref.data()-&self;
@@ -861,6 +936,10 @@ impl<'a> Waveform<'a> {
 
     }
     
+    /// Saves an image set of `self` and `alternative` compared to data
+    /// to `{signal_directory}/{signal_name}/from_{start}_to_{end}.png 
+    /// # Errors
+    /// - If a necessary file or directory could not be created 
     pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let current_resid = data_ref.data()-&self;
@@ -1093,6 +1172,7 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 
 }
 
+/// This is simply a `Waveform` in a form that can be serialized.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WaveformDef {
     wave: Vec<f64>,
@@ -1116,7 +1196,7 @@ impl WaveformDef {
     //        point_lens.last().unwrap()+start_dats.last().unwrap(). 
     //
     //ACCURACY:  Make sure that wave is in fact organized into the blocks implied by point_lens and start_dats.
-    pub(crate) fn get_waveform<'a>(&self, seq: &'a Sequence) -> Waveform<'a> {
+    pub(crate) fn get_waveform<'a>(&self, seq: &'a Sequence) -> Result<Waveform<'a>, WaveCreationError> {
         Waveform::new(self.wave.clone(), seq, self.spacer)
     }
 
@@ -1148,7 +1228,7 @@ impl From<StudentsTDef> for StudentsT {
 
 }
 
-
+/// This holds both the background distribution of binding and the prototype Kernel shapes
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Background {
     pub dist: BackgroundDist,
@@ -1157,16 +1237,16 @@ pub struct Background {
 
 impl Background {
 
-    pub fn new(sigma_background : f64, df : f64, fragment_length: f64) -> Background {
+    pub fn new(sigma_background : f64, df : f64, fragment_length: f64) -> Result<Background, Box<dyn Error>> {
 
-        let dist = BackgroundDist::new(sigma_background, df);
+        let dist = BackgroundDist::new(sigma_background, df)?;
         
         let kernel: [Kernel; KernelWidth::COUNT * KernelVariety::COUNT] = core::array::from_fn(|a| {
             let var = KernelVariety::VARIANTS[a/KernelWidth::COUNT];
             let wid = KernelWidth::VARIANTS[a % KernelWidth::COUNT];
             Kernel::new(fragment_length, 1.0, wid, var)
         });
-        Background{dist: dist, kernel: kernel}
+        Ok(Background{dist: dist, kernel: kernel})
     }
 
 
@@ -1263,7 +1343,7 @@ impl Background {
 
 
 #[derive(Clone)]
-pub struct Noise<'a> {
+pub(crate) struct Noise<'a> {
     resids: Vec<f64>,
     extraneous_resids: Vec<f64>,
     pub background: &'a Background,
@@ -1272,28 +1352,28 @@ pub struct Noise<'a> {
 impl<'a> Noise<'a> {
 
 
-    pub fn new(resids: Vec<f64>, extraneous_resids: Vec<f64>, background: &'a Background) -> Noise<'a> {
+    pub(crate) fn new(resids: Vec<f64>, extraneous_resids: Vec<f64>, background: &'a Background) -> Noise<'a> {
         Noise{ resids: resids, extraneous_resids: extraneous_resids, background: background}
 
     }
 
-    pub fn resids(&self) -> Vec<f64> {
+    pub(crate) fn resids(&self) -> Vec<f64> {
         self.resids.clone()
     }
-    pub fn extraneous_resids(&self) -> Vec<f64> {
+    pub(crate) fn extraneous_resids(&self) -> Vec<f64> {
         self.extraneous_resids.clone()
     }
     
     
-    pub fn dist(&self) -> BackgroundDist {
+    pub(crate) fn dist(&self) -> BackgroundDist {
         self.background.dist.clone()
     }
 
-    pub fn replace_extraneous(&mut self, extraneous_resids: Vec<f64>) {
+    pub(crate) fn replace_extraneous(&mut self, extraneous_resids: Vec<f64>) {
         self.extraneous_resids = extraneous_resids;
     }
 
-    pub fn noise_with_new_extraneous(&self, extraneous_resids: Vec<f64>) -> Noise<'a> {
+    pub(crate) fn noise_with_new_extraneous(&self, extraneous_resids: Vec<f64>) -> Noise<'a> {
 
         let mut new_noise = self.clone();
         new_noise.extraneous_resids = extraneous_resids;
@@ -1302,34 +1382,7 @@ impl<'a> Noise<'a> {
     }
 
     
-    /*pub fn rank(&self) -> Vec<f64> {
-
-        
-        //This generates a vector where each element is tagged with its original position
-        let mut rx: Vec<(usize, f64)> = self.resids.clone().iter().enumerate().map(|(a, b)| (a, *b)).collect();
-
-        //This sorts the elements, but recalls their original positions
-        rx.par_sort_unstable_by(|(i,a), (j,b)| a.partial_cmp(b).expect(format!("No NaNs allowed! {} {} {} {}", i,a, j, b).as_str()));
-       
-    
-        
-        let mut ranks: Vec<f64> = vec![0.; rx.len()];
-
-        let mut ind: f64 = 0.0;
-
-        //This uses the sort of elements to put rankings in their original positions
-        for &(i, _) in &rx {
-            ranks[i] = ind;
-            ind += 1.0;
-        }
-
-        
-        ranks
-        
-        
-    }*/
-
-    pub fn rmse_noise(&self, spacer: usize) -> f64 {
+    pub(crate) fn rmse_noise(&self, spacer: usize) -> f64 {
 
         
         let extra = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
@@ -1346,7 +1399,7 @@ impl<'a> Noise<'a> {
 
     //This does not work on calculating the AD based on the cdf of the background directly.
     //It works on the CDF of the |residuals|
-    pub fn ad_calc(&self, spacer: usize) -> f64 {
+    pub(crate) fn ad_calc(&self, spacer: usize) -> f64 {
 
         //let time = Instant::now();
         let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()).collect();
@@ -1377,33 +1430,6 @@ impl<'a> Noise<'a> {
     }
 
     
-    /*pub fn ad_grad(&self) -> Vec<f64> {
-
-        //let start = Instant::now();
-        let ranks = self.rank();
-
-        let n = self.resids.len() as f64;
-       
-        let mut derivative: Vec<f64> = vec![0.0; self.resids.len()];
-
-        for i in 0..self.resids.len() {
-            let pdf = self.background.pdf(self.resids[i]);
-            let (cdf, sf) = self.background.cd_and_sf(self.resids[i]);
-            let mut poc = pdf/cdf;
-            if !poc.is_finite() {poc = 0.;} //We assume that pdf outpaces cdf to 0 mathematically, but some cdf implementations are lazier sooner
-            let mut pos = pdf/sf;
-            if !pos.is_finite() {pos = 0.;} //We assume that pdf outpaces sf to 0 mathematically, but some sf implementations are lazier sooner
-
-            //derivative[i] = -((2.*ranks[i]+1.)*pdf)/(n*cdf)+((2.*n-(2.*ranks[i]+1.))*pdf)/(n*sf);
-            derivative[i] = -((2.*ranks[i]+1.)*poc)/(n)+((2.*n-(2.*ranks[i]+1.))*pos)/(n);
-        }
-
-
-        //println!("ad_grad {:?}", start.elapsed());
-        derivative
-
-    }*/
-
     //Note: this is kinda bad for some of the main body, but it's Fine(tm)
     fn low_val(la: f64) -> f64 {
 
@@ -1416,42 +1442,6 @@ impl<'a> Noise<'a> {
 
         -1.4286015+ln_la*(-1.5951525-1.0 + ln_la*(-0.9975172 + ln_la *(-0.3141198-ln_la*0.1146426)))
     }
-
-    /*fn deriv_low_val(la: f64) -> f64 {
-
-        const C: f64 = PI*PI/8.0;
-        C/(la*la)- 2.5/la + Self::deriv_polynomial_sqrt_la(la)/Self::polynomial_sqrt_la(la)
-
-    }
-
-    fn polynomial_sqrt_la(la: f64) -> f64 {
-
-        const C: f64 = PI*PI/8.0;
-        const CFS: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
-
-        let mut p: f64 = C*CFS[0]+(C*CFS[1]-CFS[0]/2.)*la.powi(1)+4.5*CFS[5]*la.powi(6);
-
-        for i in 2..CFS.len() {
-            p += (-1_f64).powi((i+1) as i32)*(C*CFS[i]-((2*i-3) as f64)*CFS[i-1]/2.)*la.powi(i as i32);
-        }
-        return p
-
-    }
-
-    fn deriv_polynomial_sqrt_la(la:f64) -> f64 {
-
-        const C: f64 = PI*PI/8.0;
-        const CFS: [f64; 6] = [2.00012,0.247105,0.0649821, 0.0347962,0.0116720,0.00168691];
-
-        let mut p: f64 = (C*CFS[1]-CFS[0]/2.)+27.*CFS[5]*la.powi(5);
-
-        for i in 2..CFS.len() {
-            p+= (-1_f64).powi((i+1) as i32)*(i as f64)*(C*CFS[i]-((2*i-3) as f64)*CFS[i-1]/2.)*la.powi((i-1) as i32);
-        }
-
-        return p
-
-    }*/
 
     fn high_val(ha: f64) -> f64 {
 
@@ -1481,34 +1471,6 @@ impl<'a> Noise<'a> {
 
         w*lo+(1.0-w)*hi
     }
-
-    /*
-    pub fn ad_diff(a: f64) -> f64 {
-
-        const H: f64 = 0.0000001;
-        (Self::ad_like(a+H)-Self::ad_like(a))/H
-    }
-
-    pub fn ad_deriv(a: f64) -> f64 {
-        
-        if a.is_infinite() {
-            return 0.0;
-        }
-
-        let w = Self::weight_fn(a);
-        let dl = Self::deriv_low_val(a);
-        let dh = Self::deriv_high_val(a);
-        let dw = Self::deriv_weight_fn(a);
-        let lv = Self::low_val(a);
-        let hv = Self::high_val(a);
-
-
-        //println!("a: {}, w: {}, dl: {}, hl: {}, dw: {}, lv: {}, hv: {}", a, w, dl, hl, dw, lv, hv);
-        //w*Self::deriv_low_val(a)+(1.-w)*Self::deriv_high_val(a)
-          //  +Self::deriv_weight_fn(a)*(Self::low_val(a)-Self::high_val(a))
-        w*dl+(1.-w)*dh + dw*(lv-hv)
-       
-    }*/
 
 
 }
@@ -1540,169 +1502,6 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
     }
 }
 
-
-
-//I had to take the source code for below from the aberth crate and modify it for vectors
-
-
-pub fn aberth_vec(polynomial: &Vec<f64>, epsilon: f64) -> Result<Vec<Complex<f64>>, &'static str> {
-  let dydx = &vec_derivative(polynomial); //Got up to here 
-  let mut zs: Vec<Complex<f64>> = initial_guesses(polynomial);
-  let mut new_zs = zs.clone();
-
-  let iter: usize = ((1.0/epsilon) as usize)+1;
-  'iteration: for _ in 0..iter {
-    let mut converged = true;
-
-    for i in 0..zs.len() {
-      let p_of_z = sample_polynomial(polynomial, zs[i]);
-      let dydx_of_z = sample_polynomial(dydx, zs[i]);
-      let sum = (0..zs.len())
-        .filter(|&k| k != i)
-        .fold(Complex::new(0.0f64, 0.0), |acc, k| {
-          acc + Complex::new(1.0f64, 0.0) / (zs[i] - zs[k])
-        });
-
-      let new_z = zs[i] + p_of_z / (p_of_z * sum - dydx_of_z);
-      new_zs[i] = new_z;
-
-      if new_z.re.is_nan()
-        || new_z.im.is_nan()
-        || new_z.re.is_infinite()
-        || new_z.im.is_infinite()
-      {
-        break 'iteration;
-      }
-
-      if !new_z.approx_eq(zs[i], epsilon) {
-        converged = false;
-        }
-    }
-    if converged {
-      return Ok(new_zs);
-    }
-    core::mem::swap(&mut zs, &mut new_zs);
-  }
-  Err("Failed to converge.")
-}
-
-pub fn vec_derivative(coefficients: &Vec<f64>) -> Vec<f64> {
-  debug_assert!(coefficients.len() != 0);
-  coefficients
-    .iter()
-    .enumerate()
-    .skip(1)
-    .map(|(power, &coefficient)| {
-      let p = power as f64 ;
-      p * coefficient
-    })
-    .collect()
-}
-
-fn initial_guesses(polynomial: &Vec<f64>)-> Vec<Complex<f64>> {
-  // the degree of the polynomial
-  let n = polynomial.len() - 1;
-  let n_f = n as f64;
-  // convert polynomial to monic form
-  let mut monic: Vec<f64> = Vec::new();
-  for c in polynomial {
-    monic.push(*c / polynomial[n]);
-  }
-  // let a = - c_1 / n
-  let a = -monic[n - 1] / n_f;
-  // let z = w + a,
-  let p_of_w = {
-    // we can recycle monic on the fly.
-    for coefficient_index in 0..=n {
-      let c = monic[coefficient_index];
-      monic[coefficient_index] = 0.0f64;
-      for ((index, power), pascal) in zip(
-        zip(0..=coefficient_index, (0..=coefficient_index).rev()),
-        aberth::PascalRowIter::new(coefficient_index as u32),
-      ) {
-        let pascal: f64 = pascal as f64;
-        monic[index] =
-          MulAdd::mul_add(c, pascal * a.powi(power as i32), monic[index]);
-      }
-    }
-    monic
-  };
-  // convert P(w) into S(w)
-  let s_of_w = {
-    let mut p = p_of_w;
-    // skip the last coefficient
-    for i in 0..n {
-      p[i] = -p[i].abs()
-    }
-    p
-  };
-  // find r_0
-  let mut int = 1.0f64;
-  let r_0 = loop {
-    let s_at_r0 = aberth::sample_polynomial(&s_of_w, int.into());
-    if s_at_r0.re > 0.0f64 {
-      break int;
-    }
-    int = int + 1.0f64;
-  };
-  drop(s_of_w);
-
-  {
-    let mut guesses: Vec<Complex<f64>> = Vec::new();
-
-    let frac_2pi_n = f64::PI() * 2.0 / n_f;
-    let frac_pi_2n = f64::PI() / 2.0 / n_f;
-
-    for k in 0..n {
-      let k_f: f64 = k as f64; 
-      let theta = MulAdd::mul_add(frac_2pi_n, k_f, frac_pi_2n);
-
-      let real = MulAdd::mul_add(r_0, theta.cos(), a);
-      let imaginary = r_0 * theta.sin();
-
-      let val = Complex::new(real, imaginary);
-      guesses.push(val) ;
-    }
-
-    guesses
-  }
-}
-
-pub fn sample_polynomial(coefficients: &Vec<f64>, x: Complex<f64>) -> Complex<f64> {
-  debug_assert!(coefficients.len() != 0);
-  let mut r = Complex::new(0.0f64, 0.0);
-  for c in coefficients.iter().rev() {
-    r = r.mul_add(x, c.into())
-  }
-  r
-}
-
-trait ComplexExt<F: Float> {
-  fn approx_eq(self, w: Self, epsilon: F) -> bool;
-}
-
-impl<F: Float> ComplexExt<F> for Complex<F> {
-  /// Cheap comparison of complex numbers to within some margin, epsilon.
-  #[inline]
-  fn approx_eq(self, w: Complex<F>, epsilon: F) -> bool {
-    ((self.re - w.re).powi(2)+(self.im - w.im).powi(2)).sqrt() < epsilon
-  }
-}
-
-trait Distance<F: Float> {
-    fn dist(self, b: Self) -> F;
-}
-
-impl<F: Float> Distance<F> for Complex<F> {
-  /// Cheap comparison of complex numbers to within some margin, epsilon.
-  #[inline]
-  fn dist(self, b: Complex<F>) -> F {
-    ((self.re - b.re).powi(2)+(self.im - b.im).powi(2)).sqrt() 
-  }
-}
-
-
-    
 
 
 
@@ -1814,7 +1613,7 @@ mod tests{
         let base_w = &signal*0.4;
 
 
-        let background: Background = Background::new(0.25, 2.64, 25.0);
+        let background: Background = Background::new(0.25, 2.64, 25.0).unwrap();
 
         let mut rng = rand::thread_rng();
 
@@ -1863,7 +1662,7 @@ mod tests{
     fn noise_check(){
 
         
-        let background: Background = Background::new(0.25, 2.64, 5.0);
+        let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
 
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4],vec![], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4],vec![], &background);
@@ -1968,7 +1767,7 @@ mod tests{
     #[should_panic(expected = "Residuals aren't the same length?!")]
     fn panic_noise() {
         
-        let background: Background = Background::new(0.25, 2.64, 5.0);
+        let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
         let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], vec![], &background);
         let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], vec![], &background);
 

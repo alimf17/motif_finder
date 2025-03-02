@@ -7,7 +7,6 @@ use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH};
 use motif_finder::base::*;
 
 use motif_finder::data_struct::*;
-use motif_finder::modified_t::SymmetricBaseDirichlet;
 
 
 
@@ -86,9 +85,7 @@ fn main() {
 
     min_thermo_beta = min_thermo_beta.abs();
 
-    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(20.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
     
-    DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args set!");
 

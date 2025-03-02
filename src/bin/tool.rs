@@ -5,7 +5,6 @@ use motif_finder::{PROPOSE_EXTEND, DIRICHLET_PWM, THRESH, NECESSARY_MOTIF_IMPROV
 use motif_finder::base::*;
 
 use motif_finder::data_struct::*;
-use motif_finder::modified_t::SymmetricBaseDirichlet;
 
 use log::warn;
 
@@ -150,8 +149,6 @@ fn main() {
     };
 
     println!("filt {} cut {:?} {run_name}", filter, peak_cutoff);
-    PROPOSE_EXTEND.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
-    DIRICHLET_PWM.set(SymmetricBaseDirichlet::new(1.0_f64).expect("obviously valid")).expect("Nothing should have written to this before now");
 
     println!("Args parsed");
 

@@ -8,6 +8,7 @@ use num_traits::Float;
 use serde::{Serialize, Deserialize};
 
 use std::f64;
+use std::error::Error;
 
 use once_cell::sync::Lazy;
 
@@ -49,6 +50,9 @@ const IMPL_CUT: f64 = 1.; //
 
 static CONDITION_BASE: Lazy<f64> = Lazy::new(|| (-1.0+12.0/(3.+SCORE_THRESH.exp2())-12.0/(2.0+2.0*SCORE_THRESH.exp2())+4.0/(1.0+3.0*SCORE_THRESH.exp2())).ln());
 
+/// This is essentially a T distribution with a failure mode to a normal 
+/// approximation if it has more than 20 degrees of freedom. However, it
+/// will fail if degrees of freedom are less than 2. 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum BackgroundDist {
 
@@ -59,17 +63,12 @@ pub enum BackgroundDist {
 
 impl BackgroundDist {
 
-    pub fn new(scale: f64, freedom: f64) -> BackgroundDist {
+    pub fn new(scale: f64, freedom: f64) -> Result<BackgroundDist, Box<dyn Error>> {
 
-        if scale < 0.0 {
-            panic!("Only give me positive scale parameters!");
-        }
-        if freedom <= 2.0 { //We need at least a variance to be well defined. There's no working with this, otherwise
-            panic!("This background distribution is too ill behaved to do inference on it!");
-        } else if freedom >= GIVE_UP_AND_USE_NORMAL {
-            BackgroundDist::Normal(Normal::new(0.0, scale*(freedom/(freedom-2.)).sqrt()).expect("This shouldn't be possible."))
+        if freedom >= GIVE_UP_AND_USE_NORMAL {
+            Ok(BackgroundDist::Normal(Normal::new(0.0, scale*(freedom/(freedom-2.)).sqrt())?))
         } else {
-            BackgroundDist::FastT(FastT{ scale: scale, freedom: freedom})
+            Ok(BackgroundDist::FastT(FastT::new(scale,freedom)?))
         }
     }
     pub fn ln_cd_and_sf(&self,x: f64) -> (f64, f64) {
@@ -175,7 +174,28 @@ impl ::rand::distributions::Distribution<f64> for BackgroundDist {
 }
 
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[non_exhaustive]
+pub enum FastTError{
+    ScaleInvalid,
+    FreedomInvalid
+}
 
+impl std::fmt::Display for FastTError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FastTError::ScaleInvalid => write!(f, "Scale is NaN or non-positive"),
+            FastTError::FreedomInvalid => {
+                write!(f, "Degrees of freedom are NaN or less than 2.0")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FastTError {}
+
+/// This is a reimplementation of the T distribution from the backend of R.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FastT {
     scale: f64,
@@ -208,31 +228,14 @@ impl ContinuousLnCDF<f64, f64> for FastT {
 impl Continuous<f64, f64> for FastT {
 
     fn pdf(&self, x: f64) -> f64{
-        /*if x.is_infinite() {
-            0.0
-        } else { //We don't implement the code to give up and use a normal distribution because we only access FastT when we know we aren't giving up 
-            let d = x / self.scale;
-            (ln_gamma((self.freedom + 1.0) / 2.0) - ln_gamma(self.freedom / 2.0))
-                .exp()
-                * (1.0 + d * d / self.freedom).powf(-0.5 * (self.freedom + 1.0))
-                / (self.freedom * std::f64::consts::PI).sqrt()
-                / self.scale
-
-        }*/
         self.ln_pdf(x).exp()
-
     }
     fn ln_pdf(&self, x: f64) -> f64 {
         if x.is_infinite() {
             f64::NEG_INFINITY
         } else {
             let d = x / self.scale;
-           /* ln_gamma((self.freedom + 1.0) / 2.0)
-                - 0.5 * ((self.freedom + 1.0) * (1.0 + d * d / self.freedom).ln())
-                - ln_gamma(self.freedom / 2.0)
-                - 0.5 * (self.freedom * std::f64::consts::PI).ln()
-                - self.scale.ln()*/
-
+            
             ln_gamma((self.freedom + 1.0) / 2.0) - 
             (ln_gamma(self.freedom / 2.0) +self.scale.ln()+self.freedom.ln()/2.+std::f64::consts::PI.ln()/2.
              +((self.freedom + 1.0)/2.0) * (d.powi(2)/self.freedom).ln_1p())
@@ -276,7 +279,17 @@ impl ::rand::distributions::Distribution<f64> for FastT {
     }
 }
 
+
+
 impl FastT {
+
+    pub fn new(scale: f64, freedom: f64) -> Result<Self, FastTError> {
+
+        if scale.is_nan() || scale <= 0.0 { return Err(FastTError::ScaleInvalid);}
+        if freedom.is_nan() || freedom < 2.0 { return Err(FastTError::FreedomInvalid);}
+
+        Ok(Self{ scale: scale, freedom:freedom})
+    }
 
     pub fn cd_and_sf(&self,x: f64) -> (f64, f64) {
 
@@ -343,8 +356,7 @@ impl FastT {
         let mut sum: f64 = 0.5+g*x;
         let mut term: f64 = 1.;
         let x2 = x.powi(2);
-        while n < 50. {
-            //println!("n {} sum {}", n, sum);
+        while n < 50. { //50 was good enough for our purposes, 
             term *= -x2*(self.freedom-1.+2.*n)/(self.freedom*2.*n);
             sum += g*x*term/(2.*n+1.);
             n += 1.;
@@ -440,26 +452,9 @@ fn ln_beta_half(a: f64) -> f64 {
 }
 
 
-
-#[derive(Debug)]
-pub enum BackgroundDistDef {
-    Normal(NormalDef),
-    FastT(FastT),
-}
-
-impl From<BackgroundDistDef> for BackgroundDist {
-    fn from(def: BackgroundDistDef) -> BackgroundDist {
-        match def {
-            BackgroundDistDef::Normal(norm) => BackgroundDist::Normal(Normal::new(norm.mean, norm.std_dev).unwrap()),
-            BackgroundDistDef::FastT(fast) => BackgroundDist::FastT(fast),
-        }
-    }
-}
-
-
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(remote = "Normal")]
-pub struct NormalDef {
+struct NormalDef {
     #[serde(getter = "Normal::get_mean")]
     mean: f64,
     #[serde(getter = "Normal::get_sd")]
@@ -472,7 +467,7 @@ impl From<NormalDef> for Normal {
     }
 }
  
-pub trait Getter {
+pub(crate) trait Getter {
     fn get_mean(&self) -> f64;
     fn get_sd(&self) -> f64;
 }
@@ -482,19 +477,19 @@ impl Getter for Normal {
     fn get_sd(&self) -> f64 { self.std_dev().unwrap() }
 }
 
+
 #[derive(Debug)]
-pub struct SymmetricBaseDirichlet {
+pub(crate) struct SymmetricBaseDirichlet {
     alpha: f64,
     ln_normalize: f64,
     gamma_sample: Gamma,
 }
 
-//This is approximately 53/1022, but you can't do float divisions in const contexts. 
-pub const MIN_WELL_DEFINED_ALPHA: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3faa8d46a351a8d4)};
+const MIN_WELL_DEFINED_ALPHA: f64 = unsafe{ std::mem::transmute::<u64, f64>(0x3faa8d46a351a8d4)};
 
 impl SymmetricBaseDirichlet{
 
-    pub fn new(alpha: f64) -> Result<Self, String> {
+    pub(crate) fn new(alpha: f64) -> Result<Self, String> {
 
         if alpha <= MIN_WELL_DEFINED_ALPHA || alpha.is_infinite() || alpha.is_nan() { return Err(format!("alpha must be well-defined, finite, and at least {MIN_WELL_DEFINED_ALPHA}")); }
 
