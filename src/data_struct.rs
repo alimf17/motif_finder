@@ -1,7 +1,7 @@
 use std::{f64, fs, fmt};
 use std::io::{Read, Write};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 //use std::time::{Duration, Instant};
 
 use core::f64::consts::PI;
@@ -55,7 +55,7 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
     map
 });
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AllData {
 
     seq: Sequence,
@@ -126,9 +126,59 @@ impl<'a> CostFunction for FitTDist<'a> {
 
 impl AllData {
   
-    //TODO: I need to create a master function which takes in a fasta file and a IPOD/ChIP-seq data set 
-    //      with a spacer and boolean indicating circularity, and outputs an AllData instance
 
+    /// This actually initializes the inference data that you need. 
+    /// There are several requirements, and failure to uphold these requirements 
+    /// will cause errors. This is the most finicky function in the public API. 
+    /// For your own sanity, pay attention here. 
+    /// # Inputs
+    /// - `fasta_file`: A string that points to a fasta file
+    /// - `data_file`: A string which points to your protein-DNA binding file.
+    ///                This file starts with a header `loc data`, followed by 
+    ///                lines which start with a non negative integer followed by 
+    ///                a float. No line should be empty. If the smallest location
+    ///                is 1, we will assume it's 1-indexed. Otherwise, we will 
+    ///                assume it's zero indexed. 
+    /// - `output_dir`: A string indicating the directory into which this AllData
+    ///    should be serialized. 
+    /// - `is_circular`: Is your chromosome circular?
+    /// - `fragment_length`: Your estimated fragment length. It should be about 
+    ///                      one half the width of your peaks. 
+    /// - `spacing`: The spacing of your location probes. Pick an average value:
+    ///              we will interpolate if you're off. This should be positive.
+    /// - `min_height`: What is the minimum height at which you want full binding 
+    ///                 of peaks? 
+    /// - `null_char`: If your fasta_file has `'N'` or `'X'` to indicate an 
+    ///                unknown base, this should be `Some('N')` or `Some('X')`.
+    ///                Otherwise, this should be `None`.
+    /// - `peak_scale`: This is a number you can increase to favor assigning
+    ///                 data blocks as having no binding, or decrease to favor
+    ///                 assigning data blocks as having binding. If `None`, we 
+    ///                 set this to `1.0`.
+    /// # Errors
+    /// There are a great deal of errors that can result from this function. 
+    /// We have to uphold a lot of invariants, and while we will do our best, 
+    /// pay close atttention to all of the errors you get here. We try to 
+    /// find and collate them into one bundle, so you can fix many errors at once.
+    /// Here are the conditions that will cause an error:
+    /// - If your fasta file does not exist. 
+    /// - If your fasta file is blank
+    /// - If your fasta file does not start every other line with `>`
+    /// - If your fasta file has bases other than A, C, G, or T
+    /// - If your data file does not exist. 
+    /// - If your data file is blank
+    /// - If `spacer = 0`
+    /// - If your data file is formatted incorrectly.
+    /// - If your data has locations that go beyond your sequence length
+    /// - If there is not enough data without binding to fit the background distribution
+    /// - If there is not enough data with binding to actually run inference on. 
+    /// - If your data or fasta files are big enough that the resulting structs
+    ///   overrun `[usize::MAX]` for the platform you're on. If you're working
+    ///   on a 32 bit platform, this is conceivable, albeit unlikely. If you're
+    ///   workng on a 64 platform, this should be impossible unless you have an
+    ///   an organism with octillions the size of the largest genomes I'm aware of.
+    ///   This can also technically cause a panic if there are errors on the fasta
+    ///   file that are super late into a fasta file that large. 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
                                  fragment_length: usize, spacing: usize, min_height: f64, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<(Self, String), AllProcessingError> {
 
@@ -245,7 +295,7 @@ impl AllData {
     }
 
     //Important getters for the other structs to access the data from. 
-    pub fn validated_data(&self) -> Result<Waveform, AllProcessingError> {
+    fn validated_data(&self) -> Result<Waveform, AllProcessingError> {
 
         let len = self.data.len();
         let spacer = self.data.spacer();
@@ -277,6 +327,9 @@ impl AllData {
         &self.seq
     }
 
+    /// This gives the starting locations of each gene block in genome coordinates.
+    /// Note that if you have a circular genome, this can loop over and produce
+    /// genome coordinates that need to be modded by the sequence length
     pub fn zero_locs(&self) -> &Vec<usize> {
         &self.start_genome_coordinates
     }
@@ -310,7 +363,7 @@ impl AllData {
         let file_string = match fs::read_to_string(fasta_file_name) {
 
             Ok(file) => file, 
-            Err(e) => return Err(FastaError::InvalidFile(Rc::new(e))),
+            Err(e) => return Err(FastaError::InvalidFile(Arc::new(e))),
         };//TODO: make this a FastaError variant
         
         let mut fasta_as_vec = file_string.split("\n").collect::<Vec<_>>();
@@ -400,7 +453,7 @@ impl AllData {
         let att_file = fs::read_to_string(data_file_name);
 
         if att_file.is_err() {
-            let err = DataProcessError::InvalidFile(Rc::new(att_file.unwrap_err()));
+            let err = DataProcessError::InvalidFile(Arc::new(att_file.unwrap_err()));
             return Err(err.collect_wrongdoing(possible_sequence_len));
         }
 
@@ -875,7 +928,7 @@ impl AllData {
 
         let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
                                                                      .map(|a| a.clone()).collect();
-        
+       
         //SAFETY: This data block filtering is what allows us to guarentee Kernel
         //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
         //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
@@ -895,6 +948,21 @@ impl AllData {
         if data_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
         }
+
+        let length_of_data: usize = data_blocks.iter().map(|a| a.len()).sum();
+
+        //This is a hard limit, because technically, we only ever computed the
+        //limit of the eth statistic as the number of points increases without bound
+        //Based on our experience with the Anderson Darling statistic, which the
+        //eth statistic is based on, it should converge like 1/sqrt(n). So, we are
+        //blatantly assuming that 100 is enough. The Marsaglias claim that there's
+        //a max error of about 0.005 even if n=8 for the AD statistic when comparing
+        //to ADinf (Marsaglia and Marsaglia, "Evaluating the Anderson-Darling 
+        //Distribution", 2004, Journal of Statistical Software), but I'm not super
+        //confident in the application of this to eth.
+        //Again, I'm blatantly pretending that 100 is sufficient. I would guess 
+        //it's _probably_ fine????
+        if length_of_data < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
 
         let ar_info = ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
         let data_info = data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
@@ -1070,8 +1138,8 @@ impl AllData {
     }
 
 
-    //While this was originally in place to compute autocorrelation coefficients I no longer need, I since actually adapted it to something useful:
-    //calculating autocorrelations of my inference
+    /// This is a helper function that computes autocorrelation coefficients across 
+    /// independent blocks
     pub fn compute_autocorrelation_coeffs(data: &Vec<Vec<f64>>, mut num_coeffs: usize) -> Vec<f64>{
 
         let min_data_len = data.iter().map(|a| a.len()).min().expect("Why are you trying to get autocorrelations from no data?");
@@ -1107,6 +1175,10 @@ impl AllData {
     }
 
 
+    /// This uses the Nelder-Mead algorithm to fit the spread and degrees of
+    /// of freedom parameter of a zero centered T distribution. Note that
+    /// the degrees of freedom have a minimum of `2.0`. This returns the
+    /// fit in order of (spread, degrees of freedom)
     pub fn estimate_t_dist(decorrelated_data: &Vec<f64>) -> (f64, f64) {
 
         let total_sample_variance = decorrelated_data.iter().map(|a| a.powi(2)).sum::<f64>()/((decorrelated_data.len()-1) as f64);
@@ -1190,6 +1262,10 @@ impl AllData {
 
 impl<'a> AllDataUse<'a> {
 
+    /// This takes an `[AllData]` and creates the `[AllDataUse]` that the inference
+    /// will actually use. 
+    /// # Errors
+    ///   If the kernel recorded in `reference_struct` is too large for its data blocks
     pub fn new(reference_struct: &'a AllData, offset: f64) -> Result<Self, AllProcessingError> {
        
         let background = reference_struct.background();
@@ -1240,10 +1316,12 @@ impl<'a> AllDataUse<'a> {
         }
     }
 
-    //SAFETY: This must uphold the safety invariant that the kernel length
-    //        is SHORTER than the number of bps in any sequence block in 
-    //        the sequence data points to. So in general, REDUCING fragment 
-    //        length is fine, but increasing it can result in UB
+    /// This makes a copy of `self`, but with a new fragment length. 
+    /// #Safety
+    ///  This must uphold the safety invariant that the kernel length
+    ///  is SHORTER than the number of bps in any sequence block in 
+    ///  the sequence data points to. So in general, REDUCING fragment 
+    ///  length is fine, but increasing it can result in UB
     pub unsafe fn with_new_fragment_length(&self, fragment_length: f64) -> Self {
 
         let mut new_data = self.clone();
@@ -1316,7 +1394,7 @@ impl<'a> AllDataUse<'a> {
         }
     }
 
-    pub fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {
+    pub(crate) fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {
 
         let num_forward = self.background.bp_span()/self.data.spacer();
 
@@ -1359,7 +1437,7 @@ impl<'a> AllDataUse<'a> {
         location_vs_integral
     }
 
-    pub fn basic_peak_output(&self, min_height_sens: f64, bed_name: &str, chromosome_name: Option<&str>) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn basic_peak_output(&self, min_height_sens: f64, bed_name: &str, chromosome_name: Option<&str>) -> Result<(), Box<dyn Error>> {
         
         let mut location_vs_integral = self.basic_peak(min_height_sens);
 
@@ -1389,8 +1467,10 @@ impl<'a> AllDataUse<'a> {
         Ok(())
 
     }
-   
-    pub fn save_data_to_directory(&self, signal_directory: &str, signal_name: &str) {
+  
+    /// This saves the occupancy trace of just the data to a set of traces 
+    /// `{signal_directory}/{signal_name}/from_{begin}_to_{end}.png`. 
+    pub fn save_data_to_directory(&self, signal_directory: &str, signal_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let zero_locs = self.zero_locs();
         
@@ -1400,11 +1480,13 @@ impl<'a> AllDataUse<'a> {
 
         let total_dir = format!("{}/{}", signal_directory,signal_name);
 
-        if let Err(creation) = std::fs::create_dir_all(&total_dir) {
+        /*if let Err(creation) = std::fs::create_dir_all(&total_dir) {
             warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
             println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
             return;
-        };
+        };*/
+
+        std::fs::create_dir_all(&total_dir)?;
 
         let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
@@ -1482,15 +1564,18 @@ impl<'a> AllDataUse<'a> {
 
         }
 
+        Ok(())
+
     }
 
 
 }
 
+/// This documents all the things that can go wrong from a processing a Fasta File
 #[derive(Error, Debug, Clone)]
 pub enum FastaError {    
     #[error(transparent)]
-    InvalidFile(#[from] Rc<std::io::Error>),
+    InvalidFile(#[from] Arc<std::io::Error>),
     #[error(transparent)]
     BlankFile(#[from] EmptyFastaError),
     #[error(transparent)]
@@ -1501,27 +1586,27 @@ pub enum FastaError {
 
 
 #[derive(Error, Debug, Clone)]
-pub struct EmptyFastaError;
+struct EmptyFastaError;
 
 impl std::fmt::Display for EmptyFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file cannot be empty or only whitespace, and must have at least one line with valid base pairs in it!")}
 }
 
 #[derive(Error, Debug, Clone)]
-pub struct MaybeNotFastaError;
+struct MaybeNotFastaError;
 
 impl std::fmt::Display for MaybeNotFastaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "FASTA file first line must start with a '>'! Are you certain this is a FASTA file?") }
 }
 
 #[derive(Error, Debug, Clone)]
-pub struct InvalidBasesError {
+struct InvalidBasesError {
     bad_base_locations: Vec<(u64, u64)>, 
     too_many_bad_bases: bool,
 }
 
 #[derive(Error, Debug)]
-pub struct SequenceWaveformIncompatible;
+struct SequenceWaveformIncompatible;
 
 impl std::fmt::Display for SequenceWaveformIncompatible {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "The sequence and the data you are using are incompatible!") }
@@ -1573,11 +1658,11 @@ impl std::fmt::Display for InvalidBasesError{
     }
 }
 
-
+/// This documents all the things that can go wrong from processing a data file
 #[derive(Error, Debug)]
 pub enum DataProcessError {
     #[error(transparent)]
-    InvalidFile(#[from] Rc<std::io::Error>),
+    InvalidFile(#[from] Arc<std::io::Error>),
     #[error(transparent)]
     BlankFile(#[from] EmptyDataError),
     #[error(transparent)]
@@ -1599,19 +1684,19 @@ impl DataProcessError {
 }
 
 #[derive(Error, Debug)]
-pub struct BadSpacerError;
+struct BadSpacerError;
 impl std::fmt::Display for BadSpacerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Spacer must be positive!")}
 }
 
 #[derive(Error, Debug)]
-pub struct EmptyDataError;
+struct EmptyDataError;
 impl std::fmt::Display for EmptyDataError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Data file should not be empty!")}
 }
 
 #[derive(Error, Debug)]
-pub struct DataFileBadFormat {
+struct DataFileBadFormat {
     bad_header: bool, 
     empty_lines: Vec<u64>,
     no_location_lines: Vec<u64>, 
@@ -1631,7 +1716,7 @@ impl DataFileBadFormat {
 }
 
 #[derive(Error, Debug)]
-pub struct TooManyBindingSites {
+struct TooManyBindingSites {
     num_binding_sites: usize, 
     data_length: usize,
 }
@@ -1685,6 +1770,8 @@ impl std::fmt::Display for DataFileBadFormat {
     }
 }
 
+/// This is the master error type. It documents all the things that can go wrong 
+/// when you try to start up an inference. 
 #[derive(Error, Debug)]
 pub enum AllProcessingError {
 
