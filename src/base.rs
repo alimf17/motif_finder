@@ -4413,6 +4413,17 @@ impl StrippedMotifSet {
         self.motif_num_prior() + self.set.iter().map(|a| a.height_prior(height_dist)+a.pwm_prior(seq)).sum::<f64>()
     }
 
+    pub fn bic(&self, data_ref: &AllDataUse) -> f64 {
+        //each motif has a height, then each position on the motif has BASE_L 
+        //parameters: 1 to determine which is the best base, then 3 for penalties
+        let k = (self.set.iter().map(|a| 1+a.len()*BASE_L).sum::<usize>()) as f64;
+        let len_dat = data_ref.data().read_wave().len() as f64;
+        let ln_like = self.ln_posterior()-self.ln_prior(data_ref.data().seq(), data_ref.height_dist());
+
+        k*len_dat.ln()-2.0*ln_like
+
+    }
+
     pub fn ln_posterior(&self) -> f64 { self.ln_post }
 
     pub fn ln_likelihood(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>)) -> f64 {
@@ -5037,6 +5048,10 @@ impl SetTraceDef {
         self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
     }
 
+    pub fn bic_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
+        self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
+    }
+
     pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
 
         let use_data = AllDataUse::new(&full_data, 0.0).expect("full_data must be valid");
@@ -5150,6 +5165,10 @@ impl SetTraceDef {
     
     pub fn extract_highest_likelihood_set(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>), tail_start: usize) -> &StrippedMotifSet {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(seq, height_dist).partial_cmp(&b.ln_likelihood(seq, height_dist)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
+    }
+    
+    pub fn extract_lowest_bic_set(&self, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
+        self.trace[(self.len()-tail_start)..self.len()].iter().min_by(|a,b| a.bic(data_ref).partial_cmp(&b.bic(data_ref)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
 
     /// Returns a vector of `[self.trace_min_dist]()` for each `[Motif]` in `reference_mots` 

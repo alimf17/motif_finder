@@ -205,9 +205,12 @@ pub fn main() {
         println!("Min len {}", min_len);
     }
     
-    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
+    //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
 
-    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
+    //let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
+
+    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_lowest_bic_set(&data_ref,min_len)).collect::<Vec<_>>();
+    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().min_by(|a,b| a.bic(&data_ref).partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements");
 
     //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(data_ref.data().seq(), data_ref.height_dist(), min_len)).collect::<Vec<_>>();
 
