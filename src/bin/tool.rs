@@ -22,31 +22,31 @@ fn main() {
 
     //Must have the following arguments:
 
-    //1) Name of run
-    //2) Output directory
-    //3) FASTA file name
-    //4) "true" if the genome is circular, "false" if it's linear
-    //5) Data file name
-    //6) The average length of the DNA fragments after your DNAse digest
-    //7) A positive integer corresponding to the spacing between data points in bp
-    //8) Number of advances to run the set trace
-    //9) The minimum thermodynamic beta for the chains. The absolute value of this will be taken, and if you give a number > 1.0, the reciprocal will be taken instead
-    //10) The number of intermediate traces between the base inference chain and the minimum thermodynamic beta chain. Must be a non-negative integer
+    //1) Name of run -run
+    //2) Output directory -run 
+    //3) FASTA file name -prep
+    //4) "true" if the genome is circular, "false" if it's linear -prep
+    //5) Data file name -prep 
+    //6) The average length of the DNA fragments after your DNAse digest -prep
+    //7) A positive integer corresponding to the spacing between data points in bp -prep
+    //8) Number of advances to run the set trace -run
+    //9) The minimum thermodynamic beta for the chains. The absolute value of this will be taken, and if you give a number > 1.0, the reciprocal will be taken instead -run
+    //10) The number of intermediate traces between the base inference chain and the minimum thermodynamic beta chain. Must be a non-negative integer -run
 
-    //11) The number of expected binding sites, approximately
+    //11) The number of expected binding sites, approximately (now the min height, -run)
 
     //12) A non negative double for how much to scale the cutoff for a data block
     //   to be considered peaky: less than 1.0 is more permissive, greater than 1.0 
-    //   is more strict. If this exists but can't parse to a double, it's turned into a 1.0
+    //   is more strict. If this exists but can't parse to a double, it's turned into a 1.0 -prep
     //May also have the following arguments:
     //13) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw base
-    //   extensions and contractions on a single motif Will only work if (9) included
+    //   extensions and contractions on a single motif Will only work if (9) included -obs
     //14) A strictly positive double for alpha of a symmetric dirichlet distribution from which we draw
-    //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included
+    //    base identities for entirely NEW PWMs. Will only work if (9) and (10) included -obs
     //15) A strictly positive double less than 1.0 indicating how weak a motif needs to be in a
-    //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included 
+    //    certain position before giving up drawing it. Will only work if (9), (10), and (11) included -obs
     //16) A strictly positive double indicating how much ln likelihood a PWM needs to bring before
-    //    being considered. Will only work if (9), (10), (11), and (12) included
+    //    being considered. Will only work if (9), (10), (11), and (12) included 
     //
     //Penultimate argument) Either the word "meme" or the word "json". If one of these is not the argument,
     //   no other arguments will be considered.

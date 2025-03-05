@@ -549,7 +549,7 @@ mod tests{
     fn background_attempt() {
 
         let scale = 0.25;
-        let dis = BackgroundDist::new(scale, 2.84);
+        let dis = BackgroundDist::new(scale, 2.84).unwrap();
 
         println!("lge {}", ln_gamma(4.).exp());
         let mut rng = rand::thread_rng();

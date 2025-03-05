@@ -181,10 +181,86 @@ impl Sequence {
 
     }
 
+    // Makes a copy of `self`, with the blocks in `remove` removed
+    // Any element of `remove` which is at least the size of the number of blocks
+    // is simply ignored. Returns `None` if remove contains all legal blocks
+    pub(crate) fn with_removed_blocks(&self, remove: &[usize]) -> Option<Self> {
+        
+        let mut new_blocks = self.seq_blocks.clone();
+        let mut new_lens = self.block_lens.clone();
+        let mut new_starts = self.block_u8_starts.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a >= self.block_u8_starts.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.block_lens.len() { return None;}
+
+        let mut i = 0;
+
+        //Ok, this is a slightly weird thing we're doing
+        //Basically, we're treating the last blocks specially, because they 
+        //don't have a boundary to stop at
+        //BUT, we have to iteratitively check new_starts because
+        //each following block to remove could also end up needing to be treated
+        //like an end block, until we know we have at least one block in front of
+        //block i. The first guard is a guard against a panic, in case we completely
+        //drain remove_descend doing this
+        while (i < remove_descend.len()) && (remove_descend[i] == new_starts.len()-1) {
+
+            let ind = remove_descend[i];
+            _ = new_blocks.drain(new_starts[ind]..).collect::<Vec<_>>();
+            _ = new_starts.pop();
+            _ = new_lens.pop();
+            i += 1;
+        }
+
+        while (i < remove_descend.len()) {
+            let ind = remove_descend[i];
+            let (start, stop) = (new_starts[ind], new_starts[ind+1]);
+            let len_u8 = stop-start;
+            _ = new_blocks.drain(start..stop).collect::<Vec<_>>();
+            _ = new_starts[(ind+1)..].iter_mut().map(|a| *a -= len_u8).collect::<Vec<_>>();
+            _ = new_starts.remove(ind);
+            _ = new_lens.remove(ind);
+            i += 1;
+        }
+
+        //We already know we shouldn't return None, but ? is easy
+        let max_len = *new_lens.iter().max()?;
+
+        const F: Vec<u64> = Vec::new();
+        let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
+        let orig_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::new();
+        let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
+        
+        let mut seq = Sequence{
+            seq_blocks: new_blocks,
+            block_u8_starts: new_starts,
+            block_lens: new_lens,
+            max_len: max_len,
+            kmer_dict: orig_dict,
+            kmer_id_dict: orig_id_dict,
+            kmer_nums: orig_nums,
+        };
+
+        seq.initialize_kmer_dicts();
+        Some(seq)
+
+
+    }
 
     fn initialize_kmer_dicts(&mut self) {
 
-        
+
         let mut kmer_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|_a| {
             Vec::new()
         });
@@ -209,17 +285,17 @@ impl Sequence {
         self.kmer_nums = kmer_nums;
 
     }
-    
+
     fn generate_kmers(&self, len: usize) -> Vec<u64> {
 
-        
+
 
         let mut unel: Vec<u64> = Vec::new();
-        
+
         for i in 0..self.block_lens.len() {
-            
+
             if self.block_lens[i] >= len {
-               
+
                 for j in 0..(self.block_lens[i]-len+1){
                     unel.push(Self::kmer_to_u64(&self.return_bases(i, j, len)));
                 }
@@ -231,11 +307,11 @@ impl Sequence {
         unel = unel.into_iter().unique().collect();
 
         unel.sort_unstable(); // we filtered uniquely, so unstable sorting doesn't matter
-        
+
         unel.shrink_to_fit();
 
         unel
-      
+
     }
 
 
@@ -264,7 +340,7 @@ impl Sequence {
     pub fn block_lens(&self) -> Vec<usize> {
         self.block_lens.clone()
     }
-   
+
     pub fn ith_block_len(&self, i: usize) -> usize {
         self.block_lens[i]
     }
@@ -317,7 +393,7 @@ impl Sequence {
     fn bases_to_code(bases: &[Bp ; BP_PER_U8]) -> u8 {
 
         bases.iter().zip(PLACE_VALS).map(|(&a, b)| (a as usize)*(b as usize)).sum::<usize>() as u8
-    
+
     }
 
 
@@ -342,7 +418,7 @@ impl Sequence {
     }
 
 
-    
+
     pub(crate) fn kmer_to_u64(bases: &[Bp]) -> u64 {
 
         let mut mot : u64 = 0;
@@ -390,7 +466,7 @@ impl Sequence {
         let mask_offset: u64 = (1 << (start_offset+2)) - 1;
 
         let mut check_u64 = Self::kmer_to_u64(bases);
-        
+
         //There is always at leasst one kmer that neighbors `bases` in its last Bp: itself
         let mut num: f64 = 1.0;
 
@@ -429,7 +505,7 @@ impl Sequence {
 
         let all_bases: Vec<_> = all_coded.iter().map(|a| Self::code_to_bases(*a)).flatten().collect();
 
-        
+
 
         let new_s = start_id % BP_PER_U8;
 
@@ -471,7 +547,7 @@ impl Sequence {
 
         self.kmer_dict[len-MIN_BASE].iter().enumerate()
             .filter(|(_, &b)| ((b & MINMER_MASK) ^ minmer) == 0 ).map(|(a, _)| a).collect::<Vec<usize>>()
-                    
+
     }
 
     //Returns the kmer id in position 0 if possible and the number of possible kmers in position 1
@@ -494,7 +570,7 @@ impl Sequence {
         let mut check: u64 =  kmer_a ^ kmer_b; //^ is the XOR operator in rust
 
         let mut hamming: usize = 0;
-        
+
         while (check > 0) && (hamming <= threshold) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
             hamming += ((check & U64_BITMASK) > 0) as usize;
             check = check >> 2;
@@ -511,8 +587,8 @@ impl Sequence {
         let len: usize = kmer.len();
 
         self.kmer_dict[len-MIN_BASE].iter().enumerate()
-                           .filter(|(_, &b)| Self::u64_kmers_within_hamming(u64_kmer, b, threshold))
-                           .map(|(a, _)| a).collect::<Vec<usize>>()                    
+            .filter(|(_, &b)| Self::u64_kmers_within_hamming(u64_kmer, b, threshold))
+            .map(|(a, _)| a).collect::<Vec<usize>>()                    
 
     }
 
@@ -521,7 +597,7 @@ impl Sequence {
 
         let mot_id: usize = rng.gen_range(0..(self.kmer_nums[len-MIN_BASE]));
         Self::u64_to_kmer(self.kmer_dict[len-MIN_BASE][mot_id], len)
-    
+
     }
 
     pub fn n_random_valid_motifs<R: Rng + ?Sized>(&self, len: usize, n: usize, rng: &mut R) -> Vec<usize>{
@@ -553,7 +629,7 @@ pub struct NullSequence {
 
 
 impl NullSequence {
-    
+
 
     /// Initializes a new NullSequence from a vector of sequence blocks
     /// # Panics
@@ -576,11 +652,11 @@ impl NullSequence {
 
         let mut max_len: usize = 0;
 
-        
+
         for block in blocks {
-            
+
             s_bases.push(b_len);
-            
+
             block_is.push(p_len);
 
             //SAFETY: We have unsafe code that relies on these invariants being upheld
@@ -601,7 +677,7 @@ impl NullSequence {
             }
 
             let num_entries = block.len()/BP_PER_U8;
-            
+
             for i in 0..num_entries {
                 //SAFETY: the check on the block having the right number of BPs guarentees that this is sound
                 let precoded = &block[(BP_PER_U8*i)..(BP_PER_U8*i+BP_PER_U8)].iter().map(|&a| unsafe{Bp::usize_to_bp(a)}).collect::<Vec<_>>().try_into().expect("slice with incorrect length");
@@ -619,12 +695,12 @@ impl NullSequence {
 
 
         let mut seq = NullSequence {
-                    seq_blocks: seq_bls,
-                    block_u8_starts: block_is,
-                    block_lens: block_ls,
-                    max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
-                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+            seq_blocks: seq_bls,
+            block_u8_starts: block_is,
+            block_lens: block_ls,
+            max_len: max_len,
+            kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
+            kmer_lists: core::array::from_fn(|a| Vec::new()),
 
         };
 
@@ -658,22 +734,22 @@ impl NullSequence {
 
 
         let max_len: usize = *block_lens.iter().max().unwrap();
-    
+
 
         let mut seq = NullSequence{
-                    seq_blocks: seq_blocks,
-                    block_u8_starts: block_u8_starts,
-                    block_lens: block_lens,
-                    max_len: max_len,
-                    kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
-                    kmer_lists: core::array::from_fn(|a| Vec::new()),
+            seq_blocks: seq_blocks,
+            block_u8_starts: block_u8_starts,
+            block_lens: block_lens,
+            max_len: max_len,
+            kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
+            kmer_lists: core::array::from_fn(|a| Vec::new()),
         };
 
         seq.initialize_kmer_count();
         seq
 
     }
-    
+
     fn initialize_kmer_count(&mut self) {
 
         let kmer_counts: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| self.generate_kmer_counts(a+MIN_BASE));
@@ -686,14 +762,14 @@ impl NullSequence {
         self.kmer_lists = kmer_lists;
 
     }
-    
+
     //NOTE: Pretty much any time anybody can access this array without automatically using the 
     //      the correct len should be immediately considered incorrect, especially because it 
     //      it will NOT fail: it will just give the wrong answer SILENTLY.
     fn generate_kmer_counts(&self, len: usize) -> HashMap<u64,usize, WyHash> {
 
         let mut unel: Vec<u64> = Vec::new();
-       
+
         let guess_capacity = 2_usize.pow(len as u32).min(self.block_lens.iter().sum::<usize>());
 
         let hasher = WyHash::with_seed(0);
@@ -713,7 +789,7 @@ impl NullSequence {
 
         lenmer_counts
 
-      
+
     }
 
 
@@ -741,7 +817,7 @@ impl NullSequence {
     pub fn block_lens(&self) -> Vec<usize> {
         self.block_lens.clone()
     }
-    
+
     pub fn max_len(&self) -> usize {
         self.max_len
     }
@@ -963,7 +1039,7 @@ mod tests {
             for _ in 0..100 {
 
                 let mot2 = sequence.random_valid_motif(b_l, &mut rng);
-                
+
                 let neighbors = sequence.number_kmers_neighboring_by_last_bp(&mot2);
 
                 let mut neigh: f64 = 0.0;

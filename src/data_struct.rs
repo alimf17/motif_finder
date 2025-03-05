@@ -1568,6 +1568,53 @@ impl<'a> AllDataUse<'a> {
 
     }
 
+    /// This creates an `[AllData]` from `self` which omits the blocks indexed by `remove`. 
+    /// We ignore any duplicated elements of `remove` as well as any elements 
+    /// that are at least the number of blocks in `self`. Returns `Ok(None)` if `remove` 
+    /// contains all blocks. The AllData that comes out retains the parent's propensities, 
+    /// and all data about the null sequence. 
+    pub fn with_removed_blocks(&self, remove: &[usize]) -> Option<AllData> {
+
+        let new_seq = self.data.seq().with_removed_blocks(remove)?;
+        let new_wave = self.data.with_removed_blocks(remove)?;
+
+        let mut new_coords = self.start_genome_coordinates.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a >= self.start_genome_coordinates.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.start_genome_coordinates.len() { return None;}
+ 
+        for ind in remove_descend {
+            new_coords.remove(ind);
+        }
+
+        let to_return = AllData{
+
+            seq: new_seq,
+            propensities: self.propensities.clone(),
+            null_seq: self.null_seq.clone(), 
+            data: new_wave,
+            start_genome_coordinates: new_coords,
+            start_nullbp_coordinates: self.start_nullbp_coordinates.clone(),
+            background: self.background.clone(), 
+            min_height: self.min_height,
+        };
+
+        _ = AllDataUse::new(&to_return, 0.0).expect("AllData should always produce a legal AllDataUse");
+
+        Some(to_return)
+
+    }
 
 }
 

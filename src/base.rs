@@ -18,7 +18,7 @@ use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
 use crate::MAX_TF_NUM;
-use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety};
+use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety, MULT_CONST_FOR_H, ADD_CONST_FOR_H};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 
@@ -4409,8 +4409,8 @@ impl StrippedMotifSet {
         -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
     }
 
-    pub fn ln_prior(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>)) -> f64 {
-        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior(height_dist)+a.pwm_prior(seq)).sum::<f64>()
+    pub fn ln_prior(&self, data_ref: &AllDataUse) -> f64 {
+        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior(data_ref.height_dist())+a.pwm_prior(data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn bic(&self, data_ref: &AllDataUse) -> f64 {
@@ -4418,7 +4418,7 @@ impl StrippedMotifSet {
         //parameters: 1 to determine which is the best base, then 3 for penalties
         let k = (self.set.iter().map(|a| 1+a.len()*BASE_L).sum::<usize>()) as f64;
         let len_dat = data_ref.data().read_wave().len() as f64;
-        let ln_like = self.ln_posterior()-self.ln_prior(data_ref.data().seq(), data_ref.height_dist());
+        let ln_like = self.ln_posterior()-self.ln_prior(data_ref);
 
         k*len_dat.ln()-2.0*ln_like
 
@@ -4426,8 +4426,8 @@ impl StrippedMotifSet {
 
     pub fn ln_posterior(&self) -> f64 { self.ln_post }
 
-    pub fn ln_likelihood(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>)) -> f64 {
-        self.ln_posterior()-self.ln_prior(seq, height_dist)
+    pub fn ln_likelihood(&self, data_ref: &AllDataUse) -> f64 {
+        self.ln_posterior()-self.ln_prior(data_ref)
     }
 
     pub fn set_iter(&self) -> Iter<'_, Motif> {
@@ -5036,7 +5036,7 @@ impl SetTraceDef {
     /// This pares down the trace to just the first `max_elements` states
     pub fn reduce(&mut self, max_elements: usize) {
         if self.trace.len() >= max_elements {
-            let _ = self.trace.drain(max_elements..);
+            let _ = self.trace.drain(max_elements..).collect::<Vec<_>>();
         }
     }
 
@@ -5049,13 +5049,36 @@ impl SetTraceDef {
     }
 
     pub fn bic_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
-        self.trace.iter().map(|a| a.ln_post).collect::<Vec<f64>>()
+        self.trace.iter().map(|a| a.bic(full_data)).collect::<Vec<f64>>()
     }
 
-    pub fn ln_likelihood_trace(&self, full_data: &AllData) -> Vec<f64> {
+    /// This approximates eth from the ln likelihood
+    /// This will give good answers for big eths
+    /// But poorer answers for small eths
+    /// We don't explicitly calculate eth for this because that will take
+    /// 10,000 times longer (literally).
+    pub fn approx_eth_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
 
-        let use_data = AllDataUse::new(&full_data, 0.0).expect("full_data must be valid");
-        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data.seq(), use_data.height_dist())).collect::<Vec<f64>>()
+
+        // This is based on the asymptotic expansion of W0, modulo subbing exp(x)
+        fn lambert_w_exp_x(x: f64) -> f64 {
+            let lnx = x.ln();
+            x-lnx+lnx/x+0.5*lnx*(lnx-2.0)/(x*x)
+        }
+
+        let ln_neg_twice_mul = (-2.0*MULT_CONST_FOR_H).ln();
+
+        // This solves for eth assuming we are exclusively in high tail regime
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data))
+                         .map(|b| 2.0*(ADD_CONST_FOR_H-b)+ln_neg_twice_mul)
+                         .map(|b| lambert_w_exp_x(b)/2.0*ln_neg_twice_mul)
+                         .collect()
+
+    }
+
+    pub fn ln_likelihood_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
+
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data)).collect::<Vec<f64>>()
 
     }
 
@@ -5163,8 +5186,8 @@ impl SetTraceDef {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_post.partial_cmp(&b.ln_post).expect("No NaNs allowed in posterior")).expect("trace should have at least one motif set")
     }
     
-    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, height_dist: &(impl ::rand::distributions::Distribution<f64> +Continuous<f64, f64>), tail_start: usize) -> &StrippedMotifSet {
-        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(seq, height_dist).partial_cmp(&b.ln_likelihood(seq, height_dist)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
+    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
+        self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(data_ref).partial_cmp(&b.ln_likelihood(data_ref)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
     
     pub fn extract_lowest_bic_set(&self, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
@@ -7511,7 +7534,7 @@ mod tester{
         let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
-        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, -0.2, -0.4, -0.6, -0.6], &small, 5);
+        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, -0.2, -0.4, -0.6, -0.6], &small, 5).unwrap();
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, KernelWidth::Wide, KernelVariety::Gaussian); //small

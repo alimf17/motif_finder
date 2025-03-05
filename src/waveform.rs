@@ -1025,6 +1025,47 @@ impl<'a> Waveform<'a> {
 
     }
 
+    pub(crate) fn with_removed_blocks(&self, remove: &[usize]) -> Option<WaveformDef> {
+
+        let mut new_wave = self.wave.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a >= self.start_dats.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.start_dats.len() { return None;}
+
+        let mut i = 0;
+
+        if (remove_descend[i] == self.start_dats.len()-1) {
+
+            let ind = remove_descend[i];
+            _ = new_wave.drain(self.start_dats[ind]..).collect::<Vec<_>>();
+            i += 1;
+        }
+
+        while (i < remove_descend.len()) {
+            let ind = remove_descend[i];
+            _ = new_wave.drain(self.start_dats[ind]..self.start_dats[ind+1]).collect::<Vec<_>>();
+            i += 1;
+        }
+
+        Some(WaveformDef {
+            wave: new_wave,
+            spacer: self.spacer
+        })
+
+
+    }
+
     pub fn spacer(&self) -> usize {
         self.spacer
     }
@@ -1056,6 +1097,7 @@ impl<'a> Waveform<'a> {
     pub fn amount_data(&self) -> usize {
         self.wave.len()
     }
+
 
 }
 
@@ -1445,7 +1487,7 @@ impl<'a> Noise<'a> {
 
     fn high_val(ha: f64) -> f64 {
 
-        -(ha).ln()/2.0-1.835246330265487*ha+0.18593237745127472
+        -(ha).ln()/2.0+MULT_CONST_FOR_H*ha+ADD_CONST_FOR_H
 
     }
 
@@ -1474,6 +1516,10 @@ impl<'a> Noise<'a> {
 
 
 }
+
+pub(crate) const MULT_CONST_FOR_H: f64 = -1.835246330265487;
+pub(crate) const ADD_CONST_FOR_H: f64 = 0.18593237745127472;
+
 
 impl Mul<&Vec<f64>> for &Noise<'_> {
 

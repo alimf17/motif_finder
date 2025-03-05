@@ -212,9 +212,9 @@ pub fn main() {
     let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_lowest_bic_set(&data_ref,min_len)).collect::<Vec<_>>();
     let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().min_by(|a,b| a.bic(&data_ref).partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements");
 
-    //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(data_ref.data().seq(), data_ref.height_dist(), min_len)).collect::<Vec<_>>();
+    //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(&data_ref, min_len)).collect::<Vec<_>>();
 
-   // let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(data_ref.data().seq(), data_ref.height_dist()).partial_cmp(&b.ln_likelihood(data_ref.data().seq(), data_ref.height_dist())).unwrap()).expect("The set traces should all have at least SOME elements");
+   // let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(&data_ref).partial_cmp(&b.ln_likelihood(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements");
     
 
 
@@ -717,7 +717,7 @@ pub fn main() {
     let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
-        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_reconstructed).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     }; 
 
     /*
