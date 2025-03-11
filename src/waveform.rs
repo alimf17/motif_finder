@@ -262,10 +262,11 @@ impl<'a> Waveform<'a> {
     /// # Errors
     /// - If `spacer == 0`.
     /// - If the length of data makes it impossible to reconcile `start_data` with
-    ///   `seq` and `spacer`. NOTE OF WARNING: if `start_data` is not partitioned 
+    ///   `seq` and `spacer`. 
+    /// - If the waveform blocks that result from this would overrun the sequence blocks.
+    /// **NOTE:** WARNING: if `start_data` is not partitioned 
     ///   correctly but it is still possible to to reconcile the final length, this
     ///   will simply mis-partition your waveform. 
-    /// - If the waveform blocks that result from this would overrun the sequence blocks.
     pub fn new(start_data: Vec<f64>, seq: &'a Sequence, spacer: usize) -> Result<Waveform<'a>, WaveCreationError>  {
 
 

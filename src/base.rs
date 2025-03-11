@@ -5606,11 +5606,11 @@ impl<'a> TemperSetTraces<'a> {
    
 
     /// This actually runs one set of parallel monte carlo steps, followed by 
-    /// attempting parallel swaps. In particular, this runs `iters_between_shuffles 
-    /// *iters_before_swaps` steps between attempting parallel tempering steps. 
+    /// attempting parallel swaps. In particular, this runs `iters_before_swaps` 
+    /// steps between attempting parallel tempering steps. 
     /// First, on all adjacent pairs starting with the index `1` trace, then
     /// all adjacent pairs starting with the index `0` trace
-    pub fn iter_and_swap<R: Rng>(&mut self, iters_between_shuffles: usize, iters_before_swaps: usize, cooldown_iters: usize, rng_maker: fn() -> R) {
+    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, rng_maker: fn() -> R) {
 
 
 
@@ -5618,7 +5618,7 @@ impl<'a> TemperSetTraces<'a> {
        
             self.parallel_traces.par_iter_mut().for_each(|(set, track, _)| {
                 let mut rng = rng_maker();
-                for _ in 0..iters_between_shuffles { set.advance(track.as_mut(), false, &mut rng); }
+                set.advance(track.as_mut(), false, &mut rng); 
             });
         }
 
