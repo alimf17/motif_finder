@@ -244,6 +244,8 @@ pub fn main() {
 
     let cumulative_noises = activated.distances_by_strength();
 
+    println!("Cumulative analysis of lowest BIC motif set");
+
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
     for (i, like) in cumulative_lns.into_iter().enumerate() {
         let mot_ref = activated.get_nth_motif(i);
@@ -350,6 +352,8 @@ pub fn main() {
     let mut activated = highesst_post_motif_set.reactivate_set(&data_ref);
 
     activated.sort_by_height();
+
+    println!("Cumulative analysis of highest posterior density motif set");
 
     let cumulative_lns = activated.ln_posts_by_strength();
 
@@ -463,6 +467,8 @@ pub fn main() {
     let mut activated = highest_likelihood_motif_set.reactivate_set(&data_ref);
 
     activated.sort_by_height();
+
+    println!("Cumulative analysis of highest likelihood motif set");
 
     let cumulative_lns = activated.ln_posts_by_strength();
 
