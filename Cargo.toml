@@ -48,9 +48,16 @@ criterion = "0.3"
 
 
 [[bin]]
+name = "preprocess"
+path = "src/bin/preprocess.rs"
+
+[[bin]]
 name = "tarjim"
 path = "src/bin/tarjim.rs"
 
+[[bin]]
+name = "process"
+path = "src/bin/process.rs"
 
 [[bench]]
 name = "my_benchmark"

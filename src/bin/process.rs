@@ -3,14 +3,14 @@ use std::io::{Read, Write};
 
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
-
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT, ECOLI_FREQ};
-
 use motif_finder::data_struct::{AllData, AllDataUse};
+
+use clap::{Parser, ValueEnum};
+
 
 use log::warn;
 
-use std::sync::Arc;
 use rustfft::{FftPlanner, num_complex::Complex};
 
 use ndarray::prelude::*;
@@ -53,41 +53,61 @@ const PALETTE: [&RGBColor; 26] = [
 
 const BASE_COLORS: [&RGBColor; BASE_L] = [&full_palette::RED, &YELLOW_700, &full_palette::GREEN, &full_palette::BLUE];
 
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+
+    /// This is the directory your run output to 
+    #[arg(short, long)]
+    output: String,
+    
+    /// This is prefix your runs share. When doing this processing, we assume
+    /// that all of your outputted bin files are of the form 
+    /// "{output}/{base_file}_{<Letter starting from A and going up>}_
+    /// {<0-indexed count of runs>}_trace_from_step_{<7 digit number, with 
+    /// leading zeros>}.bin"
+    base_file: String,
+
+    /// This is the number of independent chains run on this inference.
+    /// If this is larger than 26, we will only take the first 26 chains.
+    #[arg(short, long)]
+    num_chains: usize, 
+    // Yeah, the 26 number is because of english letters in the alphabet.
+    // But seriously, this should probably be like 2-6. We usually used 4.
+
+
+    /// This is the number of sequential runs per chain. For example, 
+    /// if the last output file of the initial run of chain "A" is 
+    /// "{output}/{base_file}_A_0_trace_from_step_0100000.bin", it would
+    /// be immediately followed by "{output}/{base_file}_A_1_trace_from_step_0000000.bin"
+    #[arg(short, long)]
+    max_runs: usize,
+
+
+    /// Number of sequential runs per chain to discard as burn in. 
+    /// If this is not provided, it's set as 0. If this is larger
+    /// than max_runs, this script will panic. 
+    #[arg(short, long)]
+    discard_num: Option<usize>,
+
+    /// This is an optional argument to pick a genome to run FIMO against
+    /// If this is not supplied, FIMO will not be run.
+    #[arg(short, long)]
+    fasta_file: Option<String>
+
+}
+
+
 pub fn main() {
 
-    let args: Vec<String> = std::env::args().collect();
+    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, discard_num, fasta_file} = Cli::parse(); 
 
-    if args.len() < 5 {
-        panic!("Not enough arguments!");
+    let min_chain = discard_num.unwrap_or(0);
+
+    if min_chain > max_chain {
+        panic!("Discarding everything you should infer on!");
     }
-    
-    let out_dir: String = args[1].to_string();
-    let base_file: &str = &args[2];
-    let mut num_chains: usize = args[3].parse().expect("The number of chains you have should be numeric!");
-    let mut max_chain: usize = args[4].parse().expect("The number of strung together inferences you have per chain should be numeric!");
-    let burn_in: Option<usize> = args.get(5).map(|a| a.parse::<usize>().ok()).flatten();
-    let scale_thresh: Option<f64> = args.get(6).map(|a| a.parse::<f64>().ok()).flatten();
 
-    let mut min_chain: usize = burn_in.unwrap_or(0);
-
-    println!("num ch {num_chains} max chain {max_chain}");
-    let potential_prior_change: Option<f64> = args.get(7).map(|a| a.parse::<f64>().ok()).flatten();
-
-    match potential_prior_change {
-        Some(credibility) => {
-            if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
-            //SAFETY: This is never a multithreaded spot
-            unsafe{ NECESSARY_MOTIF_IMPROVEMENT = credibility; }
-        },
-        None => (),
-    };
-
-    if max_chain < min_chain {
-        warn!("Your upper bound id for beads in a single chain to consider for inference exceeds the minimum. We swap their roles, but make sure you didn't mess up.");
-        let temp = min_chain;
-        min_chain = max_chain;
-        max_chain = temp;
-    }
 
     if num_chains > 26 {
         warn!("Can only sustain up to 26 independent chains. Only considering the first 26.");
@@ -100,11 +120,7 @@ pub fn main() {
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
     for chain in 0..num_chains {
-        let base_str = if scale_thresh.is_none() {
-            format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain])
-        } else {
-            format!("{}/{}_{}_custom_scale_{:.1}", out_dir.clone(), base_file,UPPER_LETTERS[chain], scale_thresh.unwrap())
-        };
+        let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
         println!("Base str {} min chain {}", base_str, min_chain);
         let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
         //let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"0\\d{6}.bin")).unwrap();
@@ -191,45 +207,36 @@ pub fn main() {
 
     buffer.clear();
 
-    //TODO: change out data_name for a way to supply the correct data file to the processing directly
-    /*let mut all_dat_file = fs::File::open(set_trace_collections[0].data_name()).expect("Big trouble if we're saving invalid data files");
-    all_dat_file.read_to_end(&mut buffer);
-    let all_dat: AllData = bincode::deserialize(&buffer).expect("Big trouble if we're saving invalid data files");
-    let all_dat_use: AllDataUse = AllDataUse::new(&all_dat).expect("Big trouble if we're saving invalid data files");*/
-
-    //set_trace_collections is now the chains we want
-    
     let mut min_len: usize = usize::MAX;
     for trace in set_trace_collections.iter() {
         min_len = min_len.min(trace.len());
         println!("Min len {}", min_len);
     }
     
-    //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
+    let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
 
-    //let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements");
+    //TODO: generate motif_num_traces plot here
+    println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
+
+    
+    println!("Beginning analysis of Lowest BIC motif set");
 
     let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_lowest_bic_set(&data_ref,min_len)).collect::<Vec<_>>();
-    let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().min_by(|a,b| a.bic(&data_ref).partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements");
+    let mut lowest_bic_motif_set: StrippedMotifSet = best_motif_sets.iter().min_by(|a,b| a.bic(&data_ref).partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
 
-    //let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(&data_ref, min_len)).collect::<Vec<_>>();
+    lowest_bic_motif_set.sort_by_height();
 
-   // let best_single_motif_set: &StrippedMotifSet = *best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(&data_ref).partial_cmp(&b.ln_likelihood(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements");
     
 
 
-    best_single_motif_set.set_iter().enumerate().for_each(|(i,m)| {
+    lowest_bic_motif_set.set_iter().enumerate().for_each(|(i,m)| {
         let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
         draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
     });
 
 
-    println!("Best motif set: {:?}", best_single_motif_set);
-    let mut activated = best_single_motif_set.reactivate_set(&data_ref);
-    for i in 0..best_single_motif_set.num_motifs(){
-        let (mot, nulls) = activated.get_nth_motif_and_scores(i).clone();
-        println!("null binds best {:?}", nulls) 
-    }
+    println!("Lowest BIC motif set: {:?}", lowest_bic_motif_set);
+    let mut activated = lowest_bic_motif_set.reactivate_set(&data_ref);
 
     activated.sort_by_height();
 
@@ -244,271 +251,318 @@ pub fn main() {
     }
 
 
-    let save_file = format!("{}_best_trace", base_file);
+    let save_file = format!("{}_lowest_bic", base_file);
 
-    best_single_motif_set.save_this_trace(&data_ref, &out_dir, &save_file);
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
 
+    if let Some(fasta) = fasta_file.clone() {
    
-    let trial_a = best_single_motif_set.generate_fimo(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
+        let trial_a = lowest_bic_motif_set.generate_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
 
-    let trial_x = best_single_motif_set.generate_ascending_fimo(&data_ref,None,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta",  &out_dir, &save_file);
+        let trial_x = lowest_bic_motif_set.generate_ascending_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
 
-    if trial_a.is_err() {
-        println!("error in pr gen {:?}", trial_a);
-    }
+        if trial_a.is_err() {
+            println!("error in pr gen {:?}", trial_a);
+        }
 
-    if trial_x.is_err() {
-        println!("error in cum pr gen {:?}", trial_x);
-    }
-
-
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
-        let trial_b = trace.many_fimo_gen(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
-        if trial_b.is_err() {
-            println!("error in pr gen {i} {:?}", trial_b);
+        if trial_x.is_err() {
+            println!("error in cum pr gen {:?}", trial_x);
         }
     }
-    let reference_motifs: Vec<Motif> = best_single_motif_set.set_iter().map(|a| a.clone()).collect();
-
-    let distances_file = format!("{}/{}_distances_to_refs.png",out_dir.clone(), base_file);
-    let autocorrs_file = format!("{}/{}_distance_autocorrelations.png",out_dir.clone(), base_file);
     
+    //If I don't document this as I'm writing it, it's going to blow a hole 
+    //through my head and the head of anybody reading it
+    //"pairings" is nested in the following way:
+    //      1) Over the independent chains
+    //      2) For each independent chain, over the StrippedMotifSets in that chain
+    //      3) For each StrippedMotifSet in the chain, there's a lowest_bic_motif_set.len() number of pairings: 
+    //                                                 which, if they exist, are the motif and distance of that pairing
+    let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
+        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&lowest_bic_motif_set)).collect::<Vec<_>>()
+    }).collect();
 
-    let distances_plot = BitMapBackend::new(distances_file.as_str(), (2600, 2600)).into_drawing_area();
-    let autocorrelation_plot = BitMapBackend::new(autocorrs_file.as_str(), (1350, 1350)).into_drawing_area();
+    let num_clusts = lowest_bic_motif_set.num_motifs();
+    let likely_cap = pairings[0].len()*pairings.len();
 
-    distances_plot.fill(&full_palette::WHITE).unwrap();
-    autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
+    //This is nested so that the outer layer corresponds to the Motifs in the 
+    //lowest_bic_motif_set, and the inner layer to all the matches, regardless of chain
+    let mut results: Vec<Vec<((f64, bool, &Motif), usize)>> = (0..num_clusts).map(|i| {
+        let mut cluster: Vec<((f64, bool, &Motif), usize)> = Vec::with_capacity(likely_cap);
+        for (c_id, chain) in pairings.iter().enumerate() {
+            for pairing in chain.iter() {
+                if let Some(dist_mot_tup) = pairing[i] {
+                    cluster.push((dist_mot_tup, c_id));
+                };
+            }
+        }
+        cluster
+    }).collect();
 
-    let mut autocorrelations_ctx = ChartBuilder::on(&autocorrelation_plot)
-                               .caption("Autocorrelations of each trace's distances", ("Times New Roman", 30))
-                               .set_label_area_size(LabelAreaPosition::Left, 40)
-                               .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                               .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..1.5_f64)
-                               .unwrap();
+    for result in results.iter_mut() {
+        result.sort_by(|((a, _, _),_), ((b,_, _),_)| a.partial_cmp(b).unwrap())
+    }
 
-    autocorrelations_ctx.configure_mesh()
-                               .x_desc("Lag (in units of step save period)")
-                               .y_desc("Autocorrelation coefficient")
-                               .draw().unwrap();
+    //This is nested over 
+    //      1) the Motifs in the lowest_bic_motif_set
+    //      2) the indepdendent chains
+    //      3) the distances present in those chains (NOTE: we skip over nones)
+    let distance_assessments: Vec<Vec<Vec<f64>>> = (0..num_clusts).map(|i| {
+        pairings.iter().map(|chain| {
+            let mut dist_vec: Vec<f64> = Vec::with_capacity(chain.len());
+            for pairing in chain.iter() {
+                if let Some((dist,_, _)) = pairing[i] {dist_vec.push(dist);};
+            }
+            dist_vec
+        }).collect()
+    }).collect();
 
 
-    let mut rng = rand::thread_rng();
 
-    let potential_trpr = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
-    let potential_trpr_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
-    let potential_trpr_raw = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon_Raw.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
-    let potential_trpr_raw_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/TrpR_Regulon_Raw.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
 
-    let potential_argr = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
-    let potential_argr_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
-    let potential_argr_raw = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon_Raw.meme", &data_ref, None, f64::INFINITY, false, &mut rng).unwrap();
-    let potential_argr_raw_alt = MotifSet::set_from_meme("/home/alimf/motif_finder_project/Data/RegulonMots/ArgR_Regulon_Raw.meme", &data_ref, Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
-
-    let distances_file_trpr = format!("{}/{}_distances_to_trpr.png",out_dir.clone(), base_file);
-    let distances_file_trpr_alt = format!("{}/{}_distances_to_trpr_alt.png",out_dir.clone(), base_file);
-    let distances_file_trpr_raw = format!("{}/{}_distances_to_trpr_raw.png",out_dir.clone(), base_file);
-    let distances_file_trpr_raw_alt = format!("{}/{}_distances_to_trpr_raw_alt.png",out_dir.clone(), base_file);
-
-    let distances_file_argr = format!("{}/{}_distances_to_argr.png",out_dir.clone(), base_file);
-    let distances_file_argr_alt = format!("{}/{}_distances_to_argr_alt.png",out_dir.clone(), base_file);
-    let distances_file_argr_raw = format!("{}/{}_distances_to_argr_raw.png",out_dir.clone(), base_file);
-    let distances_file_argr_raw_alt = format!("{}/{}_distances_to_argr_raw_alt.png",out_dir.clone(), base_file);
-
-    let distances_panels = distances_plot.split_evenly((2, (reference_motifs.len()+1)/2));
-    let mut distances_ctxes = distances_panels.iter().enumerate().map(|(i,a)| ChartBuilder::on(a)
-                                                                      .caption(format!("Distance from Reference {}", i).as_str(), ("Times New Roman", 30))
-                                                                      .set_label_area_size(LabelAreaPosition::Left, 40)
-                                                                      .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                                                                      .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..100_f64)
-                                                                      .unwrap()
-                                                                      ).collect::<Vec<_>>(); 
-
-    for ctx in distances_ctxes.iter_mut() { ctx.configure_mesh()
-                                               .x_desc("Saved steps")
-                                               .y_desc("Mean of motif set distance to reference")
-                                               .draw().unwrap(); }
-
-    let distances_plot_trpr = BitMapBackend::new(distances_file_trpr.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_trpr.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_trpr_alt = BitMapBackend::new(distances_file_trpr_alt.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_trpr_alt.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_trpr_raw = BitMapBackend::new(distances_file_trpr_raw.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_trpr_raw.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_trpr_raw_alt = BitMapBackend::new(distances_file_trpr_raw_alt.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_trpr_raw_alt.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_argr = BitMapBackend::new(distances_file_argr.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_argr.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_argr_alt = BitMapBackend::new(distances_file_argr_alt.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_argr_alt.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_argr_raw = BitMapBackend::new(distances_file_argr_raw.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_argr_raw.fill(&full_palette::WHITE).unwrap();
-    let distances_plot_argr_raw_alt = BitMapBackend::new(distances_file_argr_raw_alt.as_str(), (2600, 2600)).into_drawing_area();
-    distances_plot_argr_raw_alt.fill(&full_palette::WHITE).unwrap();
-
-    let mut distances_trpr = ChartBuilder::on(&distances_plot_trpr)
-        .caption(format!("Distance from TrpR Initial ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_trpr.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-
-    let mut distances_trpr_alt = ChartBuilder::on(&distances_plot_trpr_alt)
-        .caption(format!("Distance from TrpR Initial Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_trpr_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-    
-    
-    let mut distances_trpr_raw = ChartBuilder::on(&distances_plot_trpr_raw)
-        .caption(format!("Distance from TrpR Regulon Raw ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_trpr_raw.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-
-    let mut distances_trpr_raw_alt = ChartBuilder::on(&distances_plot_trpr_raw_alt)
-        .caption(format!("Distance from TrpR Regulon Raw Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_trpr_raw_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-    
-    let mut distances_argr = ChartBuilder::on(&distances_plot_argr)
-        .caption(format!("Distance from ArgR Initial ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_argr.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-
-    let mut distances_argr_alt = ChartBuilder::on(&distances_plot_argr_alt)
-        .caption(format!("Distance from ArgR Initial Scaled By Base Fequency ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_argr_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-    
-    
-    let mut distances_argr_raw = ChartBuilder::on(&distances_plot_argr_raw)
-        .caption(format!("Distance from ArgR Regulon Raw ").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_argr_raw.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-
-    let mut distances_argr_raw_alt = ChartBuilder::on(&distances_plot_argr_raw_alt)
-        .caption(format!("Distance from ArgR Regulon Raw Scaled By Base Fequency").as_str(), ("Times New Roman", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..set_trace_collections[0].len(), 0_f64..30_f64)
-        .unwrap();
-
-    distances_argr_raw_alt.configure_mesh().x_desc("Saved steps").y_desc("Mean of motif set distance to reference").draw().unwrap();
-   
-    let mut plot_pair_refs = [(&potential_trpr, &mut distances_trpr), 
-                          (&potential_trpr_alt, &mut distances_trpr_alt),
-                          (&potential_trpr_raw, &mut distances_trpr_raw),
-                          (&potential_trpr_raw_alt, &mut distances_trpr_raw_alt),
-                          (&potential_argr, &mut distances_argr),
-                          (&potential_argr_alt, &mut distances_argr_alt),
-                          (&potential_argr_raw, &mut distances_argr_raw),
-                          (&potential_argr_raw_alt, &mut distances_argr_raw_alt)];
-
-    let correlation_len = 1000;
-
-    for (chain, collection) in set_trace_collections.iter().enumerate() {
-
-        let _chain_name = format!("{}_{}",base_file, UPPER_LETTERS[chain]);
+    println!("min {}", min_len);
+    for (i, mut trace) in results.into_iter().enumerate() {
+        println!("Motif {}: \n", i);
+        println!("Rhat motif {}: {}", i, rhat(&distance_assessments[i], min_len));
+        println!("Motif: \n {:?}", lowest_bic_motif_set.get_nth_motif(i).best_motif_string());
         
+    }
+
+    println!("RMSE lowest BIC {}", lowest_bic_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
+
+
+    println!("Beginning analysis of highest posterior density motif set");
+
+    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
+    let mut highesst_post_motif_set: StrippedMotifSet = best_motif_sets.iter().min_by(|a,b| a.ln_posterior().partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
+
+    highesst_post_motif_set.sort_by_height();
+
     
-        //TODO: This makes a vector V of length reference_motifs, of vectors of length equal 
-        //      to each collection. V[i][j] is the mean distance of the motifs in collection's
-        //      jth set to the ith reference motif. I eventually want to: 
-        //          1-Create a plot for each ith REFERENCE motif, with lines from each of the collections of its distances
-        //          2-Calculate autocorrelations for each REFERENCE motif and plot them as well
-        let distance_traces = collection.create_distance_traces(&reference_motifs);
-
-        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&distance_traces, correlation_len);
-
-        let style = ShapeStyle{ color: (*PALETTE[chain]).into(), filled: true, stroke_width: 0};
-
-        let color = unsafe{*PALETTE.as_ptr().add(chain)};
-
-        let letter = UPPER_LETTERS[chain];
-
-        for (i, trace) in distance_traces.iter().enumerate() {
-            distances_ctxes[i].draw_series(trace.iter().enumerate().map(|(i, p)| Circle::new((i,*p), 5, style.clone())))
-                              .unwrap().label(format!("{}", letter).as_str())
-                              .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
-                              
-        }
-
-        for (reference_set, plot_ref) in plot_pair_refs.iter_mut() {
-
-            let set_mots_try = reference_set.set_copy();
-            let distance_traces = collection.create_distance_traces(&set_mots_try);
-            (plot_ref).draw_series(LineSeries::new(distance_traces[0].iter().enumerate().map(|(i, p)| (i,*p)), color.clone()))
-                .unwrap().label(format!("{}", letter).as_str())
-                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
-
-            plot_ref.configure_series_labels().position(SeriesLabelPosition::UpperRight).margin(40).legend_area_size(20).border_style(&full_palette::BLACK).label_font(("Calibri", 80)).draw().unwrap();
-
-        }
 
 
-        autocorrelations_ctx.draw_series(collection_autocorrelation.iter().enumerate().map(|(i, p)| Circle::new((i,*p), 5, ShapeStyle{ color: (*PALETTE[chain]).into(), filled : true, stroke_width : 0})))
-                                                                   .unwrap().label(format!("{}", UPPER_LETTERS[chain]).as_str())
-                                                                   .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
+    highesst_post_motif_set.set_iter().enumerate().for_each(|(i,m)| {
+        let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
+        draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
+    });
 
 
+    println!("Highest Posterior Density motif set: {:?}", highesst_post_motif_set);
+    let mut activated = highesst_post_motif_set.reactivate_set(&data_ref);
+
+    activated.sort_by_height();
+
+    let cumulative_lns = activated.ln_posts_by_strength();
+
+    let cumulative_noises = activated.distances_by_strength();
+
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    for (i, like) in cumulative_lns.into_iter().enumerate() {
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
     }
 
 
+    let save_file = format!("{}_highest_post", base_file);
 
-    autocorrelations_ctx.configure_series_labels().draw().unwrap();
-    for ctx in distances_ctxes.iter_mut() { ctx.configure_series_labels().draw().unwrap(); }
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
 
-    let autocorrs_file = format!("{}/{}_ln_post_autocorrelations.png",out_dir.clone(), base_file);
+    if let Some(fasta) = fasta_file.clone() {
+   
+        let trial_a = highesst_post_motif_set.generate_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
+
+        let trial_x = highesst_post_motif_set.generate_ascending_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
+
+        if trial_a.is_err() {
+            println!("error in pr gen {:?}", trial_a);
+        }
+
+        if trial_x.is_err() {
+            println!("error in cum pr gen {:?}", trial_x);
+        }
+    }
+    
+    //If I don't document this as I'm writing it, it's going to blow a hole 
+    //through my head and the head of anybody reading it
+    //"pairings" is nested in the following way:
+    //      1) Over the independent chains
+    //      2) For each independent chain, over the StrippedMotifSets in that chain
+    //      3) For each StrippedMotifSet in the chain, there's a highesst_post_motif_set.len() number of pairings: 
+    //                                                 which, if they exist, are the motif and distance of that pairing
+    let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
+        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&highesst_post_motif_set)).collect::<Vec<_>>()
+    }).collect();
+
+    let num_clusts = highesst_post_motif_set.num_motifs();
+    let likely_cap = pairings[0].len()*pairings.len();
+
+    //This is nested so that the outer layer corresponds to the Motifs in the 
+    //highesst_post_motif_set, and the inner layer to all the matches, regardless of chain
+    let mut results: Vec<Vec<((f64, bool, &Motif), usize)>> = (0..num_clusts).map(|i| {
+        let mut cluster: Vec<((f64, bool, &Motif), usize)> = Vec::with_capacity(likely_cap);
+        for (c_id, chain) in pairings.iter().enumerate() {
+            for pairing in chain.iter() {
+                if let Some(dist_mot_tup) = pairing[i] {
+                    cluster.push((dist_mot_tup, c_id));
+                };
+            }
+        }
+        cluster
+    }).collect();
+
+    for result in results.iter_mut() {
+        result.sort_by(|((a, _, _),_), ((b,_, _),_)| a.partial_cmp(b).unwrap())
+    }
+
+    //This is nested over 
+    //      1) the Motifs in the highesst_post_motif_set
+    //      2) the indepdendent chains
+    //      3) the distances present in those chains (NOTE: we skip over nones)
+    let distance_assessments: Vec<Vec<Vec<f64>>> = (0..num_clusts).map(|i| {
+        pairings.iter().map(|chain| {
+            let mut dist_vec: Vec<f64> = Vec::with_capacity(chain.len());
+            for pairing in chain.iter() {
+                if let Some((dist,_, _)) = pairing[i] {dist_vec.push(dist);};
+            }
+            dist_vec
+        }).collect()
+    }).collect();
+
+
+
+
+    println!("min {}", min_len);
+    for (i, mut trace) in results.into_iter().enumerate() {
+        println!("Motif {}: \n", i);
+        println!("Rhat motif {}: {}", i, rhat(&distance_assessments[i], min_len));
+        println!("Motif: \n {:?}", highesst_post_motif_set.get_nth_motif(i).best_motif_string());
+        
+    }
+
+    println!("RMSE highest posterior density {}", highesst_post_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
+
+
+
+    println!("Beginning analysis of highest likelihood motif set");
+
+    let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(&data_ref, min_len)).collect::<Vec<_>>();
+
+    let mut highest_likelihood_motif_set: StrippedMotifSet = best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(&data_ref).partial_cmp(&b.ln_likelihood(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
+
+    highest_likelihood_motif_set.sort_by_height();
+
     
 
-    let autocorrelation_plot = BitMapBackend::new(autocorrs_file.as_str(), (1350, 1350)).into_drawing_area();
 
-    autocorrelation_plot.fill(&full_palette::WHITE).unwrap();
+    highest_likelihood_motif_set.set_iter().enumerate().for_each(|(i,m)| {
+        let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
+        draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
+    });
 
-    let mut autocorrelations_post = ChartBuilder::on(&autocorrelation_plot)
-                               .caption("Autocorrelations of each trace's ln posterior density", ("Times New Roman", 30))
-                               .set_label_area_size(LabelAreaPosition::Left, 40)
-                               .set_label_area_size(LabelAreaPosition::Bottom, 40)
-                               .build_cartesian_2d(0..correlation_len, 0_f64..1.5_f64)
-                               .unwrap();
 
-    autocorrelations_post.configure_mesh()
-                               .x_desc("Lag (in units of step save period)")
-                               .y_desc("Autocorrelation coefficient")
-                               .draw().unwrap();
+    println!("Highest Likelihood motif set: {:?}", highest_likelihood_motif_set);
+    let mut activated = highest_likelihood_motif_set.reactivate_set(&data_ref);
+
+    activated.sort_by_height();
+
+    let cumulative_lns = activated.ln_posts_by_strength();
+
+    let cumulative_noises = activated.distances_by_strength();
+
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    for (i, like) in cumulative_lns.into_iter().enumerate() {
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+    }
+
+
+    let save_file = format!("{}_highest_likelihood", base_file);
+
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
+
+    if let Some(fasta) = fasta_file.clone() {
+   
+        let trial_a = highest_likelihood_motif_set.generate_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
+
+        let trial_x = highest_likelihood_motif_set.generate_ascending_fimo(&data_ref,None,&fasta,  &out_dir, &save_file);
+
+        if trial_a.is_err() {
+            println!("error in pr gen {:?}", trial_a);
+        }
+
+        if trial_x.is_err() {
+            println!("error in cum pr gen {:?}", trial_x);
+        }
+    }
+    
+    //If I don't document this as I'm writing it, it's going to blow a hole 
+    //through my head and the head of anybody reading it
+    //"pairings" is nested in the following way:
+    //      1) Over the independent chains
+    //      2) For each independent chain, over the StrippedMotifSets in that chain
+    //      3) For each StrippedMotifSet in the chain, there's a highest_likelihood_motif_set.len() number of pairings: 
+    //                                                 which, if they exist, are the motif and distance of that pairing
+    let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
+        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&highest_likelihood_motif_set)).collect::<Vec<_>>()
+    }).collect();
+
+    let num_clusts = highest_likelihood_motif_set.num_motifs();
+    let likely_cap = pairings[0].len()*pairings.len();
+
+    //This is nested so that the outer layer corresponds to the Motifs in the 
+    //highest_likelihood_motif_set, and the inner layer to all the matches, regardless of chain
+    let mut results: Vec<Vec<((f64, bool, &Motif), usize)>> = (0..num_clusts).map(|i| {
+        let mut cluster: Vec<((f64, bool, &Motif), usize)> = Vec::with_capacity(likely_cap);
+        for (c_id, chain) in pairings.iter().enumerate() {
+            for pairing in chain.iter() {
+                if let Some(dist_mot_tup) = pairing[i] {
+                    cluster.push((dist_mot_tup, c_id));
+                };
+            }
+        }
+        cluster
+    }).collect();
+
+    for result in results.iter_mut() {
+        result.sort_by(|((a, _, _),_), ((b,_, _),_)| a.partial_cmp(b).unwrap())
+    }
+
+    //This is nested over 
+    //      1) the Motifs in the highest_likelihood_motif_set
+    //      2) the indepdendent chains
+    //      3) the distances present in those chains (NOTE: we skip over nones)
+    let distance_assessments: Vec<Vec<Vec<f64>>> = (0..num_clusts).map(|i| {
+        pairings.iter().map(|chain| {
+            let mut dist_vec: Vec<f64> = Vec::with_capacity(chain.len());
+            for pairing in chain.iter() {
+                if let Some((dist,_, _)) = pairing[i] {dist_vec.push(dist);};
+            }
+            dist_vec
+        }).collect()
+    }).collect();
+
+
+
+
+    println!("min {}", min_len);
+    for (i, mut trace) in results.into_iter().enumerate() {
+        println!("Motif {}: \n", i);
+        println!("Rhat motif {}: {}", i, rhat(&distance_assessments[i], min_len));
+        println!("Motif: \n {:?}", highest_likelihood_motif_set.get_nth_motif(i).best_motif_string());
+        
+    }
+
+    println!("RMSE highest likelihood {}", highest_likelihood_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
+
+
+
+
 
 
     std::mem::drop(buffer);
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
     let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    let diff_sig_directory = format!("{}/{base_file}_most_improved", out_dir.clone());
+    
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         let tracey = trace.ln_posterior_trace();
@@ -521,170 +575,14 @@ pub fn main() {
         let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
         let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
         
-        let mut diff_trace: Vec<(usize, f64)> = tracey.windows(2).map(|a| a[1]-a[0]).enumerate().collect();
-        diff_trace.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-        let track_bests: usize = diff_trace.len().min(5);
-
-        for i in 0..track_bests {
-
-            let last_digit = i % 10;
-            let ordinal_tail = match last_digit {
-                1 => {if i == 11 {"th"} else {"st"}},
-                2 => {if i == 12 {"th"} else {"nd"}},
-                3 => "rd",
-                _ => "th",
-            };
-                
-            let prev_ind = diff_trace[i].0;
-            let next_ind = prev_ind+1;
-
-
-            let prev_set = trace[prev_ind].reactivate_set(&data_ref);
-            let next_set = trace[next_ind].reactivate_set(&data_ref);
-
-            let signal_difference = next_set.ref_signal()-prev_set.ref_signal();
-
-            let improve_name = format!("{letter}_{i}{ordinal_tail}_improvement_difference");
-            signal_difference.save_waveform_to_directory(&data_ref, &diff_sig_directory, &improve_name, &full_palette::CYAN, true);
-
-            let output_name = format!("{diff_sig_directory}/{improve_name}_comparions.txt");
-            let Ok(mut text_file_out) = fs::File::create(&output_name) else { println!("Failed to create {output_name}"); continue;};
-            
-            _ = text_file_out.write_all(format!("Tracking {i}{ordinal_tail} best increase in ln posterior for trace {letter}. Abs change in ln post is {} from step {prev_ind} to step {next_ind}", diff_trace[i].1).as_bytes());
-
-            let guarentee_len = prev_set.len().min(next_set.len());
-
-            for k in 0..guarentee_len {
-                let prev_mot_scores = prev_set.nth_motif_and_scores(k);
-                let next_mot_scores = next_set.nth_motif_and_scores(k);
-
-                let mut output: String = format!("Motif {k} for each set has a height of {} before and {} after. Difference is {}.\n Best motifs are:\n", 
-                                                 prev_mot_scores.0.peak_height(), next_mot_scores.0.peak_height(), next_mot_scores.0.peak_height()-prev_mot_scores.0.peak_height());
-
-                output.push_str(format!("Prev: {}\nNext: {}\n", prev_mot_scores.0.best_motif_string(), next_mot_scores.0.best_motif_string()).as_str());
-                let mut min: f64 = f64::INFINITY;
-                let mut max: f64 = -f64::INFINITY;
-                for &score in prev_mot_scores.1.iter() {
-                    min = min.min(score);
-                    max = max.max(score);
-                }
-                output.push_str(format!("Prev motif off target binding score range: {} to {} with {} elements\n", min, max, prev_mot_scores.1.len()).as_str());
-                let mut min: f64 = f64::INFINITY;
-                let mut max: f64 = -f64::INFINITY;
-                for &score in next_mot_scores.1.iter() {
-                    min = min.min(score);
-                    max = max.max(score);
-                }
-                output.push_str(format!("Next motif off target binding score range: {} to {} with {} elements\n", min, max, next_mot_scores.1.len()).as_str());
-
-                let (dist, rev) = prev_mot_scores.0.distance_function(&next_mot_scores.0);
-
-                let rev_str = if rev { "is closer reverse complement" } else {"is closer as standard"};
-                output.push_str(format!("Motif distance is {} and {rev_str}\n", dist).as_str());
-                                
-                let Ok(()) = text_file_out.write_all(output.as_bytes()) else { println!("Couldn't write the information regarding Motif {k} for {i}{ordinal_tail} improvement difference of chain {letter}\n");  continue;};
-            }
-
-            if prev_set.len() != next_set.len() {
-                let Ok(()) = text_file_out.write_all(format!("Sets have different motif numbers. Previous set has {} motifs, while the next set has {} motifs\n", prev_set.len(), next_set.len()).as_bytes()) else {continue;};
-            }
-        }
-        
-        let mut diff_trace: Vec<(usize, f64)> = tracey.windows(2).map(|a| (a[1]-a[0]).abs()).enumerate().filter(|a| a.1 != 0.0).collect();
-        diff_trace.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-        let track_bests: usize = diff_trace.len().min(5);
-
-        for i in 0..track_bests {
-
-            let last_digit = i % 10;
-            let ordinal_tail = match last_digit {
-                1 => {if i == 11 {"th"} else {"st"}},
-                2 => {if i == 12 {"th"} else {"nd"}},
-                3 => "rd",
-                _ => "th",
-            };
-                
-            let prev_ind = diff_trace[i].0;
-            let next_ind = prev_ind+1;
-
-
-            let prev_set = trace[prev_ind].reactivate_set(&data_ref);
-            let next_set = trace[next_ind].reactivate_set(&data_ref);
-
-            let signal_difference = next_set.ref_signal()-prev_set.ref_signal();
-
-            let improve_name = format!("{letter}_{i}{ordinal_tail}_least_change_difference");
-            signal_difference.save_waveform_to_directory(&data_ref, &diff_sig_directory, &improve_name, &full_palette::CYAN, true);
-
-            let output_name = format!("{diff_sig_directory}/{improve_name}_comparions.txt");
-            let Ok(mut text_file_out) = fs::File::create(&output_name) else { println!("Failed to create {output_name}"); continue;};
-
-            let guarentee_len = prev_set.len().min(next_set.len());
-
-            _ = text_file_out.write_all(format!("Tracking {i}{ordinal_tail} least non zero change in ln posterior for trace {letter}. Abs change in ln post is {} from step {prev_ind} to step {next_ind}\n", diff_trace[i].1).as_bytes());
-
-            for k in 0..guarentee_len {
-                let prev_mot_scores = prev_set.nth_motif_and_scores(k);
-                let next_mot_scores = next_set.nth_motif_and_scores(k);
-
-                let mut output: String = format!("Motif {k} for each set has a height of {} before and {} after. Difference is {}.\n Best motifs are:\n", 
-                                                 prev_mot_scores.0.peak_height(), next_mot_scores.0.peak_height(), next_mot_scores.0.peak_height()-prev_mot_scores.0.peak_height());
-
-                output.push_str(format!("Prev: {}\nNext: {}\n", prev_mot_scores.0.best_motif_string(), next_mot_scores.0.best_motif_string()).as_str());
-                let mut min: f64 = f64::INFINITY;
-                let mut max: f64 = -f64::INFINITY;
-                for &score in prev_mot_scores.1.iter() {
-                    min = min.min(score);
-                    max = max.max(score);
-                }
-                output.push_str(format!("Prev motif off target binding score range: {} to {} with {} elements\n", min, max, prev_mot_scores.1.len()).as_str());
-                let mut min: f64 = f64::INFINITY;
-                let mut max: f64 = -f64::INFINITY;
-                for &score in next_mot_scores.1.iter() {
-                    min = min.min(score);
-                    max = max.max(score);
-                }
-                output.push_str(format!("Next motif off target binding score range: {} to {} with {} elements\n", min, max, next_mot_scores.1.len()).as_str());
-
-                let (dist, rev) = prev_mot_scores.0.distance_function(&next_mot_scores.0);
-
-                let rev_str = if rev { "is closer reverse complement" } else {"is closer as standard"};
-                output.push_str(format!("Motif distance is {} and {rev_str}", dist).as_str());
-                                
-                let Ok(()) = text_file_out.write_all(output.as_bytes()) else { println!("Couldn't write the information regarding Motif {k} for {i}{ordinal_tail} least improvement difference of chain {letter}\n");  continue;};
-            }
-
-            if prev_set.len() != next_set.len() {
-                let Ok(()) = text_file_out.write_all(format!("Sets have different motif numbers. Previous set has {} motifs, while the next set has {} motifs\n", prev_set.len(), next_set.len()).as_bytes()) else {continue;};
-            }
-        }
-
-
-        //println!("conj {} {:?}", conj.len(), conj);
-
-        /*        let res = samples_fft_to_spectrum(
-        &samples[0..len],
-        samples.len() as u32,
-        FrequencyLimit::All,
-        None,).unwrap();
-       
-
-        
-        */
-       
 
         plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
-        let collection_autocorrelation = AllData::compute_autocorrelation_coeffs(&vec![tracey.clone()], 1000);
-
-        let color = unsafe{*PALETTE.as_ptr().add(i)};
-        autocorrelations_post.draw_series(collection_autocorrelation.iter().enumerate().map(|(j, p)| Circle::new((j,*p), 5, ShapeStyle{ color: (*PALETTE[i]).into(), filled : true, stroke_width : 0})))
-                                                                   .unwrap().label(format!("{}", UPPER_LETTERS[i]).as_str())
-                                                                   .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.clone()));
 
     }
-    autocorrelations_post.configure_series_labels().draw().unwrap();
+        //SAFETY: This is always in bounds, and RGBColor is itself Copy, let 
+        //        alone its shared reference (And RGBColor is also Send and Sync).
+        //        I have to do this the stupid way because the compiler doesn't
+        //        seem to believe me when I tell it this. 
 
     plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
@@ -720,119 +618,36 @@ pub fn main() {
         plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
     }; 
 
-    /*
-    let mut plot_like = poloto::plot(format!("{} Median distance to data", base_file), "Step", "Median Dist");
-    let plot_like_file = fs::File::create(format!("{}/{}_med_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_like.line(format!("Chain {}", letter), trace.wave_dist_trace(&all_dat_use).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    };*/
-
     plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
     
-    let _rng = rand::thread_rng();
+    let mut plot_eth = poloto::plot(format!("{} Approximate Eth Statistic", base_file), "Step", "Ln Likelihood");
+    let plot_eth_file = fs::File::create(format!("{}/{}_eth.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_eth.line(format!("Chain {}", letter), trace.approx_eth_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+    }; 
+
+    plot_eth.simple_theme(poloto::upgrade_write(plot_eth_file));
     
-    //let ref_per_chain: usize = 5;
-
-    //let num_ref_pwm = ref_per_chain*set_trace_collections.len();
-
 
     let cluster_per_chain: usize = min_len.min(2000);
 
-    let motif_num_traces = set_trace_collections.iter().map(|a| a.motif_num_trace()).collect::<Vec<_>>();
-
-    //TODO: generate motif_num_traces plot here
-    println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
 
 
     println!("Finish best motif sets");
 
-    let total_sets = min_len*set_trace_collections.len();
-    let _tf_num = (motif_num_traces.into_iter().map(|a| tail_slice(&a, min_len).iter().sum::<f64>()).sum::<f64>()/(total_sets as f64)).floor() as usize;
 
-    let _num_sort_mots: usize = cluster_per_chain*set_trace_collections.len();
-    
-
-    //If I don't document this as I'm writing it, it's going to blow a hole 
-    //through my head and the head of anybody reading it
-    //"pairings" is nested in the following way:
-    //      1) Over the independent chains
-    //      2) For each independent chain, over the StrippedMotifSets in that chain
-    //      3) For each StrippedMotifSet in the chain, there's a best_single_motif_set.len() number of pairings: 
-    //                                                 which, if they exist, are the motif and distance of that pairing
-    let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
-        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&best_single_motif_set)).collect::<Vec<_>>()
-    }).collect();
-
-    let num_clusts = best_single_motif_set.num_motifs();
-    let likely_cap = pairings[0].len()*pairings.len();
-
-    //This is nested so that the outer layer corresponds to the Motifs in the 
-    //best_single_motif_set, and the inner layer to all the matches, regardless of chain
-    let mut results: Vec<Vec<((f64, bool, &Motif), usize)>> = (0..num_clusts).map(|i| {
-        let mut cluster: Vec<((f64, bool, &Motif), usize)> = Vec::with_capacity(likely_cap);
-        for (c_id, chain) in pairings.iter().enumerate() {
-            for pairing in chain.iter() {
-                if let Some(dist_mot_tup) = pairing[i] {
-                    cluster.push((dist_mot_tup, c_id));
-                };
-            }
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
+        let trial_b = trace.many_fimo_gen(&data_ref, 20, None ,"/home/alimf/motif_finder_project/Data/Fasta/NC_000913.2.fasta", &out_dir, &save_mini);
+        if trial_b.is_err() {
+            println!("error in pr gen {i} {:?}", trial_b);
         }
-        cluster
-    }).collect();
-
-    for result in results.iter_mut() {
-        result.sort_by(|((a, _, _),_), ((b,_, _),_)| b.partial_cmp(a).unwrap())
     }
 
-    //This is nested over 
-    //      1) the Motifs in the best_single_motif_set
-    //      2) the indepdendent chains
-    //      3) the distances present in those chains (NOTE: we skip over nones)
-    let distance_assessments: Vec<Vec<Vec<f64>>> = (0..num_clusts).map(|i| {
-        pairings.iter().map(|chain| {
-            let mut dist_vec: Vec<f64> = Vec::with_capacity(chain.len());
-            for pairing in chain.iter() {
-                if let Some((dist,_, _)) = pairing[i] {dist_vec.push(dist);};
-            }
-            dist_vec
-        }).collect()
-    }).collect();
 
 
 
-
-    println!("min {}", min_len);
-    for (i, mut trace) in results.into_iter().enumerate() {
-        println!("Motif {}: \n", i);
-        println!("Rhat motif {}: {}", i, rhat(&distance_assessments[i], min_len));
-        println!("Motif: \n {:?}", best_single_motif_set.get_nth_motif(i));
-        
-        let credible_percent: usize = 95;
-        let cluster_term = (trace.len()*credible_percent)/100;
-
-        trace.truncate(cluster_term);
-
-        //trace now holds the credible_percent region
-
-        let (pwm_traces, chain_ids) = create_offset_traces(trace);
-        graph_tetrahedral_traces(&pwm_traces, &chain_ids, format!("{}/{}_new_tetrahedra_{}.png", out_dir.clone(), base_file, i).as_str());
-        println!("tetrad");
-        /*let cis = create_credible_intervals(&pwm_traces, 0.95, &good_motifs_count);
-
-
-        println!("Number motifs near medoid: {}", num_good_motifs);
-        println!("Lower {} CI bound: \n {:?}", 0.95, cis[0]);
-        println!("Posterior mean: \n {:?}", cis[1]);
-        println!("Upper {} CI bound: \n {:?}", 0.95, cis[2]);*/
-    }
-
-    println!("RMSE best {}", best_single_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
-
-
-    //TODO: generate lnlikelihood and lnposterior traces here
-
-    
 }
 
 
@@ -841,16 +656,16 @@ pub fn main() {
 pub fn rhat(chain_pars: &Vec<Vec<f64>>, chain_length: usize) -> f64 {
 
     let max_poss_chain = chain_pars.iter().map(|a| a.len()).min().expect("Empty chain vectors not allowed");
-    
+
     let real_length = if max_poss_chain < chain_length {
         warn!("Your chain length is larger than the minimum chain length of your parameters!\n Defaulting to the minimum chain length of your parameters.");
         max_poss_chain
-        } else {chain_length};
+    } else {chain_length};
 
     let chain_sums: Vec<f64> = chain_pars.iter().map(|a| tail_slice(a, real_length).iter().sum::<f64>()).collect();
 
     let chain_means: Vec<f64> = chain_sums.iter().map(|a| (*a)/(real_length as f64)).collect();
-  
+
     let big_mean = chain_means.iter().sum::<f64>()/((chain_pars.len()) as f64);
 
     let chain_vars: Vec<f64> = chain_pars.iter().zip(chain_means.iter()).map(|(chain, mean)| {
@@ -890,7 +705,7 @@ pub fn establish_dist_array(motif_list: &Vec<Motif>) -> Array2<f64> {
 }
 
 
-pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (Array3<f64>, Vec<usize>){
+/*pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (Array3<f64>, Vec<usize>){
 
 
     let num_samples = best_motifs.len();
@@ -923,9 +738,9 @@ pub fn create_offset_traces(best_motifs: Vec<((f64, bool, &Motif), usize)>) -> (
 
     (samples, chain_ids)
 
-}
+}*/
 
-pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>, file_name: &str){
+/*pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>, file_name: &str){
 
     const SIMPLEX_ITERATOR: [&[f64; BASE_L-1]; (BASE_L-1)*(BASE_L-1)] = [&SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[2],
                                                                          &SIMPLEX_VERTICES_POINTS[0], &SIMPLEX_VERTICES_POINTS[1], &SIMPLEX_VERTICES_POINTS[3],
@@ -942,7 +757,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>,
 
     let panels = plot.split_evenly((num_rows as usize, 4));
 
-    let cis = create_credible_intervals(samples);
+    //let cis = create_credible_intervals(samples);
 
     println!("Finished cred");
     for j in 0..num_bases {
@@ -1022,7 +837,7 @@ pub fn graph_tetrahedral_traces(samples: &Array3::<f64>, chain_ids: &Vec<usize>,
 
 
     }
-}
+}*/
 
 fn draw_pwm(map_heights: &[[(usize, f64); BASE_L]], file_name: &str) {
 

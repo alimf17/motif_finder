@@ -4523,14 +4523,10 @@ impl StrippedMotifSet {
 
         let _ = fs::create_dir(&fimo_output);
 
-        println!("created dir");
         let mut bind_command = Command::new("fimo");
         let commander = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
-        println!("command: {:?}", commander);
         
         commander.status()?;
-
-        println!("ran fimo");
 
 
         Ok(())
@@ -5185,7 +5181,7 @@ impl SetTraceDef {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_post.partial_cmp(&b.ln_post).expect("No NaNs allowed in posterior")).expect("trace should have at least one motif set")
     }
     
-    pub fn extract_highest_likelihood_set(&self, seq: &Sequence, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
+    pub fn extract_highest_likelihood_set(&self, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
         self.trace[(self.len()-tail_start)..self.len()].iter().max_by(|a,b| a.ln_likelihood(data_ref).partial_cmp(&b.ln_likelihood(data_ref)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
     
@@ -5193,7 +5189,7 @@ impl SetTraceDef {
         self.trace[(self.len()-tail_start)..self.len()].iter().min_by(|a,b| a.bic(data_ref).partial_cmp(&b.bic(data_ref)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
     }
 
-    /// Returns a vector of `[self.trace_min_dist]()` for each `[Motif]` in `reference_mots` 
+    /// Returns a vector of `[self.trace_min_dist()]` for each `[Motif]` in `reference_mots` 
     pub fn create_distance_traces(&self, reference_mots: &Vec<Motif>) -> Vec<Vec<f64>> {
 
         let mut distances: Vec<Vec<f64>> = vec![vec![0_f64; self.trace.len()] ; reference_mots.len()];
