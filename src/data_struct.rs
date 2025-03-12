@@ -66,6 +66,7 @@ pub struct AllData {
     start_nullbp_coordinates: Vec<usize>,
     background: Background,
     min_height: f64,
+    credibility: f64, 
 }
 
 #[derive(Clone)]
@@ -78,6 +79,7 @@ pub struct AllDataUse<'a> {
     background: Background,
     offset: f64,
     min_height: f64,
+    credibility: f64, 
     height_dist: TruncatedLogNormal,
 }
 
@@ -180,7 +182,7 @@ impl AllData {
     ///   This can also technically cause a panic if there are errors on the fasta
     ///   file that are super late into a fasta file that large. 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, min_height: f64, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<Self, AllProcessingError> {
+                                 fragment_length: usize, spacing: usize, min_height: f64, credibility: f64, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<Self, AllProcessingError> {
 
 
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);
@@ -207,7 +209,7 @@ impl AllData {
         let (seq, null_seq, data, starts, start_nulls) = test_sync.expect("We already returned if this was an error.");
 
         println!("synchronized fasta and data");
-        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height,};
+        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height, credibility: credibility};
 
         //I've inserted this as a check to make sure that this isn't so massive
         //that TARJIM can't work with it or save it. Because if it is, you want
@@ -1254,6 +1256,7 @@ impl<'a> AllDataUse<'a> {
                background: reference_struct.background().clone(),
                offset: offset,
                min_height: reference_struct.min_height,
+               credibility: reference_struct.credibility,
                height_dist: TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, reference_struct.min_height, MAX_HEIGHT).unwrap()
         })
 
@@ -1263,7 +1266,7 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>, min_height: f64) -> Self {
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>, min_height: f64, credibility: f64) -> Self {
         Self{
             data: data,
             propensities: propensities,
@@ -1273,6 +1276,7 @@ impl<'a> AllDataUse<'a> {
             background: background.clone(),
             offset: 0.0,
             min_height: min_height.max(1.0),
+            credibility: credibility.max(0.01), 
             height_dist: TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, min_height.max(1.0), MAX_HEIGHT).unwrap()
         }
     }
@@ -1330,6 +1334,10 @@ impl<'a> AllDataUse<'a> {
 
     pub fn min_height(&self) -> f64 {
         self.min_height
+    }
+
+    pub fn credibility(&self) -> f64 {
+        self.credibility
     }
 
     pub fn height_dist(&self) -> &TruncatedLogNormal {
@@ -1569,6 +1577,7 @@ impl<'a> AllDataUse<'a> {
             start_nullbp_coordinates: self.start_nullbp_coordinates.clone(),
             background: self.background.clone(), 
             min_height: self.min_height,
+            credibility: self.credibility,
         };
 
         _ = AllDataUse::new(&to_return, 0.0).expect("AllData should always produce a legal AllDataUse");

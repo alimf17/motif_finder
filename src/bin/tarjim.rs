@@ -24,11 +24,11 @@ struct Cli {
     name: String,
 
     /// Sets the input file from preprocessing for your run to infer on
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long)]
     input: String,
 
     /// Sets the output directory for your run 
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long)]
     output: String,
 
     /// Number of advances you want the algorithm to run for. Note, this is 

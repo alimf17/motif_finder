@@ -3116,14 +3116,14 @@ impl<'a> MotifSet<'a> {
     /// and p = 1-(-NECESSARY_MOTIF_IMPROVEMENT).exp().
     /// Note: the ommission of ln(p) term is deliberate. It amounts to a normalization constant
     /// for the motif set prior, and would obfuscate the true point of this prior
-    pub fn motif_num_prior(&self) -> f64 {
-        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
-        -((self.set.len()-1) as f64)* unsafe{ NECESSARY_MOTIF_IMPROVEMENT } 
+    pub fn motif_num_prior(&self, credibility: f64) -> f64 {
+         if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; } ;
+        -((self.set.len()-1) as f64)* credibility
     }
 
     pub fn ln_prior(&self) -> f64 {
         //println!("motif num {} heights {:?} pwms {:?}",self.motif_num_prior(), self.set.iter().map(|a| a.0.height_prior()).collect::<Vec<_>>(), self.set.iter().map(|a| a.0.pwm_prior(self.data_ref.data().seq())).collect::<Vec<_>>());
-        self.motif_num_prior() + self.set.iter().map(|a| a.0.height_prior(self.data_ref.height_dist())+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
+        self.motif_num_prior(self.data_ref.credibility()) + self.set.iter().map(|a| a.0.height_prior(self.data_ref.height_dist())+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn ln_likelihood(&self) -> f64 {
@@ -3272,8 +3272,7 @@ impl<'a> MotifSet<'a> {
     pub fn propose_new_motif<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
 
-        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return None; } };
-
+        if self.set.len() > MAX_TF_NUM { return None; } ;
 
         let mut new_set = self.derive_set();
         
@@ -3361,7 +3360,7 @@ impl<'a> MotifSet<'a> {
     /// followed by the ln posterior density - ln proposal probability
     pub fn propose_new_motif_alt<R: Rng + ?Sized>(&self, rng: &mut R ) -> Option<(Self, f64)> {
         
-        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return None; } };
+        if self.set.len() > MAX_TF_NUM { return None; } ;
 
         let mut new_set = self.derive_set();
 
@@ -4404,13 +4403,13 @@ impl StrippedMotifSet {
         self.set.sort_unstable_by(|a, b| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
     }
 
-    pub fn motif_num_prior(&self) -> f64 {
-        if let Some(&ceil) = MAX_TF_NUM.get() { if self.set.len() > ceil { return -f64::INFINITY; } };
-        -((self.set.len()-1) as f64)* unsafe { NECESSARY_MOTIF_IMPROVEMENT }
+    pub fn motif_num_prior(&self, credibility: f64) -> f64 {
+        if self.set.len() > MAX_TF_NUM { return -f64::INFINITY; } ;
+        -((self.set.len()-1) as f64)* credibility
     }
 
     pub fn ln_prior(&self, data_ref: &AllDataUse) -> f64 {
-        self.motif_num_prior() + self.set.iter().map(|a| a.height_prior(data_ref.height_dist())+a.pwm_prior(data_ref.data().seq())).sum::<f64>()
+        self.motif_num_prior(data_ref.credibility()) + self.set.iter().map(|a| a.height_prior(data_ref.height_dist())+a.pwm_prior(data_ref.data().seq())).sum::<f64>()
     }
 
     pub fn bic(&self, data_ref: &AllDataUse) -> f64 {
@@ -4791,7 +4790,7 @@ impl<'a> SetTrace<'a> {
             },
             
             3 => {
-                if *MAX_TF_NUM.get().unwrap() == 1 {
+                if MAX_TF_NUM == 1 {
                     let extend: bool = rng.gen();
                     which_variant = if extend {2} else {3};
                 }

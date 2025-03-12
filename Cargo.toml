@@ -48,8 +48,8 @@ criterion = "0.3"
 
 
 [[bin]]
-name = "tool"
-path = "src/bin/tool.rs"
+name = "tarjim"
+path = "src/bin/tarjim.rs"
 
 
 [[bench]]
