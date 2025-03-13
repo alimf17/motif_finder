@@ -21,6 +21,7 @@ use std::io::Read;
 struct Cli {
     
     /// Sets the name of your run
+    #[arg(short, long)]
     name: String,
 
     /// Sets the input file from preprocessing for your run to infer on

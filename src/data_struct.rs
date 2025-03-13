@@ -1344,6 +1344,10 @@ impl<'a> AllDataUse<'a> {
         &self.height_dist
     }
 
+    pub fn num_blocks(&self) -> usize {
+        self.data.point_lens().len()
+    }
+
     pub fn propensities(&self) -> &Vec<f64> {
         self.propensities
     }
