@@ -67,7 +67,7 @@ impl BackgroundDist {
 
         if freedom >= GIVE_UP_AND_USE_NORMAL {
             let ratio = if freedom.is_infinite() {1.0} else { freedom/(freedom-2.) };
-            Ok(BackgroundDist::Normal(Normal::new(0.0, scale*ratio).sqrt())?))
+            Ok(BackgroundDist::Normal(Normal::new(0.0, scale*ratio).sqrt())?)
         } else {
             Ok(BackgroundDist::FastT(FastT::new(scale,freedom)?))
         }
