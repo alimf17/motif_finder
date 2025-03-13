@@ -889,7 +889,7 @@ impl AllData {
 
         ar_blocks.retain(|a| a.len() > data_zone);
 
-        let trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
+        let mut trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
                                                                      .map(|a| a.clone()).collect();
        
         //SAFETY: This data block filtering is what allows us to guarentee Kernel
@@ -924,7 +924,8 @@ impl AllData {
         //Distribution", 2004, Journal of Statistical Software), but I'm not super
         //confident in the application of this to eth.
         //Again, I'm blatantly pretending that 100 is sufficient. I would guess 
-        //it's _probably_ fine????
+        //it's _probably_ fine???? 100 vs 8 is a lot of wiggle room, and eth is
+        //quite related to AD
         if length_of_data < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
 
         let ar_info = ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
@@ -935,8 +936,17 @@ impl AllData {
         println!("data lens, start loc, and end datas {:?}", data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>());
         println!("total data amount {}", data_info.iter().map(|a| a.0).sum::<usize>());
 
-        let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
+        //let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
+        let mut final_med_prep = Data::new(ar_blocks.iter().flatten().map(|&(_, a)| a).collect::<Vec<f64>>());
+        let final_median = final_med_prep.median();
+
+        final_med_prep = Data::new(ar_blocks.iter().flatten().map(|&(_, a)| (a-median).abs()).collect::<Vec<f64>>());
+
+        let mad_final = final_med_prep.median()*MAD_ADJUSTER;
+        println!("background data sd is set to {}", mad_final);
+
+        trimmed_data_blocks = trimmed_data_blocks.into_iter().map(|a| a.into_iter().map(|(c,b)|(c, b-final_median)).collect::<Vec<(usize,f64)>>()).collect();
 
         //Despite yule_walker_ar_coefficients_with_bic and estimate_t_dist both
         //having the CAPACITY to panic if ar_inference has only empty vectors, 
@@ -945,12 +955,12 @@ impl AllData {
         //the inference of the results, but only if we have like fewer than 2 data
         //points, which doesn't happen with the way we defined data_zone
         let background_dist = { 
-            let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
-            Background::new(sd, df, (fragment_length as f64)/(WIDE)).expect("We have hard limits on our t distribution fit to prevent an error")//Based on analysis, sd of the kernel is about 1/3 the high fragment length
+            //let (sd, df) = Self::estimate_t_dist(&(ar_inference.concat()));
+            Background::new(mad_final, f64::INFINITY, (fragment_length as f64)/(WIDE)).expect("We have hard limits on our t distribution fit to prevent an error")//Based on analysis, sd of the kernel is about 1/3 the high fragment length
         } ;
         println!("inferred background dist");
 
-        let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.iter().map(|a| a.clone()).collect();
+        let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.into_iter().map(|a| a.into_iter().map(|(c,b)|(c, b-final_median)).collect::<Vec<(usize,f64)>>()).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
         Ok((trimmed_data_blocks, background_dist, min_height, trimmed_ar_blocks))

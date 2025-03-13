@@ -97,7 +97,7 @@ fn main() {
     //    being considered. Will only work if (9), (10), (11), and (12) included -prep 
     //
 
-    let Cli { name: output_name, output_dir: output_dir, fasta: fasta_file, data: data_file, circular: is_circular, length_of_fragment: fragment_length, spacing: spacing, min_height: min_height, prior: credibility, height_scale: peak_cutoff}= Cli::parse();
+    let Cli { name: name, output_dir: output_dir, fasta: fasta_file, data: data_file, circular: is_circular, length_of_fragment: fragment_length, spacing: spacing, min_height: min_height, prior: credibility, height_scale: peak_cutoff}= Cli::parse();
 
     assert!(spacing > 0, "The spacing cannot be zero!");
     assert!(fragment_length > spacing, "The fragment length must be strictly greater than the spacing!");
@@ -125,6 +125,8 @@ fn main() {
     println!("have all data");
 
     let buffer: Vec<u8> = bincode::serialize(&total_data).expect("serializable");
+
+    let output_name = format!("{output_dir}/{name}");
 
     let mut outfile_handle = match File::create(output_name.clone()) {
         Err(_) => {
