@@ -55,7 +55,7 @@ struct Cli {
     trace_num: usize,
 
     #[arg(short, long, group="initial")]
-    initial_condition: Option<InitialType>,
+    condition_type: Option<InitialType>,
 
     #[arg(requires="initial")]
     file_initial: Option<String>,
