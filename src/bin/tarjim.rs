@@ -97,7 +97,7 @@ fn main() {
     //   as implied by the Fasta and data files will be checked against the name in the SetTraceDef.  
     //   If they're not identical, the program will panic on the spot -run , optional 
 
-    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, initial_condition: initial_type, file_initial: initial_file, starting_tf}= Cli::parse();
+    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, condition_type: initial_type, file_initial: initial_file, starting_tf}= Cli::parse();
 
     min_thermo_beta = min_thermo_beta.abs();
 
