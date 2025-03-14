@@ -2563,6 +2563,39 @@ impl<'a> MotifSet<'a> {
 
         mot_set
     }
+    
+    /// This randomly generates a single `n` Motif MotifSet with valid motifs for data_ref
+    pub fn rand_with_n_motifs<R: Rng+?Sized>(n: usize, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
+
+        let mut valid: bool;
+
+        let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
+
+            let set: Vec<Motif> = (0..n).map(|_| Motif::rand_mot(data_ref.data().seq(), data_ref.height_dist(), rng)).collect();
+
+            let mut signal = data_ref.data().derive_zero();
+            for mot in set.iter() {
+                signal += &(mot.generate_waveform(data_ref));
+            }
+
+            let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| {
+                let null = a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0);
+                (a,null)
+            }).collect();
+
+            let mut mot_set_try = MotifSet{ set: set_with_nulls, signal: signal, ln_post: None, data_ref: data_ref};
+
+            let like = mot_set_try.ln_posterior();
+
+            valid = like.is_finite();
+
+            if valid {
+                break mot_set_try;
+            }
+        };
+
+        mot_set
+    }
 
     /// This randomly generates a single Motif MotifSet with
     /// with height peak_height and a random valid motif for data_ref

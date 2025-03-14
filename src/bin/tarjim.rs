@@ -60,6 +60,10 @@ struct Cli {
     #[arg(requires="initial")]
     file_initial: Option<String>,
 
+    /// This sets an initial guess on the number of transcription factors.
+    /// It will be ignored if you supply a valid initial condition
+    #[arg(short, long)]
+    starting_tf: Option<usize>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -93,7 +97,7 @@ fn main() {
     //   as implied by the Fasta and data files will be checked against the name in the SetTraceDef.  
     //   If they're not identical, the program will panic on the spot -run , optional 
 
-    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, initial_condition: initial_type, file_initial: initial_file}= Cli::parse();
+    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, initial_condition: initial_type, file_initial: initial_file, starting_tf}= Cli::parse();
 
     min_thermo_beta = min_thermo_beta.abs();
 
@@ -129,7 +133,7 @@ fn main() {
 
     let mut rng = rand::thread_rng();
 
-    let maybe_init = match (initial_type, initial_file) {
+    let mut maybe_init = match (initial_type, initial_file) {
 
         (None, _) => None,
         (_, None) => {
@@ -170,7 +174,11 @@ fn main() {
         _ => None,
     };
 
-
+    if maybe_init.is_none() {
+        if let Some(tf_num) = starting_tf {
+            maybe_init = Some(MotifSet::rand_with_n_motifs(tf_num, &data_ref, &mut rng));
+        }
+    }
 
     println!("pre initial");
 
