@@ -1038,7 +1038,7 @@ impl<'a> Waveform<'a> {
         remove_descend.reverse();
         remove_descend.dedup();
 
-        remove_descend = remove_descend.into_iter().filter(|a| *a >= self.start_dats.len()).collect();
+        remove_descend = remove_descend.into_iter().filter(|a| *a < self.start_dats.len()).collect();
 
         //This is only possible if we have all blocks listed in remove_descend,
         //thanks to sorting and dedup().

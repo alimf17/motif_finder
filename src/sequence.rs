@@ -198,7 +198,7 @@ impl Sequence {
         remove_descend.reverse();
         remove_descend.dedup();
 
-        remove_descend = remove_descend.into_iter().filter(|a| *a >= self.block_u8_starts.len()).collect();
+        remove_descend = remove_descend.into_iter().filter(|a| *a < self.block_u8_starts.len()).collect();
 
         //This is only possible if we have all blocks listed in remove_descend,
         //thanks to sorting and dedup().
