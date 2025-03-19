@@ -135,7 +135,7 @@ fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
 
-    for block_set in block_divisions {
+    for (i, block_set) in block_divisions.into_iter().enumerate() {
 
         let name_tail: String = block_set.iter().map(|a| a.to_string()).collect::<Vec<String>>().join("_");
 
@@ -147,14 +147,16 @@ fn main() {
         let osb_set = data_ref.with_removed_blocks(&osb_set_inds).unwrap();
 
         let loo_file_str = format!("{loo_directory}/omit_{name_tail}");
+        let loo_file_str_short = format!("{loo_directory}/omit_set_{i}");
         let osb_file_str = format!("{osb_directory}/keep_{name_tail}");
+        let osb_file_str_short = format!("{osb_directory}/keep_set_{i}");
 
-        let mut loo_file_handle = File::create(loo_file_str).unwrap();
+        let mut loo_file_handle = File::create(loo_file_str).unwrap_or_else(|_| File::create(loo_file_str_short).unwrap());
         buffer = bincode::serialize(&loo_set).expect("Serializable");
         loo_file_handle.write(&buffer).expect("Just created this file");
         buffer.clear();
         
-        let mut osb_file_handle = File::create(osb_file_str).unwrap();
+        let mut osb_file_handle = File::create(osb_file_str).unwrap_or_else(|_| File::create(osb_file_str_short).unwrap());
         buffer = bincode::serialize(&osb_set).expect("Serializable");
         osb_file_handle.write(&buffer).expect("Just created this file");
         buffer.clear();
