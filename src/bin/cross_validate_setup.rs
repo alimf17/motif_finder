@@ -113,7 +113,10 @@ fn main() {
 
     };
 
-    index_use.shuffle(&mut rng);
+    //I used to shuffle the blocks. Now, I just put them in one after the next
+    //in each different bin. If I don't have special blocks, this simplifies to
+    //just sorting block n into group n % k. 
+    //index_use.shuffle(&mut rng);
 
     for block_ind in index_use.into_iter() {
         block_divisions[place_ind].push(block_ind);
