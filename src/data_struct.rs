@@ -722,7 +722,7 @@ impl AllData {
 
         //The maximum spacing where things can start interfering with one another is 3 kernel sds
         //away, because we decided that fragment lengths should be about 6 kernel sds long
-        let data_zone: usize = 100.max(fragment_length/(spacing));
+        let data_zone: usize = 10.max(fragment_length/(spacing));
         
         for block in lerped_blocks {
 
