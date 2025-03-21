@@ -68,13 +68,6 @@ struct Cli {
     /// leading zeros>}.bin"
     base_file: String,
 
-    /// This is the number of independent chains run on this inference.
-    /// If this is larger than 26, we will only take the first 26 chains.
-    #[arg(short, long)]
-    num_chains: usize, 
-    // Yeah, the 26 number is because of english letters in the alphabet.
-    // But seriously, this should probably be like 2-6. We usually used 4.
-
 
     /// This is the number of sequential runs per chain. For example, 
     /// if the last output file of the initial run of chain "A" is 
@@ -83,12 +76,6 @@ struct Cli {
     #[arg(short, long)]
     max_runs: usize,
 
-
-    /// Number of sequential runs per chain to discard as burn in. 
-    /// If this is not provided, it's set as 0. If this is larger
-    /// than max_runs, this script will panic. 
-    #[arg(short, long)]
-    discard_num: Option<usize>,
 
     /// This is an optional argument to pick a genome to run FIMO against
     /// If this is not supplied, FIMO will not be run.
@@ -106,19 +93,19 @@ struct Cli {
 
 pub fn main() {
 
-    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, discard_num, fasta_file} = Cli::parse(); 
+    let Cli { output: out_dir, base_file, max_runs: max_chain, fasta_file} = Cli::parse(); 
 
-    let min_chain = discard_num.unwrap_or(0);
+    let base_str = format!("{}/{}", out_dir.clone(), base_file.clone());
+    let directory_regex = Regex::new(&(base_str.clone()+format!("_omit_([0-9]{{1-3}})+_/").as_str())).unwrap();
 
-    if min_chain > max_chain {
-        panic!("Discarding everything you should infer on!");
-    }
+    let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
+    let mut chain_files = directory_iter.filter(|a| directory_regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    println!("chain files: \n {:?}", chain_files);
 
 
-    if num_chains > 26 {
-        warn!("Can only sustain up to 26 independent chains. Only considering the first 26.");
-        num_chains = 26;
-    }
+/*
+
 
     let mut buffer: Vec<u8> = Vec::new();
 
@@ -657,7 +644,7 @@ pub fn main() {
         }
     }
 
-
+*/
 
 
 }
