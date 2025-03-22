@@ -1366,6 +1366,16 @@ impl<'a> AllDataUse<'a> {
         self.propensities[minmer as usize]
     }
 
+    pub fn legal_coordinate_ranges(&self) -> Vec<(usize, usize)> {
+
+        let mut ranges: Vec<(usize, usize)> = self.start_genome_coordinates.iter().zip(self.data.seq().block_lens()).map(|(&i, j)| (i, i+j)).collect();
+        let mut null_r: Vec<(usize, usize)> = self.start_nullbp_coordinates.iter().zip(self.null_seq.block_lens()).map(|(&i, j)| (i, i+j)).collect();
+
+        ranges.append(&mut null_r);
+        ranges.sort_unstable_by(|a,b| a.cmp(b));
+        ranges
+    }
+
     pub fn rand_minmer_by_propensity<R: Rng + ?Sized>(&self, rng: &mut R) -> u64 {
 
         const NUM_MINMERS: usize = (1_usize << ((MIN_BASE * 2)));

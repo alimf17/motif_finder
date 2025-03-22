@@ -2858,7 +2858,6 @@ impl<'a> MotifSet<'a> {
 
         let prior_state: StrippedMotifSet = bincode::deserialize(&buffer)?;
 
-        println!("bincode state {:?}", prior_state.set);
         Ok(prior_state.reactivate_set(data_ref))
 
     }
@@ -3162,6 +3161,10 @@ impl<'a> MotifSet<'a> {
     pub fn ln_likelihood(&self) -> f64 {
         //println!("nulls {:?} ad_calc {}", self.null_peak_scores(), Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer())));
         Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer()))
+    }
+
+    pub fn eth(&self) -> f64 {
+        (self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer())
     }
 
     pub fn magnitude_signal_with_noise(&self) -> f64 {
@@ -4414,7 +4417,6 @@ impl StrippedMotifSet {
 
             set: self.set.clone().into_iter().map(|a| {
                 let nulls = a.return_any_null_binds_by_hamming(data_ref.null_seq(), data_ref.min_height(), cutoff);
-                println!("set {:?}, nulls {:?}", a, nulls);
                 (a, nulls)
             }).collect(),
             signal: data_ref.data().derive_zero(),
@@ -5103,6 +5105,32 @@ impl SetTraceDef {
                          .collect()
 
     }
+    
+    /// This approximates ln eth from the ln likelihood
+    /// This will give good answers for big eths
+    /// But poorer answers for small eths
+    /// We don't explicitly calculate eth for this because that will take
+    /// 10,000 times longer (literally).
+    pub fn approx_ln_eth_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
+
+
+        // This is based on the asymptotic expansion of W0, modulo subbing exp(x)
+        fn lambert_w_exp_x(x: f64) -> f64 {
+            let lnx = x.ln();
+            x-lnx+lnx/x+0.5*lnx*(lnx-2.0)/(x*x)
+        }
+
+        let ln_neg_twice_mul = (-2.0*MULT_CONST_FOR_H).ln();
+
+        // This solves for eth assuming we are exclusively in high tail regime
+        self.trace.iter().map(|a| a.ln_post-a.ln_prior(full_data))
+                         .map(|b| 2.0*(ADD_CONST_FOR_H-b)+ln_neg_twice_mul)
+                         .map(|b| lambert_w_exp_x(b)/2.0*ln_neg_twice_mul)
+                         .map(|b| b.ln())
+                         .collect()
+
+    }
+
 
     pub fn ln_likelihood_trace(&self, full_data: &AllDataUse) -> Vec<f64> {
 
