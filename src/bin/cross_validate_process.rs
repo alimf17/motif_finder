@@ -153,54 +153,59 @@ pub fn main() {
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
+        println!("set trace check {chain} {}", set_trace_collections[chain].len());
 
 
     }
-    let mut all_datas: Vec<AllData> = Vec::with_capacity(n_fold);
+
     let mut data_file_names: Vec<String> = Vec::with_capacity(n_fold);
+    let mut test_file_names: Vec<String> = Vec::with_capacity(n_fold); 
 
     let mut max_post_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
     let mut max_like_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
     let mut min_bics_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
     
-    let _ : Vec<_> = set_trace_collections.iter().map(|a| {
+    let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
+    println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
+    let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
+    let plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
         
+    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    let mut plot_wave_dist_noise = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_noise_file = fs::File::create(format!("{}/{}_wave_dist_with_noises.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
+    let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    let mut plot_eth = poloto::plot(format!("{} Approximate Ln Eth Statistic", base_file), "Step", "Ln Likelihood");
+    let plot_eth_file = fs::File::create(format!("{}/{}_eth.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    
+    for (i, trace) in set_trace_collections.iter().enumerate() {
         buffer.clear();
         
-        let all_data_file = a.data_name().to_owned();
-    
+        println!("set trace check {i} {}", trace.len());
+        let all_data_file = trace.data_name().to_owned();
+        let all_test_file = { let s = all_data_file.replace("exclude_blocks", "only_with_blocks"); s.replace("omit", "keep") };
+
         let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
         let _ = try_bincode.read_to_end(&mut buffer);
 
         let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
-        all_datas.push(data_reconstructed);
 
         data_file_names.push(all_data_file);
-    }).collect();
+        test_file_names.push(all_test_file);
 
-    let test_file_names: Vec<String> = data_file_names.iter().map(|a| {let s = a.replace("exclude_blocks", "only_with_blocks"); s.replace("omit", "keep")} ).collect();
-    println!("test names \n {:?}", test_file_names);
-    let all_tests: Vec<AllData> = test_file_names.iter().map(|a|{
-     
-        buffer.clear();
-        let all_data_file = a.clone();
-        let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
-        let _ = try_bincode.read_to_end(&mut buffer);
-
-        bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!")
-
-    }).collect();
-
-    let all_data_uses: Vec<_> = all_datas.iter().map(|a| AllDataUse::new(&a, 0.0).expect("AllData file must be valid!")).collect();
-    let all_test_uses: Vec<_> = all_tests.iter().map(|a| AllDataUse::new(&a, 0.0).expect("AllData file must be valid!")).collect();
-    println!("images generating");
+        let data_seq = AllDataUse::new(&data_reconstructed, 0.0).expect("AllData file must be valid!");
+        
+        println!("images generating {i}");
     
-    let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
-    println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
-    let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
     
-    for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         let tracey = trace.ln_posterior_trace();
         let mut ordered_tracey = tracey.clone();
@@ -213,118 +218,89 @@ pub fn main() {
         let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
         
 
-        max_post_sets[i] =  trace.extract_highest_posterior_set(0);
+        max_post_sets.push(trace.extract_highest_posterior_set(trace.len()));
 
         plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
 
-    }
         //SAFETY: This is always in bounds, and RGBColor is itself Copy, let 
         //        alone its shared reference (And RGBColor is also Send and Sync).
         //        I have to do this the stupid way because the compiler doesn't
         //        seem to believe me when I tell it this. 
 
-    plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
 
 
-    let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
-    let plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
         let letter = UPPER_LETTERS[i];
         plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
+        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_trace(&data_seq,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+        plot_wave_dist_noise.line(format!("Chain {}", letter), trace.wave_rmse_noise_trace(&data_seq,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_seq).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+        plot_eth.line(format!("Chain {}", letter), trace.approx_ln_eth_trace(&data_seq).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+
     
-    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
-    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_trace(&all_data_uses[i],250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
-   
-    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
-    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist_with_noises.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_noise_trace(&all_data_uses[i],250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
-   
-    
-    let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
-    let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        max_like_sets[i] = trace.extract_highest_likelihood_set(&all_data_uses[i], 0);
-        min_bics_sets[i] = trace.extract_lowest_bic_set(&all_data_uses[i], 0);
-        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&all_data_uses[i]).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    }; 
+        max_like_sets.push(trace.extract_highest_likelihood_set(&data_seq, trace.len()));
+        min_bics_sets.push(trace.extract_lowest_bic_set(&data_seq, trace.len()));
 
 
-    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
-    
-    let mut plot_eth = poloto::plot(format!("{} Approximate Eth Statistic", base_file), "Step", "Ln Likelihood");
-    let plot_eth_file = fs::File::create(format!("{}/{}_eth.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_eth.line(format!("Chain {}", letter), trace.approx_ln_eth_trace(&all_data_uses[i]).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    }; 
+        
 
-    plot_eth.simple_theme(poloto::upgrade_write(plot_eth_file));
-    
 
-    for i in 0..set_trace_collections.len() {
+        if let Some(ref fimo_running) = fasta_file {
+            max_post_sets[i].generate_ascending_fimo(&data_seq, None, fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
+            max_like_sets[i].generate_ascending_fimo(&data_seq, None, fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
+            min_bics_sets[i].generate_ascending_fimo(&data_seq, None, fimo_running, &out_dir, &format!("{}_min_bic", match_chain[i])).unwrap();
+        };
+
+        //I'm fist fighting every ounce of memory, here. I don't need OOMs, so I'm only 
+        //keeping one data set viable at a time
+        std::mem::drop(data_seq);
+        std::mem::drop(data_reconstructed);
+
+        buffer.clear();
+        let mut try_bincode = fs::File::open(&test_file_names[i]).expect("a trace should always refer to a valid data file");
+        let _ = try_bincode.read_to_end(&mut buffer);
+        let test_data: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!"); 
+        let test_use = AllDataUse::new(&test_data, 0.0).expect("AllData file must be valid!");
 
         let legal_loc_name = format!("{}/legal_locations.txt", chain_files[i]);
         let mut loc_file = fs::File::create(&legal_loc_name).unwrap();
-        
-        loc_file.write(print_better(&all_test_uses[i].legal_coordinate_ranges()).as_bytes());
+
+        loc_file.write(print_better(&test_use.legal_coordinate_ranges()).as_bytes());
 
         println!("Sets from {:?}", data_file_names[i]);
         println!("Max post \n {:?}", max_post_sets[i]);
-        let active_max_post = max_post_sets[i].reactivate_set(&all_test_uses[i]);
+        let active_max_post = max_post_sets[i].reactivate_set(&test_use);
         println!("Test set analysis: \n Posterior Density \t Likelihood \t Occ. Sig. Dist \t Occ. Sig. Noise. Dist \t Eth");
         println!("{} \t {} \t {} \t {} \t {}", active_max_post.calc_ln_post(), active_max_post.ln_likelihood(),
-                active_max_post.signal_rmse(), active_max_post.magnitude_signal_with_noise(), active_max_post.eth());
+        active_max_post.signal_rmse(), active_max_post.magnitude_signal_with_noise(), active_max_post.eth());
 
 
 
         println!("Max like \n {:?}", max_like_sets[i]);
-        let active_max_like = max_like_sets[i].reactivate_set(&all_test_uses[i]);
+        let active_max_like = max_like_sets[i].reactivate_set(&test_use);
         println!("Test set analysis: \n Posterior Density \t Likelihood \t Occ. Sig. Dist \t Occ. Sig. Noise. Dist \t Eth");
         println!("{} \t {} \t {} \t {} \t {}", active_max_like.calc_ln_post(), active_max_like.ln_likelihood(),
                 active_max_like.signal_rmse(), active_max_like.magnitude_signal_with_noise(), active_max_like.eth());
         
         println!("Min BIC \n {:?}" , min_bics_sets[i]);
-        let active_min_bics = min_bics_sets[i].reactivate_set(&all_test_uses[i]);
+        let active_min_bics = min_bics_sets[i].reactivate_set(&test_use);
         println!("Test set analysis: \n Posterior Density \t Likelihood \t Occ. Sig. Dist \t Occ. Sig. Noise. Dist \t Eth");
         println!("{} \t {} \t {} \t {} \t {}", active_min_bics.calc_ln_post(), active_min_bics.ln_likelihood(),
                 active_min_bics.signal_rmse(), active_min_bics.magnitude_signal_with_noise(), active_min_bics.eth());
 
-        
-
     }
 
-    if let Some(fimo_running) = fasta_file {
+    
+    println!("test names \n {:?}", test_file_names);
+    //I'm trying to minimize my memory footprint, a little. I keep getting oomed
+    
+    plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
+    plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
+    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
+    plot_wave_dist_noise.simple_theme(poloto::upgrade_write(plot_wave_dist_noise_file));
+    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
+    plot_eth.simple_theme(poloto::upgrade_write(plot_eth_file));
 
-        for i in 0..set_trace_collections.len() {
-
-        /*    println!("Sets from {:?}", data_file_names[i]);
-            println!("Max post \n {:?}", max_post_sets[i]);
-            println!("Max like \n {:?}", max_like_sets[i]);
-            println!("Min BIC \n {:?}" , min_bics_sets[i]);*/
-
-           
-
-            max_post_sets[i].generate_ascending_fimo(&all_data_uses[i], None, &fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
-            max_like_sets[i].generate_ascending_fimo(&all_data_uses[i], None, &fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
-            min_bics_sets[i].generate_ascending_fimo(&all_data_uses[i], None, &fimo_running, &out_dir, &format!("{}_min_bic", match_chain[i])).unwrap();
-
-        }
-
-
-    };
-
+}
 /*
 
 
@@ -866,7 +842,6 @@ pub fn main() {
 */
 
 
-}
 
 
 fn print_better<T: Debug>(x: &[T])-> String {
