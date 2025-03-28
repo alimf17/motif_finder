@@ -273,6 +273,13 @@ pub fn main() {
         println!("{} \t {} \t {} \t {} \t {}", active_max_post.calc_ln_post(), active_max_post.ln_likelihood(),
         active_max_post.signal_rmse(), active_max_post.magnitude_signal_with_noise(), active_max_post.eth());
 
+        let cumulative_lns = active_max_post.ln_posts_by_strength();
+        let cumulative_noises = active_max_post.distances_by_strength();
+
+        for (i, like) in cumulative_lns.into_iter().enumerate() {
+            let mot_ref = active_max_post.get_nth_motif(i);
+            println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        }
 
 
         println!("Max like \n {:?}", max_like_sets[i]);
@@ -281,12 +288,28 @@ pub fn main() {
         println!("{} \t {} \t {} \t {} \t {}", active_max_like.calc_ln_post(), active_max_like.ln_likelihood(),
                 active_max_like.signal_rmse(), active_max_like.magnitude_signal_with_noise(), active_max_like.eth());
         
+        let cumulative_lns = active_max_like.ln_posts_by_strength();
+        let cumulative_noises = active_max_like.distances_by_strength();
+
+        for (i, like) in cumulative_lns.into_iter().enumerate() {
+            let mot_ref = active_max_like.get_nth_motif(i);
+            println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        }
+        
         println!("Min BIC \n {:?}" , min_bics_sets[i]);
         let active_min_bics = min_bics_sets[i].reactivate_set(&test_use);
         println!("Test set analysis: \n Posterior Density \t Likelihood \t Occ. Sig. Dist \t Occ. Sig. Noise. Dist \t Eth");
         println!("{} \t {} \t {} \t {} \t {}", active_min_bics.calc_ln_post(), active_min_bics.ln_likelihood(),
                 active_min_bics.signal_rmse(), active_min_bics.magnitude_signal_with_noise(), active_min_bics.eth());
 
+        println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+        let cumulative_lns = active_min_bics.ln_posts_by_strength();
+        let cumulative_noises = active_min_bics.distances_by_strength();
+
+        for (i, like) in cumulative_lns.into_iter().enumerate() {
+            let mot_ref = active_min_bics.get_nth_motif(i);
+            println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        }
     }
 
     
