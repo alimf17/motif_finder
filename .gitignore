@@ -6,3 +6,4 @@ core*
 *.log
 perf.data*
 cachegrind.out*
+/src/bin/check_background.rs
