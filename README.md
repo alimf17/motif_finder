@@ -24,7 +24,8 @@ Download or create a data file for your DNA-protein data, along with the FASTA f
 
 ### Preprocessing
 
-Usage: `preprocess [OPTIONS] --name <NAME> --output-dir <OUTPUT_DIR> --fasta <FASTA> --data <DATA> --length-of-fragment <LENGTH_OF_FRAGMENT> --spacing <SPACING> --min-height <MIN_HEIGHT> --prior <PRIOR>`
+```bash 
+Usage: preprocess [OPTIONS] --name <NAME> --output-dir <OUTPUT_DIR> --fasta <FASTA> --data <DATA> --length-of-fragment <LENGTH_OF_FRAGMENT> --spacing <SPACING> --min-height <MIN_HEIGHT> --prior <PRIOR>`
 
 Options:
   -n, --name <NAME>
@@ -51,10 +52,11 @@ Options:
           Print help
   -V, --version
           Print version
-
+```
 ### TARJIM
 
-Usage: `tarjim [OPTIONS] --name <NAME> --input <INPUT> --output <OUTPUT> --advances <ADVANCES> --beta <BETA> --trace-num <TRACE_NUM>`
+```bash
+Usage: tarjim [OPTIONS] --name <NAME> --input <INPUT> --output <OUTPUT> --advances <ADVANCES> --beta <BETA> --trace-num <TRACE_NUM>`
 
 Options:
   -n, --name <NAME>
@@ -92,9 +94,10 @@ Options:
 
   -V, --version
           Print version
-
+```
 ### Post processing
 
+```bash
 Usage: `process [OPTIONS] --output <OUTPUT> --num-chains <NUM_CHAINS> --max-runs <MAX_RUNS> <BASE_FILE>`
 
 Arguments:
@@ -108,7 +111,7 @@ Options:
   -f, --fasta-file <FASTA_FILE>    This is an optional argument to pick a genome to run FIMO against If this is not supplied, FIMO will not be run
   -h, --help                       Print help
   -V, --version                    Print version 
-
+```
 ## Contributing
 
 Please submit PRs for any minor fixes. For any major changes, please open an issue
