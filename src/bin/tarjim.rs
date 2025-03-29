@@ -20,7 +20,10 @@ use std::io::Read;
 #[command(version, about, long_about = None)]
 struct Cli {
     
-    /// Sets the name of your run
+    /// Sets the name of your run. Note that if you want multiple runs to 
+    /// be considered in parallel, use the syntax `<name>_<letter starting from A>`
+    /// for your names. If you want runs to be considered as sequential continuations, 
+    /// use the syntax `<name with possible letter>_<number starting from 0>`
     #[arg(short, long)]
     name: String,
 
@@ -58,6 +61,7 @@ struct Cli {
     condition_type: Option<InitialType>,
 
     #[arg(requires="initial")]
+     #[arg(short, long)]
     file_initial: Option<String>,
 
     /// This sets an initial guess on the number of transcription factors.

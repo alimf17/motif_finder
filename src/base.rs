@@ -4510,7 +4510,7 @@ impl StrippedMotifSet {
     /// Generates many fimo runs, one for each `[StrippedMotifSet]` in 
     /// `self.over_additions()`, saving the result of the `i`th element of this
     /// vector to `{output_dir}/{run_name}_{i}_savestate.meme`.
-    pub fn generate_ascending_fimo(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn generate_ascending_fimo(&self, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let over_add = self.over_additions();
 
@@ -4518,7 +4518,7 @@ impl StrippedMotifSet {
         for (i, set) in over_add.into_iter().enumerate() {
 
             let run_mod = format!("{}_{}", run_name, i);
-            set.generate_fimo(data_ref, background_dist, fasta_file, output_dir, &run_mod)?;
+            set.generate_fimo(background_dist, fasta_file, output_dir, &run_mod)?;
         }
 
         Ok(())
@@ -4546,7 +4546,7 @@ impl StrippedMotifSet {
     /// # Errors
     /// If the needed directories or files cannot be generated or written to,
     /// or if the MEME suite is not installed on your machine
-    pub fn generate_fimo(&self, data_ref: &AllDataUse, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn generate_fimo(&self, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
 
        
         let meme_file = match self.output_to_meme(background_dist, output_dir, run_name) {
@@ -5167,13 +5167,13 @@ impl SetTraceDef {
     /// This generates fimo files for `number_samps` steps in `self`.
     /// # Errors
     /// If MEME is not installed on your machine
-    pub fn many_fimo_gen(&self, waypost: &AllDataUse, number_samps: usize, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn many_fimo_gen(&self, number_samps: usize, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
         let step_size: usize = self.trace.len()/number_samps;
         
         let m: Vec<Result<(), Box<dyn Error+Send+Sync>>> = self.trace.par_iter().step_by(step_size).enumerate().map(|(i, a)| {
          
             let save_file = format!("{}_{i}", run_name);
-            let b = a.generate_fimo(waypost,background_dist,fasta_file,output_dir, &save_file);
+            let b = a.generate_fimo(background_dist,fasta_file,output_dir, &save_file);
         
             b
         }).collect();

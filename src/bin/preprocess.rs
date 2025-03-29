@@ -23,16 +23,22 @@ use std::io::{Read, Write};
 struct Cli {
 
     /// Sets the name of your output file
+    #[arg(short, long)]
     name: String,
 
     /// Sets the directory location of your output file
+    #[arg(short, long)]
     output_dir: String,
 
     /// Sets the name of the fasta file for your inference 
     #[arg(short, long)]
     fasta: String,
 
-    /// Sets the name of your data file for your inference 
+    /// Sets the name of your data file for your inference. This data file 
+    /// must have the header "loc data", followed by rows which start with
+    /// an integer, then a space, then a float. For the inference to produce
+    /// a correct result, the floats should be the log2 ratio of some
+    /// experimental condition to some control: eg for ChIP-chip log2(IP/mock)
     #[arg(short, long)]
     data: String,
 
@@ -40,10 +46,10 @@ struct Cli {
     #[arg(short, long)]
     circular: bool,
 
-    /// Gives the average length of the DNA fragments in your prep, in base pairs
+    /// Gives the average length of the DNA fragments in your prep, in base pairs.
     /// This should come out to about half the width of your singleton peaks. 
     /// Note the word "singleton": a "peak" might actually be multiple binding 
-    /// kernels glommed next to each other.
+    /// kernels glommed next to each other, so estimate low.
     #[arg(short, long)]
     length_of_fragment: usize,
 
