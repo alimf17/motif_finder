@@ -25,7 +25,7 @@ Download or create a data file for your DNA-protein data, along with the FASTA f
 ### Preprocessing
 
 ```bash 
-Usage: preprocess [OPTIONS] --name <NAME> --output-dir <OUTPUT_DIR> --fasta <FASTA> --data <DATA> --length-of-fragment <LENGTH_OF_FRAGMENT> --spacing <SPACING> --min-height <MIN_HEIGHT> --prior <PRIOR>`
+Usage: cargo run --release --bin preprocess -- [OPTIONS] --name <NAME> --output-dir <OUTPUT_DIR> --fasta <FASTA> --data <DATA> --length-of-fragment <LENGTH_OF_FRAGMENT> --spacing <SPACING> --min-height <MIN_HEIGHT> --prior <PRIOR>`
 
 Options:
   -n, --name <NAME>
@@ -56,7 +56,7 @@ Options:
 ### TARJIM
 
 ```bash
-Usage: tarjim [OPTIONS] --name <NAME> --input <INPUT> --output <OUTPUT> --advances <ADVANCES> --beta <BETA> --trace-num <TRACE_NUM>`
+Usage: cargo run --release --bin tarjim -- [OPTIONS] --name <NAME> --input <INPUT> --output <OUTPUT> --advances <ADVANCES> --beta <BETA> --trace-num <TRACE_NUM>`
 
 Options:
   -n, --name <NAME>
@@ -98,7 +98,7 @@ Options:
 ### Post processing
 
 ```bash
-Usage: `process [OPTIONS] --output <OUTPUT> --num-chains <NUM_CHAINS> --max-runs <MAX_RUNS> <BASE_FILE>`
+Usage: `cargo run --release --bin -- process [OPTIONS] --output <OUTPUT> --num-chains <NUM_CHAINS> --max-runs <MAX_RUNS> <BASE_FILE>`
 
 Arguments:
   <BASE_FILE>  This is prefix your runs share. When doing this processing, we assume that all of your outputted bin files are of the form "{output}/{base_file}_{<Letter starting from A and going up>}_ {<0-indexed count of runs>}_trace_from_step_{<7 digit number, with leading zeros>}.bin"
@@ -111,6 +111,8 @@ Options:
   -f, --fasta-file <FASTA_FILE>    This is an optional argument to pick a genome to run FIMO against If this is not supplied, FIMO will not be run
   -h, --help                       Print help
   -V, --version                    Print version 
+
+This outputs as text the result of the post processing of your runs. It is advised that you redirect this text away from standard output.
 ```
 ## Contributing
 
