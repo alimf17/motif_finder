@@ -97,7 +97,7 @@ pub fn main() {
     let Cli { output: out_dir, base_file, max_runs: max_chain, fasta_file} = Cli::parse(); 
 
     let base_str = format!("{}/{}", out_dir.clone(), base_file.clone());
-    let directory_regex = Regex::new(&(base_str.clone()+format!("_omit_([0-9]{{1,3}}_)*[0-9]{{1,3}}$").as_str())).unwrap();
+    let directory_regex = Regex::new(&(base_str.clone()+format!("_omit_(set_)?([0-9]{{1,3}}_)*[0-9]{{1,3}}$").as_str())).unwrap();
     let file_regex = Regex::new(".bin").unwrap();
 
     let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
@@ -108,7 +108,7 @@ pub fn main() {
     chain_files.sort_unstable();
     println!("chain files: \n {:?}", chain_files);
 
-    let name_regex = Regex::new(&(format!("({}_omit_([0-9]{{1,3}}_)*[0-9]{{1,3}}$)", base_file).as_str())).unwrap();
+    let name_regex = Regex::new(&(format!("({}_omit_(set_)?([0-9]{{1,3}}_)*[0-9]{{1,3}}$)", base_file).as_str())).unwrap();
 
     let match_chain = chain_files.iter().map(|a| name_regex.captures(a).unwrap().get(1).unwrap().as_str().to_string()).collect::<Vec<_>>();
 
@@ -163,7 +163,6 @@ pub fn main() {
 
     let mut max_post_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
     let mut max_like_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
-    let mut min_bics_sets: Vec<&StrippedMotifSet> = Vec::with_capacity(n_fold);
     
     let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
     println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
@@ -238,7 +237,6 @@ pub fn main() {
 
     
         max_like_sets.push(trace.extract_highest_likelihood_set(&data_seq, trace.len()));
-        min_bics_sets.push(trace.extract_lowest_bic_set(&data_seq, trace.len()));
 
 
         
@@ -247,7 +245,6 @@ pub fn main() {
         if let Some(ref fimo_running) = fasta_file {
             max_post_sets[i].generate_ascending_fimo(None, fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
             max_like_sets[i].generate_ascending_fimo(None, fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
-            min_bics_sets[i].generate_ascending_fimo(None, fimo_running, &out_dir, &format!("{}_min_bic", match_chain[i])).unwrap();
         };
 
         //I'm fist fighting every ounce of memory, here. I don't need OOMs, so I'm only 
@@ -296,20 +293,7 @@ pub fn main() {
             println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
         }
         
-        println!("Min BIC \n {:?}" , min_bics_sets[i]);
-        let active_min_bics = min_bics_sets[i].reactivate_set(&test_use);
-        println!("Test set analysis: \n Posterior Density \t Likelihood \t Occ. Sig. Dist \t Occ. Sig. Noise. Dist \t Eth");
-        println!("{} \t {} \t {} \t {} \t {}", active_min_bics.calc_ln_post(), active_min_bics.ln_likelihood(),
-                active_min_bics.signal_rmse(), active_min_bics.magnitude_signal_with_noise(), active_min_bics.eth());
 
-        println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
-        let cumulative_lns = active_min_bics.ln_posts_by_strength();
-        let cumulative_noises = active_min_bics.distances_by_strength();
-
-        for (i, like) in cumulative_lns.into_iter().enumerate() {
-            let mot_ref = active_min_bics.get_nth_motif(i);
-            println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
-        }
     }
 
     

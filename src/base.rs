@@ -4515,11 +4515,16 @@ impl StrippedMotifSet {
         let over_add = self.over_additions();
 
 
-        for (i, set) in over_add.into_iter().enumerate() {
+        let a: Result<Vec<()>, Box<dyn Error+Send+Sync>> = over_add.into_par_iter().enumerate().map(|(i, set)| {
 
             let run_mod = format!("{}_{}", run_name, i);
-            set.generate_fimo(background_dist, fasta_file, output_dir, &run_mod)?;
-        }
+            let mut command=set.generate_fimo_command(background_dist, fasta_file, output_dir, &run_mod)?;
+            command.status()?;
+            Ok(())
+        }).collect();
+
+
+        a?;
 
         Ok(())
 
@@ -4559,13 +4564,35 @@ impl StrippedMotifSet {
         let _ = fs::create_dir(&fimo_output);
 
         let mut bind_command = Command::new("fimo");
-        let commander = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
+        let mut commander = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
         
         commander.status()?;
 
 
         Ok(())
     }
+
+    /// This outputs `self` to the meme file `{output_dir}/{run_name}_savestate.meme`,
+    /// and returns the fimo command for this meme file that has an output directory of `{output_dir}/{run_name}_fimo`.
+    pub fn generate_fimo_command(&self, background_dist: Option<[f64; BASE_L]>, fasta_file: &str, output_dir: &str, run_name: &str) -> Result<Command, Box<dyn Error+Send+Sync>> {
+
+
+        let meme_file = match self.output_to_meme(background_dist, output_dir, run_name) {
+            Ok(m) => m,
+            Err(e) => return Err(Box::new(e)),
+        };
+
+        let fimo_output = format!("{}/{}_fimo", output_dir, run_name);
+
+        let _ = fs::create_dir(&fimo_output);
+
+        let mut bind_command = Command::new("fimo");
+        let _ = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
+
+        Ok(bind_command)
+
+    }
+
 
     /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
     /// and `reference_set`, using the minimum squared Aitchison metric * 4

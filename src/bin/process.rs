@@ -66,6 +66,7 @@ struct Cli {
     /// "{output}/{base_file}_{<Letter starting from A and going up>}_
     /// {<0-indexed count of runs>}_trace_from_step_{<7 digit number, with 
     /// leading zeros>}.bin"
+    #[arg(short, long)]
     base_file: String,
 
     /// This is the number of independent chains run on this inference.
@@ -641,7 +642,7 @@ pub fn main() {
 
 
     println!("Finish best motif sets");
-
+/*
 
     for (i, trace) in set_trace_collections.iter().enumerate() {
         let save_mini = format!("{save_file}_{}", UPPER_LETTERS[i]); 
@@ -652,7 +653,7 @@ pub fn main() {
     }
 
 
-
+*/
 
 }
 
