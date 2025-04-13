@@ -243,8 +243,8 @@ pub fn main() {
 
 
         if let Some(ref fimo_running) = fasta_file {
-            max_post_sets[i].generate_ascending_fimo(None, fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
-            max_like_sets[i].generate_ascending_fimo(None, fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
+            max_post_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
+            max_like_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
         };
 
         //I'm fist fighting every ounce of memory, here. I don't need OOMs, so I'm only 
