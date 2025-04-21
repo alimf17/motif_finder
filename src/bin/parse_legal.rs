@@ -26,11 +26,12 @@ use plotters::prelude::*;
 use plotters::prelude::full_palette::ORANGE;
 
 fn main() {
-    //let file_out_trp = "/Users/afarhat/Downloads/NC_000913.2_TrpR_lb_ratio_unstranded_minus_mean_25_data.bin";
 
-    let file_out_trp = "/expanse/lustre/scratch/alimf/temp_project/ProcessedData/IPOD_HR_min_height_1.0_try_again.bin";
+    let args: Vec<String> = std::env::args().collect();
 
-    let mut try_bincode = fs::File::open(file_out_trp).unwrap();
+    let file_out = args[1].clone();
+
+    let mut try_bincode = fs::File::open(file_out).unwrap();
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
@@ -40,6 +41,11 @@ fn main() {
 
     buffer.clear();
 
-    data.save_data_to_directory("/expanse/lustre/scratch/alimf/temp_project/ProcessedData", "IPOD_HR_min_height_1.0_try_again_plain");
+    let ranges = data.legal_coordinate_ranges();
 
+    print!("[");
+    for r in ranges {
+        print!("{:?}, ", r);
+    }
+    print!("]");
 }
