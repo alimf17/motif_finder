@@ -2317,9 +2317,10 @@ impl Motif {
     /// 
     /// # Example
     /// ```
-    /// use motif_finder::base::{Motif, Bp, Base};
+    /// use motif_finder::base::{Motif, Bp, Base, TruncatedLogNormal, LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MAX_HEIGHT};
     /// let mut rng = rand::thread_rng();
-    /// let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &mut rng);
+    /// let height_dist = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, 2.0, MAX_HEIGHT).unwrap();
+    /// let m = Motif::from_motif(vec![Bp::A, Bp::C, Bp::G, Bp::G, Bp::G, Bp::G, Bp::T, Bp::T, Bp::T], &height_dist,&mut rng);
     /// let dself = m.distance_function(&m);
     /// assert!(dself.0.abs() < 1e-16);
     /// assert!(!dself.1);
@@ -3384,7 +3385,7 @@ impl<'a> MotifSet<'a> {
     }
     
     /// This proposes a new motif for the motif set by the following process:
-    /// 1. We pick `prefix`, a `MIN_BASE-mer` based on the propensities in `self.data_ref()`
+    /// 1. We pick `prefix`, a `MIN_BASE-mer` drawn uniformly 
     /// 2. We sample a motif length `k` uniformly from `MIN_BASE` to `MAX_BASE`
     /// 3. We uniformly sample from all the possible `k`-mers that start with `prefix`
     /// 4. We randomly generate a `Motif` with the best match of the `k`-mer from step 3, 
@@ -6328,9 +6329,7 @@ mod tester{
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let invented_propensities = vec![1.0/65536_f64; 65536];
-
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities, MIN_HEIGHT)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, MIN_HEIGHT, 4.126)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -6373,7 +6372,10 @@ mod tester{
         let mot_scram = mot.scramble_by_id_to_valid(id, false, &sequence);
         assert!(mot_scram.peak_height() == mot.peak_height(), "peak height isn't preserved when it should be");
 
-        let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
+        //let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
+        
+        let hamming_fn = |x: usize| if x < 10 {1} else { x/2-3};
+
         let ln_num_hammings = |x: &Motif| ((sequence.all_kmers_within_hamming(&x.best_motif(), hamming_fn(x.len())+1).len()) as f64).ln() ;
         println!(" motif 0 neighbors {} motif 1 neighbors {}", ln_num_hammings(motif_set.nth_motif(0)).exp(), ln_num_hammings(motif_set.nth_motif(1)).exp());
         //This should usually be Some
@@ -6389,11 +6391,10 @@ mod tester{
         let leap_kmer = leap.best_motif();
         let leap1_kmer = leap1.best_motif();
 
-        let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
-
         
         let kmer_num_ln_rat = ln_num_hammings(&leap)+ln_num_hammings(&leap1)-(ln_num_hammings(&motif_set.get_nth_motif(0))+ln_num_hammings(&motif_set.get_nth_motif(1)));
 
+        println!("ln rats {} {} {} {}", ln_num_hammings(&leap), ln_num_hammings(&leap1), ln_num_hammings(&motif_set.get_nth_motif(0)), ln_num_hammings(&motif_set.get_nth_motif(1)));
         println!("shuff check {} {:?} {}", leap_score, leaped.ln_post, kmer_num_ln_rat);
         assert!((leap_score-(leaped.ln_post.unwrap()+kmer_num_ln_rat)).abs() < 1e-6);
 
@@ -6619,18 +6620,14 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 350./6.).unwrap();
 
-        let mut invented_propensities = vec![0.0_f64; 65536];
 
         let minmers = sequence.unique_kmers(MIN_BASE);
 
         let mut sum: f64 = 0.0;
-        for minmer in minmers { invented_propensities[minmer as usize] = 1.0; sum += 1.0; }
-
-        for i in 0..invented_propensities.len() { invented_propensities[i] /= sum;}
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, &invented_propensities, MIN_HEIGHT)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, MIN_HEIGHT, 4.126)};
         let _block_n: usize = 5;
 
         let duration = start_gen.elapsed();
@@ -6876,7 +6873,6 @@ mod tester{
         let should_prior = ln_prop-(birth_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&motif_set.signal;
-        let _propensities = remaining.kmer_propensities(birth_mot.nth_motif(l).len());
         //let pick_prob = (birth_mot.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
         let new_mot = birth_mot.nth_motif(l);
@@ -7268,9 +7264,8 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 20.).unwrap();
 
-        let invented_propensities = vec![1.0/65536_f64; 65536];
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, &invented_propensities, 3.0)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0, 4.126)};
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -7297,7 +7292,7 @@ mod tester{
 
         let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
 
-        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, &invented_propensities, 3.0) }; 
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, 3.0, 4.126) }; 
 
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
@@ -7601,7 +7596,7 @@ mod tester{
 
 
 
-        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,&invented_propensities, 3.0) }; 
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,3.0, 4.126) }; 
         let theory_base = [1.0.log2(), 1e-5.log2(), 1e-5.log2(), 0.2_f64.log2()];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -7617,7 +7612,7 @@ mod tester{
         let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
         let small: Sequence = Sequence::new_manual(small_block, small_lens);
-        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, -0.2, -0.4, -0.6, -0.6], &small, 5).unwrap();
+        let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6,-0.1], &small, 5).unwrap();
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
         let wave_motif: Motif = Motif::raw_pwm(mat, 10.0, KernelWidth::Wide, KernelVariety::Gaussian); //small

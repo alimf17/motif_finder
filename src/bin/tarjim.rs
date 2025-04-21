@@ -120,7 +120,6 @@ fn main() {
 
     let mut total_data: AllData = bincode::deserialize(&buffer).expect("Something was incorrect with your saved data input bincode file!");
 
-    total_data.clear_props();
 
 
     println!("have all data");

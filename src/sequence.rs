@@ -1,6 +1,7 @@
 
-use serde::{Serialize,Deserialize};
+use serde::{Serialize,Deserialize, Serializer, ser::SerializeStruct, Deserializer, de::Visitor, de::SeqAccess, de::MapAccess};
 
+use std::fmt;
 use std::collections::{HashMap, HashSet};
 use itertools::{Itertools};
 use rand::Rng;
@@ -33,7 +34,7 @@ pub(crate) const U64_BITMASK: u64 = 3;
 //   4) I still screw it up when I have to do it manually. 
 //   5) Save yourself. 
 /// This is the struct which holds the sequence blocks with significant amounts of binding
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,
@@ -371,6 +372,14 @@ impl Sequence {
         self.kmer_dict[k-MIN_BASE].clone()
     }
 
+        /// #Panics
+    /// If `k` is not an element of `MIN_BASE..=MAX_BASE`
+    pub fn unique_kmers_ref(&self, k: usize) -> &Vec<u64> {
+
+        &self.kmer_dict[k-MIN_BASE]
+    }
+
+
     pub(crate) fn idth_unique_kmer(&self, k: usize, id: usize) -> u64 {
         self.kmer_dict[k-MIN_BASE][id]
     }
@@ -615,9 +624,91 @@ impl Sequence {
 
         id_set.into_iter().collect()
     }
+
 }
+/*
+   pub struct Sequence {
+    seq_blocks: Vec<u8>,
+    block_u8_starts: Vec<usize>,
+    block_lens: Vec<usize>,
+    max_len: usize,
+    kmer_dict:  [Vec<u64>; MAX_BASE+1-MIN_BASE],
+    kmer_id_dict: Vec<HashMap<u64, usize, WyHash>>,
+    kmer_nums: [usize; MAX_BASE+1-MIN_BASE],
+}
+*/
+
+impl Serialize for Sequence {
+
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("Sequence", 2)?;
+        state.serialize_field("seq_blocks", &self.seq_blocks)?;
+        state.serialize_field("block_lens", &self.block_lens)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Sequence {
+
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field { Seq_Blocks, Block_Lens }
+
+        struct SequenceVisitor;
+        impl<'de> Visitor<'de> for SequenceVisitor {
+            type Value = Sequence;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct Sequence")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<Sequence, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let seq_blocks: Vec<u8> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let block_lens: Vec<usize> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+
+                Ok(Sequence::new_manual(seq_blocks, block_lens))
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Sequence, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut seq_blocks: Option<Vec<u8>> = None;
+                let mut block_lens: Option<Vec<usize>> = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Seq_Blocks => {
+                            if seq_blocks.is_some() {
+                                return Err(serde::de::Error::duplicate_field("seq_blocks"));
+                            }
+                            seq_blocks = Some(map.next_value()?);
+                        }
+                        Field::Block_Lens=> {
+                            if block_lens.is_some() {
+                                return Err(serde::de::Error::duplicate_field("block_lens"));
+                            }
+                            block_lens = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let seq_blocks = seq_blocks.ok_or_else(|| serde::de::Error::missing_field("secs"))?;
+                let block_lens = block_lens.ok_or_else(|| serde::de::Error::missing_field("nanos"))?;
+                Ok(Sequence::new_manual(seq_blocks, block_lens))
+            }
+        }
+
+        deserializer.deserialize_struct("Sequence", &["seq_blocks","block_u8_starts","block_lens","max_len", "kmer_dict","kmer_id_dict", "kmer_nums"], SequenceVisitor)
+
+
+    }
+}
+
 /// This is the struct which holds the sequence blocks with no notable binding
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct NullSequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,
@@ -851,6 +942,74 @@ impl NullSequence {
 
     pub fn kmer_count(&self, kmer: u64, len: usize) -> Option<usize> {
         self.kmer_counts[len-MIN_BASE].get(&kmer).map(|a| *a) 
+    }
+}
+
+impl Serialize for NullSequence {
+
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("NullSequence", 2)?;
+        state.serialize_field("seq_blocks", &self.seq_blocks)?;
+        state.serialize_field("block_lens", &self.block_lens)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for NullSequence {
+
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field { Seq_Blocks, Block_Lens }
+
+        struct NullSequenceVisitor;
+        impl<'de> Visitor<'de> for NullSequenceVisitor {
+            type Value = NullSequence;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct NullSequence")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<NullSequence, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let seq_blocks: Vec<u8> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let block_lens: Vec<usize> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+
+                Ok(NullSequence::new_manual(seq_blocks, block_lens))
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<NullSequence, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut seq_blocks: Option<Vec<u8>> = None;
+                let mut block_lens: Option<Vec<usize>> = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Seq_Blocks => {
+                            if seq_blocks.is_some() {
+                                return Err(serde::de::Error::duplicate_field("seq_blocks"));
+                            }
+                            seq_blocks = Some(map.next_value()?);
+                        }
+                        Field::Block_Lens=> {
+                            if block_lens.is_some() {
+                                return Err(serde::de::Error::duplicate_field("block_lens"));
+                            }
+                            block_lens = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let seq_blocks = seq_blocks.ok_or_else(|| serde::de::Error::missing_field("secs"))?;
+                let block_lens = block_lens.ok_or_else(|| serde::de::Error::missing_field("nanos"))?;
+                Ok(NullSequence::new_manual(seq_blocks, block_lens))
+            }
+        }
+
+        deserializer.deserialize_struct("NullSequence", &["seq_blocks","block_u8_starts","block_lens","max_len", "kmer_counts", "kmer_lists"], NullSequenceVisitor)
+
     }
 }
 

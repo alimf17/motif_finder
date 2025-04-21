@@ -16,6 +16,7 @@ use thiserror::Error;
 
 use rayon::prelude::*;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 
 use statrs::distribution::{Continuous, StudentsT};
 
@@ -59,7 +60,6 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
 pub struct AllData {
 
     seq: Sequence,
-    propensities: Vec<f64>,
     null_seq: NullSequence,
     data: WaveformDef,
     start_genome_coordinates: Vec<usize>,
@@ -72,7 +72,6 @@ pub struct AllData {
 #[derive(Clone)]
 pub struct AllDataUse<'a> {
     data: Waveform<'a>, 
-    propensities: &'a Vec<f64>,
     null_seq: &'a NullSequence, 
     start_genome_coordinates: &'a Vec<usize>,
     start_nullbp_coordinates: &'a Vec<usize>,
@@ -209,7 +208,7 @@ impl AllData {
         let (seq, null_seq, data, starts, start_nulls) = test_sync.expect("We already returned if this was an error.");
 
         println!("synchronized fasta and data");
-        let mut full_data: AllData = AllData {seq: seq, propensities: Vec::with_capacity(MINMER_NUM), null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height, credibility: credibility};
+        let mut full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height, credibility: credibility};
 
         //I've inserted this as a check to make sure that this isn't so massive
         //that TARJIM can't work with it or save it. Because if it is, you want
@@ -223,33 +222,6 @@ impl AllData {
         println!("validated data");
        
         let mut max = -f64::INFINITY;
-
-        let mut propensities: Vec<f64> = (0..MINMER_NUM).into_par_iter().map(|minmer| {
-
-            let mut nullless_mot = MotifSet::manual_set_null_free(&use_data, Motif::from_motif_max_selective(Sequence::u64_to_kmer(minmer as u64, MIN_BASE), min_height, KernelWidth::Wide, KernelVariety::Gaussian));
-
-            
-
-            let a = nullless_mot.ln_posterior();
-
-
-            a/10000.0
-
-        }).collect();
-
-
-        let mut max = -f64::INFINITY;
-        for i in 0..propensities.len() { if propensities[i] > max { max = propensities[i]; } }
-        for i in 0..propensities.len() { propensities[i] = (propensities[i]-max).exp(); }
-
-        let sum_props = propensities.iter().sum::<f64>();
-
-        let _ = propensities.par_iter_mut().map(|a| *a = *a/sum_props).collect::<Vec<_>>();
-
-        println!("propensities {:?}", propensities);
-        println!("{:?}", propensities.len());
-
-        full_data.propensities = propensities;
 
 
         Ok(full_data)
@@ -277,10 +249,6 @@ impl AllData {
 
     }
    
-    pub fn clear_props(&mut self) {
-
-        self.propensities = vec![1.0/(MINMER_NUM as f64); MINMER_NUM];
-    }
 
     pub fn background(&self) -> &Background {
         &self.background
@@ -1259,7 +1227,6 @@ impl<'a> AllDataUse<'a> {
 
         Ok( Self{ 
                data: data,
-               propensities: &reference_struct.propensities,
                null_seq: &reference_struct.null_seq,
                start_genome_coordinates: &reference_struct.start_genome_coordinates,
                start_nullbp_coordinates: &reference_struct.start_nullbp_coordinates,
@@ -1276,10 +1243,9 @@ impl<'a> AllDataUse<'a> {
     //        is SHORTER than the number of bps in any sequence block in 
     //        the sequence data points to
     //        AND start_genome_coordinates must be the same length as the number of blocks in waveform
-    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, propensities: &'a Vec<f64>, min_height: f64, credibility: f64) -> Self {
+    pub(crate) unsafe fn new_unchecked_data(data: Waveform<'a>, null_seq: &'a NullSequence, start_genome_coordinates: &'a Vec<usize>, start_nullbp_coordinates: &'a Vec<usize>, background: &'a Background, min_height: f64, credibility: f64) -> Self {
         Self{
             data: data,
-            propensities: propensities,
             null_seq: null_seq,
             start_genome_coordinates: start_genome_coordinates,
             start_nullbp_coordinates: start_nullbp_coordinates,
@@ -1358,12 +1324,12 @@ impl<'a> AllDataUse<'a> {
         self.data.point_lens().len()
     }
 
-    pub fn propensities(&self) -> &Vec<f64> {
-        self.propensities
-    }
-
     pub fn propensity_minmer(&self, minmer: u64) -> f64 {
-        self.propensities[minmer as usize]
+        if self.data.seq().id_of_u64_kmer(MIN_BASE, minmer).is_some() {
+            (self.data.seq().number_unique_kmers(MIN_BASE) as f64).recip()
+        } else {
+            0.0
+        }
     }
 
     pub fn legal_coordinate_ranges(&self) -> Vec<(usize, usize)> {
@@ -1378,13 +1344,10 @@ impl<'a> AllDataUse<'a> {
 
     pub fn rand_minmer_by_propensity<R: Rng + ?Sized>(&self, rng: &mut R) -> u64 {
 
-        const NUM_MINMERS: usize = (1_usize << ((MIN_BASE * 2)));
-        if self.propensities.len() == 0 {
-            rand::seq::index::sample(rng, NUM_MINMERS, 1).index(0) as u64
-        } else {
-            //SAFETY: 0..self.propensities.len() is always in bounds, since we already made sure that self.propensities.len() > 0
-            rand::seq::index::sample_weighted(rng, self.propensities.len(), |a| unsafe{ *self.propensities.get_unchecked(a)}, 1).expect("All weights need to be positive!").index(0) as u64
-        }
+        //This returns None only if there are NO MIN_BASE-mers that are 
+        //legal in the sequence associated with this data struct. This is
+        //deeply pathological. 
+        *self.data.seq().unique_kmers_ref(MIN_BASE).choose(rng).unwrap()
     }
 
     pub(crate) fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {
@@ -1564,8 +1527,7 @@ impl<'a> AllDataUse<'a> {
     /// This creates an `[AllData]` from `self` which omits the blocks indexed by `remove`. 
     /// We ignore any duplicated elements of `remove` as well as any elements 
     /// that are at least the number of blocks in `self`. Returns `Ok(None)` if `remove` 
-    /// contains all blocks. The AllData that comes out retains the parent's propensities, 
-    /// and all data about the null sequence. 
+    /// contains all blocks. The AllData that comes out retains all data about the null sequence. 
     pub fn with_removed_blocks(&self, remove: &[usize]) -> Option<AllData> {
 
         let new_seq = self.data.seq().with_removed_blocks(remove)?;
@@ -1594,7 +1556,6 @@ impl<'a> AllDataUse<'a> {
         let to_return = AllData{
 
             seq: new_seq,
-            propensities: self.propensities.clone(),
             null_seq: self.null_seq.clone(), 
             data: new_wave,
             start_genome_coordinates: new_coords,
@@ -1963,14 +1924,14 @@ mod tests{
 
         // /Users/afarhat/Downloads/GSE26054_RAW/GSM639836_TrpR_Trp_ln_ratio.pair
         let a = AllData::create_inference_data("/Users/afarhat/Downloads/sequence(1).fasta", "/Users/afarhat/Downloads/GSE26054_RAW/GSM639836_TrpR_Trp_ln_ratio.pair", "/Users/afarhat/Desktop/", true,
-                                 498, 25, 3.0, &None, None).unwrap();
-        for (i, b) in a.0.start_genome_coordinates.iter().enumerate(){
-            println!("{:?} start b (zero indexed) {} Look for match in file on vim line {} vim column {}", a.0.seq.return_bases(i, 0, MAX_BASE), b, (b/70)+2, b-(b/70)*70+1);
+                                 498, 25, 4.126, 3.0, &None, None).unwrap();
+        for (i, b) in a.start_genome_coordinates.iter().enumerate(){
+            println!("{:?} start b (zero indexed) {} Look for match in file on vim line {} vim column {}", a.seq.return_bases(i, 0, MAX_BASE), b, (b/70)+2, b-(b/70)*70+1);
         }
         
-        println!("Null bp starts {:?}", a.0.start_nullbp_coordinates);
-        for (i, b) in a.0.start_nullbp_coordinates.iter().enumerate(){
-            println!("{:?} start b null (zero indexed) {} Look for match in file on vim line {} vim column {}", a.0.null_seq.return_bases(i, 0, MAX_BASE), b, (b/70)+2, b-70*(b/70)+1);
+        println!("Null bp starts {:?}", a.start_nullbp_coordinates);
+        for (i, b) in a.start_nullbp_coordinates.iter().enumerate(){
+            println!("{:?} start b null (zero indexed) {} Look for match in file on vim line {} vim column {}", a.null_seq.return_bases(i, 0, MAX_BASE), b, (b/70)+2, b-70*(b/70)+1);
         }
         //println!("{:?} {:?}", serde_json::to_string(&a.0), a.1);
     }
