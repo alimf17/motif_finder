@@ -143,13 +143,13 @@ pub fn main() {
 
         fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
 
-        set_trace_collections.push(bincode::deserialize(&buffer).expect("All read in files must be correct bincode!"));
+        set_trace_collections.push(bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!").0);
 
 
         for file_name in iter_files {
             buffer.clear();
             fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
-            let interim: SetTraceDef = bincode::deserialize(&buffer).expect("All read in files must be correct bincode!");
+            let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
         }
@@ -194,7 +194,7 @@ pub fn main() {
         let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
         let _ = try_bincode.read_to_end(&mut buffer);
 
-        let data_reconstructed: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!");
+        let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
 
         data_file_names.push(all_data_file);
@@ -255,7 +255,7 @@ pub fn main() {
         buffer.clear();
         let mut try_bincode = fs::File::open(&test_file_names[i]).expect("a trace should always refer to a valid data file");
         let _ = try_bincode.read_to_end(&mut buffer);
-        let test_data: AllData = bincode::deserialize(&buffer).expect("Monte Carlo chain should always point to data in proper format for inference!"); 
+        let (test_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!"); 
         let test_use = AllDataUse::new(&test_data, 0.0).expect("AllData file must be valid!");
 
         let legal_loc_name = format!("{}/legal_locations.txt", chain_files[i]);

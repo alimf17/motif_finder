@@ -60,7 +60,7 @@ fn main() {
 
     _ = data_file_handle.read_to_end(&mut buffer).expect("Something went wrong when reading the data input file!");
 
-    let mut total_data: AllData = bincode::deserialize(&buffer).expect("Something was incorrect with your saved data input bincode file!");
+    let (mut total_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Something was incorrect with your saved data input bincode file!");
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
@@ -152,12 +152,12 @@ fn main() {
         let osb_file_str = if name_tail.len() <= 50 { format!("{osb_directory}/keep_{name_tail}")} else {osb_file_str_short.clone()};
 
         let mut loo_file_handle = File::create(loo_file_str).unwrap_or_else(|_| File::create(loo_file_str_short).unwrap());
-        buffer = bincode::serialize(&loo_set).expect("Serializable");
+        buffer = bincode::serde::encode_to_vec(&loo_set, bincode::config::standard()).expect("Serializable");
         loo_file_handle.write(&buffer).expect("Just created this file");
         buffer.clear();
         
         let mut osb_file_handle = File::create(osb_file_str).unwrap_or_else(|_| File::create(osb_file_str_short).unwrap());
-        buffer = bincode::serialize(&osb_set).expect("Serializable");
+        buffer = bincode::serde::encode_to_vec(&osb_set, bincode::config::standard()).expect("Serializable");
         osb_file_handle.write(&buffer).expect("Just created this file");
         buffer.clear();
     }

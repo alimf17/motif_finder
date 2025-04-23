@@ -35,7 +35,7 @@ fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
-    let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
+    let (pre_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 

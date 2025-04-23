@@ -130,7 +130,7 @@ fn main() {
     
     println!("have all data");
 
-    let buffer: Vec<u8> = bincode::serialize(&total_data).expect("serializable");
+    let buffer: Vec<u8> = bincode::serde::encode_to_vec(&total_data, bincode::config::standard()).expect("serializable");
 
     let output_name = format!("{output_dir}/{name}");
 

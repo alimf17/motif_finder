@@ -116,14 +116,14 @@ fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
-    let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
+    let (pre_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
     buffer.clear();
 
     //let _ = try_bin_trace.read_to_end(&mut buffer);
-    //let pre_trace: SetTraceDef = bincode::deserialize(&buffer).unwrap();
+    //let (pre_trace, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let mut rng = rand::thread_rng();
 

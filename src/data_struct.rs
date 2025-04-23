@@ -37,6 +37,7 @@ use argmin::core::*;
 use argmin::core::Error as ArgminError;
 use argmin::solver::neldermead::NelderMead;
 
+use bincode::config;
 use serde::{Serialize, Deserialize};
 
 use log::warn;
@@ -215,7 +216,7 @@ impl AllData {
         //to know that now, not later. Though I honestly cannot imagine how this
         //would happen for any good faith run of TARJIM, at least on a 64 bit 
         //machine or greater. 
-        let Ok(buffer) = bincode::serialize(&full_data) else { return Err(AllProcessingError::WayTooBig);};
+        let Ok(buffer) = bincode::serde::encode_to_vec(&full_data, config::standard()) else { return Err(AllProcessingError::WayTooBig);};
         
         let use_data = AllDataUse::new(&full_data, 0.0)?; //This won't be returned: it's just a validation check.
 
@@ -265,6 +266,21 @@ impl AllData {
         &self.start_genome_coordinates
     }
 
+    pub(crate) unsafe fn create_manual(seq: Sequence, null_seq: NullSequence, data: WaveformDef, start_genome_coordinates: Vec<usize>, start_nullbp_coordinates: Vec<usize>, background: Background, min_height: f64, credibility: f64) -> Self {
+
+        Self { 
+            seq,
+            null_seq,
+            data, 
+            start_genome_coordinates,
+            start_nullbp_coordinates,
+            background,
+            min_height,
+            credibility,
+        }
+
+
+    }
 
     //SAFETY: I'm spending a lot of effort to validate your FASTA file
     //If your FASTA file is invalid and it somehow gets through, 

@@ -118,7 +118,7 @@ fn main() {
 
     _ = data_file_handle.read_to_end(&mut buffer).expect("Something went wrong when reading the data input file!");
 
-    let mut total_data: AllData = bincode::deserialize(&buffer).expect("Something was incorrect with your saved data input bincode file!");
+    let (mut total_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Something was incorrect with your saved data input bincode file!");
 
 
 

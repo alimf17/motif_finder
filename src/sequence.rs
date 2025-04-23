@@ -626,17 +626,6 @@ impl Sequence {
     }
 
 }
-/*
-   pub struct Sequence {
-    seq_blocks: Vec<u8>,
-    block_u8_starts: Vec<usize>,
-    block_lens: Vec<usize>,
-    max_len: usize,
-    kmer_dict:  [Vec<u64>; MAX_BASE+1-MIN_BASE],
-    kmer_id_dict: Vec<HashMap<u64, usize, WyHash>>,
-    kmer_nums: [usize; MAX_BASE+1-MIN_BASE],
-}
-*/
 
 impl Serialize for Sequence {
 

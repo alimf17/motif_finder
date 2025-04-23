@@ -42,7 +42,7 @@ fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
-    let pre_data: AllData = bincode::deserialize(&buffer).unwrap();
+    let (pre_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
@@ -55,7 +55,7 @@ fn main() {
 
     let _ = try_bin_sup.read_to_end(&mut buffer);
 
-    let mut stripped_sup: StrippedMotifSet = bincode::deserialize(&buffer).unwrap();
+    let (mut stripped_sup, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     stripped_sup.sort_by_height();
 
@@ -67,7 +67,7 @@ fn main() {
 
     let _ = try_bin_sub.read_to_end(&mut buffer);
 
-    let mut stripped_sub: StrippedMotifSet = bincode::deserialize(&buffer).unwrap();
+    let (mut stripped_sub, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     stripped_sub.sort_by_height();
 

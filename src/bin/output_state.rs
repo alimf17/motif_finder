@@ -17,11 +17,11 @@ fn main() {
     
     let interim: SingleSetOrTrace = {
         
-        let try_trace: Result<SetTraceDef, _> = bincode::deserialize(&buffer);
-        if let Ok(trace) = try_trace {
+        let try_trace: Result<(SetTraceDef, usize), _> = bincode::serde::decode_from_slice(&buffer, bincode::config::standard());
+        if let Ok((trace, _bytes)) = try_trace {
             SingleSetOrTrace::Trace(trace)
         } else{
-            let set: StrippedMotifSet = bincode::deserialize(&buffer).expect("This did not give a bincode of a trace NOR a single set");
+            let (set, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("This did not give a bincode of a trace NOR a single set");
             SingleSetOrTrace::Singleton(set)
         }
     };

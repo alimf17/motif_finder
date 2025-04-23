@@ -58,6 +58,7 @@ use log::warn;
 
 use regex::Regex;
 
+use bincode::config;
 use serde::{Serialize, Deserialize};
 
 use wyhash2::WyHash;
@@ -2857,7 +2858,7 @@ impl<'a> MotifSet<'a> {
 
         bincode_file_handle.read_to_end(&mut buffer)?;
 
-        let prior_state: StrippedMotifSet = bincode::deserialize(&buffer)?;
+        let (prior_state, _bytes_read): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, config::standard())?;
 
         Ok(prior_state.reactivate_set(data_ref))
 
@@ -3031,7 +3032,7 @@ impl<'a> MotifSet<'a> {
 
         let mot_to_save: StrippedMotifSet = self.into();
 
-        let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &mot_to_save, config::standard()).expect("serializable");
 
         outfile_handle.write(&buffer).expect("We just created this file");
 
@@ -4949,7 +4950,7 @@ impl<'a> SetTrace<'a> {
             None => self.stripped_current_set(),
         };
 
-        let buffer: Vec<u8> = bincode::serialize( &mot_to_save).expect("serializable");
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &mot_to_save, config::standard()).expect("serializable");
 
         outfile_handle.write(&buffer)?;
         Ok(())
@@ -4966,7 +4967,7 @@ impl<'a> SetTrace<'a> {
 
         let mut outfile_handle = fs::File::create(savestate_file)?;
 
-        let buffer: Vec<u8> = bincode::serialize( &last).expect("serializable");
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &last, config::standard()).expect("serializable");
 
         outfile_handle.write(&buffer)?;
         Ok(())
@@ -5003,11 +5004,11 @@ impl<'a> SetTrace<'a> {
         let trace: Vec<StrippedMotifSet> = self.trace.drain(0..len_trace).collect();
 
 
-        let buffer: Vec<u8> = bincode::serialize( &(SetTraceDef {
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &(SetTraceDef {
             trace: trace,
             all_data_file: self.all_data_file.clone(),
             thermo_beta: self.thermo_beta,
-        })).expect("serializable");
+        }), config::standard()).expect("serializable");
 
 
         //fs::write(trace_file.as_str(), serde_json::to_string(&history).unwrap()).expect("Need to give a valid file to write to or inference is pointless");
@@ -7255,7 +7256,7 @@ mod tester{
         let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
         let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
 
-        let start_bases_copy = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+        let start_bases_copy: Vec<_> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
 
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
@@ -7264,12 +7265,34 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 20.).unwrap();
 
+        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), background.clone(),3.0, 4.126)};
 
         let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0, 4.126)};
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
         println!("{} gamma", ln_gamma(4.));
+
+        let mut buffer: Vec<u8> = bincode::serde::encode_to_vec(&base_seq, config::standard()).expect("serializable");
+
+        let (other_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, config::standard()).unwrap();
+
+        let mut check_kmers: Vec<u64> = vec![0; 10000];
+        rng.fill(check_kmers.as_mut_slice());
+
+        for i in MIN_BASE..=MAX_BASE {
+        
+            let dict = base_seq.seq().unique_kmers_ref(i);
+            let dict2 = other_data.seq().unique_kmers_ref(i);
+            assert!(dict.iter().zip(dict2.iter()).all(|(i, j)| i == j));
+            for &kmer in check_kmers.iter() {
+                let adjust_kmer = kmer & ((1_u64 << ((i*BITS_PER_BP) as u64))-1);
+                assert!(base_seq.seq().id_of_u64_kmer(i, adjust_kmer) == other_data.seq().id_of_u64_kmer(i, adjust_kmer));
+            }
+            assert!(base_seq.seq().number_unique_kmers(i) == other_data.seq().number_unique_kmers(i));
+            println!("kmer dict check {i}");
+        }
+
 
         //println!("{:?}", wave.raw_wave());
 
@@ -7759,6 +7782,150 @@ mod tester{
 
 
 
+    #[test]
+    fn write_async() {
+
+        use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+        use std::fs::File;
+
+        std::env::set_var("RUST_BACKTRACE", "1");
+
+        println!("rayon {:?}", rayon::current_num_threads());
+
+        let mut rng = rand::thread_rng(); //fastrand::Rng::new();
+        let spacing_dist = rand::distributions::Uniform::from(500..5000);
+        let block_n: usize = 20;
+        let u8_per_block: usize = 5000;
+        let bp_per_block: usize = u8_per_block*4;
+        let bp: usize = block_n*bp_per_block;
+        let u8_count: usize = u8_per_block*block_n;
+
+        println!("DF {}", block_n*bp_per_block);
+        let start_gen = Instant::now();
+        //let blocks: Vec<u8> = (0..u8_count).map(|_| rng.u8(..)).collect();
+        //let preblocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.u8(..)).collect();
+
+        let preblocks: Vec<u8> = (0..(u8_count/block_n)).map(|_| rng.gen::<u8>()).collect();
+        let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
+        let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
+        let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+
+
+        //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
+        //let null_blocks: Vec<u8> = pre_null_blocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
+        let null_blocks: Vec<u8> = (0..(u8_count)).map(|_| rng.gen::<u8>()).collect();
+        let _block_u8_null_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
+        let null_block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
+        let start_null_bases: Vec<usize> = (0..block_n).map(|a| 2*a*bp_per_block).collect();
+        let null_seq: NullSequence = NullSequence::new_manual(null_blocks, null_block_lens.clone());
+
+        let start_bases_copy: Vec<_> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
+
+
+        let wave: Waveform = Waveform::create_zero(&sequence, 5);
+        let duration = start_gen.elapsed();
+        println!("grad gen {} bp {:?}", bp, duration);
+
+        let background = Background::new(0.25, 2.64, 20.).unwrap();
+
+        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), background.clone(),3.0, 4.126)};
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0, 4.126)};
+
+        for i in 0..10 {
+            let mut buffer: Vec<u8> = bincode::serde::encode_to_vec(&base_seq, config::standard()).expect("serializable");
+
+            println!("adsfdasffaafd {}", buffer.len());
+            
+            let start = Instant::now();
+
+            let mut writer = File::create("../try_write.gz").unwrap();
+            let mut parz: ParCompress<Mgzip> = ParCompressBuilder::new().compression_level(Compression::new(i)).from_writer(writer);
+            parz.write_all(&buffer).unwrap();
+
+            parz.finish().unwrap();
+
+            let encode_time = start.elapsed();
+            let start = Instant::now();
+
+            let mut read_buffer: Vec<u8> = Vec::new();
+            let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(File::open("../try_write.gz").unwrap());
+            let bytes = read_file.read_to_end(&mut read_buffer);
+
+            let decode_time = start.elapsed();
+            println!("new size {} {:?} {i} encode {:?} decode {:?}", read_buffer.len(), bytes, encode_time, decode_time);
+        }
+        
+        let mut rng = rand::thread_rng();
+
+        let set_num_distr = rand::distributions::Uniform::try_from(80_usize..150).unwrap();
+
+        let motif_sets: Vec<StrippedMotifSet> = (0..10).map(|j| {
+            let n = set_num_distr.sample(&mut rng);
+            println!("{j}");
+            (&MotifSet::rand_with_n_motifs(n, &data_seq, &mut rng)).into()
+        }).collect();
+
+
+        //let mut buffer_lens: Vec<usize> = Vec::with_capacity(motif_sets.len());
+
+        for i in 0..10 { 
+            let writer = File::create(&format!("../write_buffer_{i}.gz"));
+        }
+
+        let mut len_write = File::create("../write_lens.txt").unwrap();
+
+        let mut j = 0_usize;
+        for set in motif_sets.iter(){
+            let mut buffer: Vec<u8> = bincode::serde::encode_to_vec(set, config::standard()).expect("serializable");
+            //buffer_lens.push(buffer.len());
+            len_write.write_all(format!("{}\n", buffer.len()).as_bytes());
+            println!("Motif Set {}. Number Motifs: {}. Buffer length: {} bytes", j ,set.num_motifs(), buffer.len());
+            for i in 0..10 {
+
+
+                let start = Instant::now();
+
+                let mut writer = File::options().append(true).open(&format!("../write_buffer_{i}.gz")).unwrap();
+                let mut parz: ParCompress<Mgzip> = ParCompressBuilder::new().compression_level(Compression::new(i)).from_writer(writer);
+                parz.write_all(&buffer).unwrap();
+
+                parz.finish().unwrap();
+
+                let encode_time = start.elapsed();
+                print!("{i}: {:?}\t", encode_time);
+            }
+            j = j+1;
+            println!("");
+        }
+
+        let mut string_buff: String = String::new();
+        File::open("../write_lens.txt").unwrap().read_to_string(&mut string_buff);
+        let buffer_lens: Vec<usize> = string_buff.split_terminator('\n').map(|a| {
+            println!("{}",a);
+            a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
+        }).collect();
+
+        let mut read_buffer: Vec<u8> = Vec::with_capacity(*(buffer_lens.iter().max().unwrap()));
+        let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(File::open("../write_buffer_9.gz").unwrap());
+        //let bytes = read_file.read_to_end(&mut read_buffer);
+
+        for j in 0..motif_sets.len() {
+            
+            let mut handle = read_file.by_ref().take(buffer_lens[j] as u64);
+            handle.read_to_end(&mut read_buffer).unwrap();
+
+            let (new_set, bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&read_buffer, config::standard()).expect("deserializable");
+
+            println!("Motif set {j} with {} motifs, buffer length {} bytes and recaptiulated buffer length {} bytes", motif_sets[j].num_motifs(), buffer_lens[j], bytes);
+            println!("Old set 80th motif {:?}", motif_sets[j].get_nth_motif(80));
+            println!("New set 80th motif {:?}", new_set.get_nth_motif(80));
+
+            read_buffer.clear();
+        }
+
+}
 
 
 
