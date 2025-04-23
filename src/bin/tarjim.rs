@@ -202,7 +202,17 @@ fn main() {
     let mut step_penalty = 0usize;
 
     let abort_saving = save_step*10;
-    
+
+    let trace_file: String = format!("{}/{}_trace.bin.gz", output_dir, run_name);
+    let mut trace_handle = std::fs::File::create(&trace_file).unwrap();
+
+    let bitlen_file: String = format!("{}/{}_bits.txt", output_dir, run_name);
+    let mut len_file_handle = std::fs::File::create(&bitlen_file).unwrap();
+
+    let savestate_file: String = format!("{}/{}_savestate.bin.gz", output_dir, run_name);
+
+    _ = std::fs::File::create(&savestate_file).unwrap();
+
     let start_inference_time = Instant::now();
 
     for step in 0..pushes {
@@ -217,7 +227,8 @@ fn main() {
             let save_trial: usize = 5;
             while try_save_trace < save_trial {
             
-                let Err(e) = initialization_chains.save_trace_and_clear(&output_dir, &run_name, step-step_penalty) else {step_penalty = 0; break;};
+                let savestate_handle = std::fs::File::create(&savestate_file).unwrap();
+                let Err(e) = initialization_chains.save_trace_by_gzip_and_clear(trace_handle.by_ref(), len_file_handle.by_ref(), savestate_handle) else {step_penalty = 0; break;};
                 try_save_trace += 1;
                 eprintln!("Error trying to save trace in step {step}: {:?}. Times occured: {try_save_trace}", e);
                 if try_save_trace >= save_trial {

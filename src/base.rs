@@ -27,6 +27,8 @@ use crate::data_struct::{AllData, AllDataUse};
 
 use itertools::Itertools;
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+
 
 use rand::Rng;
 use rand::prelude::IteratorRandom;
@@ -5018,6 +5020,41 @@ impl<'a> SetTrace<'a> {
         self.save_first_archived_state(output_dir, run_name)
     }
 
+    /// This saves the trace to an mgzip file, as indicated by `gz_writer`.
+    /// `length_writer` saves the bit lengths of the compressed traces in bits.
+    /// This allows us to save the whole motif trace in chunks that we can then
+    /// parse.
+    pub fn append_to_mgzip_and_drop_history<W1: Write, W2: Write, W3: Write>(&mut self, gz_writer: W1, length_writer: &mut W2, mut savestate_writer: W3) -> Result<(), Box<dyn Error+Send+Sync>> {
+
+        let mut syncz = SyncZBuilder::<Mgzip,_>::new().compression_level(Compression::new(9)).from_writer(gz_writer);
+
+        let len_trace = self.trace.len();
+
+        let trace: Vec<StrippedMotifSet> = self.trace.drain(0..len_trace).collect();
+
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &(SetTraceDef {
+            trace: trace,
+            all_data_file: self.all_data_file.clone(),
+            thermo_beta: self.thermo_beta,
+        }), config::standard()).expect("serializable");
+
+        let num_bytes = buffer.len();
+
+        syncz.write_all(&buffer)?;
+        
+        length_writer.write_all(format!("{}\n", buffer.len()).as_bytes());
+
+
+        let mot_to_save: StrippedMotifSet = self.stripped_current_set();
+
+        let buffer: Vec<u8> = bincode::serde::encode_to_vec( &mot_to_save, config::standard()).expect("serializable");
+
+        savestate_writer.write(&buffer)?;
+        
+        Ok(())
+
+    }
+
     /// This saves the occupancy trace of the current active set in the directory 
     /// `{output_dir}/{run_name}/{zeroth_step}_new_occupancy`. For more details, 
     /// see `[MotifSet::save_set_trace_and_sub_traces]()`
@@ -5801,6 +5838,8 @@ impl<'a> TemperSetTraces<'a> {
     }
 
 
+
+
     pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         self.parallel_traces[0].0.save_trace(output_dir, run_name, zeroth_step)?;
@@ -5811,6 +5850,17 @@ impl<'a> TemperSetTraces<'a> {
         Ok(())
 
     }
+
+    pub fn save_trace_by_gzip_and_clear<W1: Write, W2: Write, W3: Write>(&mut self, gz_writer: W1, length_writer: &mut W2, savestate_writer: W3) -> Result<(), Box<dyn Error+Send+Sync>> {
+
+        self.parallel_traces[0].0.append_to_mgzip_and_drop_history(gz_writer, length_writer, savestate_writer)?;
+
+        for i in 1..self.parallel_traces.len() { self.parallel_traces[i].0.drop_history(); }
+
+        Ok(())
+
+    }
+
 }
 
 /// This is the error returned if parallel tempering is badly initialized. 
@@ -7785,7 +7835,7 @@ mod tester{
     #[test]
     fn write_async() {
 
-        use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+        use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression, syncz::{SyncZ, SyncZBuilder}};
         use std::fs::File;
 
         std::env::set_var("RUST_BACKTRACE", "1");
@@ -7870,9 +7920,8 @@ mod tester{
 
         //let mut buffer_lens: Vec<usize> = Vec::with_capacity(motif_sets.len());
 
-        for i in 0..10 { 
-            let writer = File::create(&format!("../write_buffer_{i}.gz"));
-        }
+
+        let mut writers: Vec<_> = (0..10).map(|i| File::create(&format!("../write_buffer_{i}.gz")).unwrap()).collect();
 
         let mut len_write = File::create("../write_lens.txt").unwrap();
 
@@ -7887,8 +7936,7 @@ mod tester{
 
                 let start = Instant::now();
 
-                let mut writer = File::options().append(true).open(&format!("../write_buffer_{i}.gz")).unwrap();
-                let mut parz: ParCompress<Mgzip> = ParCompressBuilder::new().compression_level(Compression::new(i)).from_writer(writer);
+                let mut parz = SyncZBuilder::<Mgzip, _>::new().compression_level(Compression::new(i)).from_writer((std::io::Write::by_ref( &mut writers[i as usize])));
                 parz.write_all(&buffer).unwrap();
 
                 parz.finish().unwrap();
