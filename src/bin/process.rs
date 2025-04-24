@@ -8,6 +8,8 @@ use motif_finder::data_struct::{AllData, AllDataUse};
 
 use clap::{Parser, ValueEnum};
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+
 
 use log::warn;
 
@@ -123,41 +125,40 @@ pub fn main() {
     for chain in 0..num_chains {
         let base_str = format!("{}/{}_{}", out_dir.clone(), base_file, UPPER_LETTERS[chain]);
         println!("Base str {} min chain {}", base_str, min_chain);
-        let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_", min_chain).as_str()+"\\d{7}.bin")).unwrap();
-        //let regex = Regex::new(&(base_str.clone()+"_trace_from_step_"+"0\\d{6}.bin")).unwrap();
-        let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
-       
-        println!("try"); 
+        let chain_file = base_str.clone()+format!("_{}_trace", min_chain).as_str()+".bin.gz";
 
-        let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+        let len_file = base_str.clone()+format!("_{min_chain}_bits.txt").as_str();
 
-        chain_files.sort();
+        let skip_some: bool = if min_chain == 0 { true } else {false};
 
+        //fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+        
+        let mut string_buff: String = String::new();
+        fs::File::open(&len_file).unwrap().read_to_string(&mut string_buff);
+        let mut buffer_lens: Vec<usize> = string_buff.split_terminator('\n').map(|a| {
+            a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
+        }).collect();
+        
+        let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(chain_file).unwrap());
 
-        let skip_some: bool = if min_chain == 0 && chain_files.len() > 1 { true } else {false};
-
-        let mut iter_files = chain_files.iter();
-
-
-        if skip_some { 
-            for _ in 0..(chain_files.len().min(10)){
-            _ = iter_files.next(); 
+        if skip_some {
+            for i in 0..10 {
+                let mut handle = read_file.by_ref().take(buffer_lens[i] as u64);
+                handle.read_to_end(&mut buffer).unwrap();
             }
+
+            let _: Vec<_> = buffer_lens.drain(0..10).collect();
         }
 
-        let file_y = iter_files.next();
+        let mut handle = read_file.by_ref().take(buffer_lens[0] as u64);
 
-        println!("file {:?} ", file_y);
-
-
-        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+        handle.read_to_end(&mut buffer).unwrap();
 
         set_trace_collections.push(bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!").0);
 
-
-        for file_name in iter_files {
+        for byte_len in &buffer_lens[1..] {
             buffer.clear();
-            fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+            let mut handle = read_file.by_ref().take(*byte_len as u64);
             let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
@@ -166,26 +167,26 @@ pub fn main() {
 
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
-            let regex = Regex::new(&(base_str.clone()+format!("_{}_trace_from_step_\\d{{7}}.bin", bead).as_str())).unwrap();
-            let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
-            let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+            let chain_file = base_str.clone()+format!("_{}_trace", min_chain).as_str()+".bin.gz";
 
-            chain_files.sort();
+            let len_file = base_str.clone()+format!("_{min_chain}_bits.txt").as_str();
 
-            let iter_files = chain_files.iter();
+            let mut string_buff: String = String::new();
+            fs::File::open(&len_file).unwrap().read_to_string(&mut string_buff);
+            
+            let mut buffer_lens: Vec<usize> = string_buff.split_terminator('\n').map(|a| {
+                a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
+            }).collect();
 
-            for file_name in iter_files {
-                println!("{file_name}");
+
+            let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(chain_file).unwrap());
+
+            for byte_len in &buffer_lens[1..] {
                 buffer.clear();
-                fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+                let mut handle = read_file.by_ref().take(*byte_len as u64);
                 let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!"); 
                 
-                /*if interim.len() >= 5 {
-                    println!("{} {:?} inter", file_name, interim.index_into(0..5));
-                } else{
-                    println!("{} {:?} inter", file_name, interim.index_into(0..1));
-                }*/
                 set_trace_collections[chain].append(interim);
             }
 
