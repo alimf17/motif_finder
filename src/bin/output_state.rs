@@ -1,8 +1,9 @@
-use std::fs;
+use std::fs::File;
 use std::io::Read;
 
 use motif_finder::base::*;
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 
 fn main() {
@@ -13,7 +14,9 @@ fn main() {
 
     
     let mut buffer: Vec<u8> = Vec::new();
-    fs::File::open(file_to_read).expect("Must be valid file").read_to_end(&mut buffer).expect("something went wrong reading the file");
+    let mut decomp: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(file_to_read.as_str()).expect("You initialization file must be valid for inference to work!"));
+
+    decomp.read_to_end(&mut buffer).expect("something went wrong reading the file");
     
     let interim: SingleSetOrTrace = {
         

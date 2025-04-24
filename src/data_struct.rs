@@ -1362,8 +1362,16 @@ impl<'a> AllDataUse<'a> {
 
         //This returns None only if there are NO MIN_BASE-mers that are 
         //legal in the sequence associated with this data struct. This is
-        //deeply pathological. 
+        //so deeply pathological that we would want to abort anyway. 
         *self.data.seq().unique_kmers_ref(MIN_BASE).choose(rng).unwrap()
+    }
+
+    /// This takes each block of data, sums the positive values, and returns
+    /// an array of those values. In general, the larger the value, the more
+    /// "peaky" a data block likely is. These absolute numbers are pointless:
+    /// they only matter in context with each other, usually by ordering them.
+    pub fn return_estimated_block_peakiness(&self) -> Vec<f64> {
+        self.data.return_estimated_block_peakiness()
     }
 
     pub(crate) fn basic_peak(&self, min_height_sens: f64) -> Vec<((usize, usize), f64)> {

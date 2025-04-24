@@ -329,6 +329,24 @@ impl<'a> Waveform<'a> {
         (point_lens, start_dats)
     }
 
+    /// This takes each block of data, sums the positive values, and returns
+    /// an array of those values. In general, the larger the value, the more
+    /// "peaky" a data block likely is. These absolute numbers are pointless:
+    /// they only matter in context with each other, usually by ordering them.
+    pub fn return_estimated_block_peakiness(&self) -> Vec<f64> {
+
+        let mut peakiness: Vec<f64> = Vec::with_capacity(self.start_dats.len());
+
+        for i in 0..self.start_dats.len() {
+            let start = self.start_dats[i];
+            let end = self.start_dats[i]+self.point_lens[i];
+
+            peakiness.push(self.wave[start..end].iter().filter_map(|&a| if a > 0.0 { Some(a) } else {None}).sum::<f64>());
+        }
+
+        peakiness
+
+    }
 
     //Returns None if data_ind is >= length of the backing vector
     pub(crate) fn block_and_base(&self, data_ind: usize) -> Option<(usize, usize)> {

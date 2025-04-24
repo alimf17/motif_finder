@@ -8,6 +8,7 @@ use motif_finder::data_struct::*;
 
 use log::warn;
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 use clap::{Parser, ValueEnum};
 
@@ -142,7 +143,8 @@ fn main() {
         Ok(o) => o
     };
 
-    outfile_handle.write(&buffer).expect("We just created this file");
+    let mut parz = SyncZBuilder::<Mgzip, _>::new().compression_level(Compression::new(9)).from_writer(outfile_handle);
+    parz.write_all(&buffer).expect("We just created this file");
 
     println!("Saved preprocessing file to {output_name}.");
 

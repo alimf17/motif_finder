@@ -9,6 +9,8 @@ use motif_finder::data_struct::{AllData, AllDataUse};
 
 use clap::{Parser, ValueEnum};
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+
 
 use log::warn;
 
@@ -108,7 +110,7 @@ pub fn main() {
     chain_files.sort_unstable();
     println!("chain files: \n {:?}", chain_files);
 
-    let name_regex = Regex::new(&(format!("({}_omit_(set_)?([0-9]{{1,3}}_)*[0-9]{{1,3}}$)", base_file).as_str())).unwrap();
+    let name_regex = Regex::new(&(format!("({}_omit_set_[0-9]{{1,3}}$)", base_file).as_str())).unwrap();
 
     let match_chain = chain_files.iter().map(|a| name_regex.captures(a).unwrap().get(1).unwrap().as_str().to_string()).collect::<Vec<_>>();
 
@@ -123,7 +125,7 @@ pub fn main() {
 
     for (chain, chain_base) in chain_files.clone().into_iter().enumerate() {
 
-        let regex = Regex::new(&(chain_base.clone()+"_trace_from_step_"+"\\d{7}.bin")).unwrap();
+        /*let regex = Regex::new(&(chain_base.clone()+"_trace.bin.gz")).unwrap();
 
         let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
 
@@ -141,17 +143,35 @@ pub fn main() {
         println!("file {:?} ", file_y);
 
 
-        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");*/
+
+        let chain_file = chain_base.clone()+"_trace.bin.gz";
+        let len_file = chain_base.clone()+"_bits.txt";
+
+        let mut string_buff: String = String::new();
+        
+        fs::File::open(&len_file).unwrap().read_to_string(&mut string_buff);
+        
+        let mut buffer_lens: Vec<usize> = string_buff.split_terminator('\n').map(|a| {
+            a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
+        }).collect();
+
+        let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(chain_file).unwrap());
+        
+        let mut handle = read_file.by_ref().take(buffer_lens[0] as u64);
+
+        handle.read_to_end(&mut buffer).unwrap();
+
 
         set_trace_collections.push(bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!").0);
 
-
-        for file_name in iter_files {
+        for byte_len in &buffer_lens[1..] {
             buffer.clear();
-            fs::File::open(file_name).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");
+            let mut handle = read_file.by_ref().take(*byte_len as u64);
             let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
+
         }
         println!("set trace check {chain} {}", set_trace_collections[chain].len());
 
@@ -191,7 +211,7 @@ pub fn main() {
         let all_data_file = trace.data_name().to_owned();
         let all_test_file = { let s = all_data_file.replace("exclude_blocks", "only_with_blocks"); s.replace("omit", "keep") };
 
-        let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+        let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file"));
         let _ = try_bincode.read_to_end(&mut buffer);
 
         let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
@@ -253,7 +273,7 @@ pub fn main() {
         std::mem::drop(data_reconstructed);
 
         buffer.clear();
-        let mut try_bincode = fs::File::open(&test_file_names[i]).expect("a trace should always refer to a valid data file");
+        let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(&test_file_names[i]).expect("a trace should always refer to a valid data file"));
         let _ = try_bincode.read_to_end(&mut buffer);
         let (test_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!"); 
         let test_use = AllDataUse::new(&test_data, 0.0).expect("AllData file must be valid!");

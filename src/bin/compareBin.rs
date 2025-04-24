@@ -1,5 +1,5 @@
 
-use std::fs;
+use std::fs::File;
 use std::io::Read;
 
 use motif_finder::base::*;
@@ -12,7 +12,7 @@ use motif_finder::data_struct::{AllData, AllDataUse};
 
 use statrs::distribution::Continuous;
 
-
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 
 
@@ -32,11 +32,11 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    let file_out = args[1].clone();
+    let data_file = args[1].clone();
 
     let motif_set_bin = args[2].clone();
 
-    let mut try_bincode = fs::File::open(file_out).unwrap();
+    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(data_file.as_str()).expect("You initialization file must be valid for inference to work!"));
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
@@ -48,7 +48,7 @@ fn main() {
 
     let mut rng = rand::thread_rng();
  
-    let mut try_bincode = fs::File::open(motif_set_bin.clone()).unwrap();
+    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(motif_set_bin.as_str()).expect("You initialization file must be valid for inference to work!")); 
 
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
     let (prep_mot_set, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();

@@ -1,11 +1,12 @@
 
-use std::fs;
+use std::fs::File;
 use std::io::Read;
 
 
 use motif_finder::ECOLI_FREQ;
 use motif_finder::base::*;
 use motif_finder::waveform::*;
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 
 
@@ -38,7 +39,9 @@ fn main() {
 
     let motif_set_meme = args[2].clone();
 
-    let mut try_bincode = fs::File::open(file_out).unwrap();
+
+    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(file_out.as_str()).expect("You initialization file must be valid for inference to work!"));
+
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later

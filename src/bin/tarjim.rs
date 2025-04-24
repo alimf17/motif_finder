@@ -6,6 +6,8 @@ use motif_finder::base::*;
 
 use motif_finder::data_struct::*;
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
+
 use log::warn;
 
 use clap::{Parser, ValueEnum};
@@ -112,13 +114,13 @@ fn main() {
     }
     println!("post min {min_thermo_beta}");
 
-    let mut data_file_handle = File::open(data_file.as_str()).expect("You initialization file must be valid for inference to work!");
+    let mut data_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(data_file.as_str()).expect("You initialization file must be valid for inference to work!"));
 
     let mut buffer: Vec<u8> = Vec::new();
 
     _ = data_file_handle.read_to_end(&mut buffer).expect("Something went wrong when reading the data input file!");
 
-    let (mut total_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Something was incorrect with your saved data input bincode file!");
+    let (mut total_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Something was incorrect with your saved data input bincode mgz file!");
 
 
 

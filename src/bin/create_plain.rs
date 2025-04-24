@@ -1,10 +1,11 @@
-use std::fs;
+use std::fs::File;
 use std::io::Read;
 
 use motif_finder::base::*;
 use motif_finder::waveform::*;
 
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 
 use motif_finder::data_struct::{AllData, AllDataUse};
@@ -30,7 +31,7 @@ fn main() {
 
     let file_out_trp = "/expanse/lustre/scratch/alimf/temp_project/ProcessedData/IPOD_HR_min_height_1.0_try_again.bin";
 
-    let mut try_bincode = fs::File::open(file_out_trp).unwrap();
+    let mut try_bincode : ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(file_out_trp).expect("You initialization file must be valid for inference to work!"));
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later

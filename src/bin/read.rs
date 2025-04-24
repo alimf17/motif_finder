@@ -1,8 +1,9 @@
 use motif_finder::data_struct::{AllData, AllDataUse};
 
 use std::io::{Read};
-use std::{env, fs};
+use std::{env, fs::File};
 
+use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
 
 
 fn main() {
@@ -13,7 +14,7 @@ fn main() {
 
     println!("db {bincode_file}");
     
-    let mut bincode_file_handle = fs::File::open(bincode_file).expect("Binarray file MUST be valid!");
+    let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(bincode_file.as_str()).expect("You initialization file must be valid for inference to work!"));
 
     let mut buffer: Vec<u8> = Vec::new();
 
