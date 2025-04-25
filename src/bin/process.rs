@@ -150,15 +150,19 @@ pub fn main() {
             let _: Vec<_> = buffer_lens.drain(0..10).collect();
         }
 
+        println!("buffer 0 {}", buffer_lens[0]);
         let mut handle = read_file.by_ref().take(buffer_lens[0] as u64);
 
         handle.read_to_end(&mut buffer).unwrap();
 
         set_trace_collections.push(bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!").0);
 
+        let mut index: usize = 0;
         for byte_len in &buffer_lens[1..] {
             buffer.clear();
+            index = index+1;
             let mut handle = read_file.by_ref().take(*byte_len as u64);
+            handle.read_to_end(&mut buffer).unwrap(); 
             let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
             set_trace_collections[chain].append(interim);
@@ -199,8 +203,10 @@ pub fn main() {
     }
 
     let all_data_file = set_trace_collections[0].data_name().to_owned();
-    
-    let mut try_bincode = fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file");
+   
+    println!("{all_data_file}");
+
+    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file"));
     let _ = try_bincode.read_to_end(&mut buffer);
 
     let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
