@@ -4484,6 +4484,7 @@ impl StrippedMotifSet {
 
         let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate.meme";
 
+        println!("{savestate_file}");
         let mut outfile_handle = fs::File::create(&savestate_file)?;
 
         outfile_handle.write(b"MEME Version 4\n\n")?;
@@ -4560,16 +4561,23 @@ impl StrippedMotifSet {
        
         let meme_file = match self.output_to_meme(background_dist, output_dir, run_name) {
             Ok(m) => m,
-            Err(e) => return Err(Box::new(e)),
+            Err(e) => {
+                println!("couldn't make meme file");
+                return Err(Box::new(e))
+            },
         };
 
         let fimo_output = format!("{}/{}_fimo", output_dir, run_name);
 
-        let _ = fs::create_dir(&fimo_output);
+        let a = fs::create_dir(&fimo_output);
+
+        println!("fimo output {fimo_output}");
+        println!("creating dir {:?}", a);
 
         let mut bind_command = Command::new("fimo");
         let mut commander = bind_command.arg("--oc").arg(&fimo_output).arg("--bfile").arg("--uniform--").arg(&meme_file).arg(fasta_file);
         
+        println!("command: {:?}", commander);
         commander.status()?;
 
 

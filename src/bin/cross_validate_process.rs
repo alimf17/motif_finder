@@ -99,58 +99,25 @@ pub fn main() {
     let Cli { output: out_dir, base_file, max_runs: max_chain, fasta_file} = Cli::parse(); 
 
     let base_str = format!("{}/{}", out_dir.clone(), base_file.clone());
-    let directory_regex = Regex::new(&(base_str.clone()+format!("_omit_(set_)?([0-9]{{1,3}}_)*[0-9]{{1,3}}$").as_str())).unwrap();
-    let file_regex = Regex::new(".bin").unwrap();
 
-    let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
-    let mut chain_files = directory_iter.filter(|a| directory_regex.is_match(a.as_ref().unwrap().path().to_str().unwrap()))
-                                        //.filter(|a| !file_regex.is_match(a.as_ref().unwrap().path().to_str().unwrap()))
-                                        .map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
+    let chain_base = base_str.clone()+"_omit_set";
 
-    chain_files.sort_unstable();
-    println!("chain files: \n {:?}", chain_files);
+    let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(4);
 
-    let name_regex = Regex::new(&(format!("({}_omit_set_[0-9]{{1,3}}$)", base_file).as_str())).unwrap();
+    let mut set_num = 0_usize;
 
-    let match_chain = chain_files.iter().map(|a| name_regex.captures(a).unwrap().get(1).unwrap().as_str().to_string()).collect::<Vec<_>>();
+    let mut chain_file = format!("{}_{}_trace.bin.gz", chain_base, set_num);
 
-    println!("match chain \n {:?}", &(chain_files.iter().map(|a| name_regex.captures(a).unwrap().get(1).unwrap().as_str()).collect::<Vec<_>>()));
+    let mut len_file = format!("{}_{}_bits.txt", chain_base, set_num);
+    println!("{chain_file} {len_file}");
 
-    let n_fold = chain_files.len();
-    
     let mut buffer: Vec<u8> = Vec::new();
 
-    let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(n_fold);
+    let mut string_buff: String = String::new();
 
+    while let Ok(mut len_handle) = fs::File::open(&len_file) {
 
-    for (chain, chain_base) in chain_files.clone().into_iter().enumerate() {
-
-        /*let regex = Regex::new(&(chain_base.clone()+"_trace.bin.gz")).unwrap();
-
-        let directory_iter = fs::read_dir(&out_dir).expect("This directory either doesn't exist, you're not allowed to touch it, or isn't a directory at all!");
-
-        let mut chain_files = directory_iter.filter(|a| regex.is_match(a.as_ref().unwrap().path().to_str().unwrap())).map(|a| a.unwrap().path().to_str().unwrap().to_string()).collect::<Vec<_>>();
-
-        chain_files.sort();
-
-        println!("{chain_base}: \n {:?}", chain_files);
-
-        let mut iter_files = chain_files.iter();
-
-
-        let file_y = iter_files.next();
-
-        println!("file {:?} ", file_y);
-
-
-        fs::File::open(file_y.expect("Must have matches to proceed")).expect("We got this from a list of directory files").read_to_end(&mut buffer).expect("something went wrong reading the file");*/
-
-        let chain_file = chain_base.clone()+"_trace.bin.gz";
-        let len_file = chain_base.clone()+"_bits.txt";
-
-        let mut string_buff: String = String::new();
-        
-        fs::File::open(&len_file).unwrap().read_to_string(&mut string_buff);
+        len_handle.read_to_string(&mut string_buff);
         
         let mut buffer_lens: Vec<usize> = string_buff.split_terminator('\n').map(|a| {
             a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
@@ -168,16 +135,22 @@ pub fn main() {
         for byte_len in &buffer_lens[1..] {
             buffer.clear();
             let mut handle = read_file.by_ref().take(*byte_len as u64);
+            handle.read_to_end(&mut buffer).unwrap();
             let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!");
             //interim.reduce(max_max_length);
-            set_trace_collections[chain].append(interim);
+            set_trace_collections[set_num].append(interim);
 
         }
-        println!("set trace check {chain} {}", set_trace_collections[chain].len());
+        println!("set trace check {set_num} {}", set_trace_collections[set_num].len());
 
-
+        set_num += 1;
+        buffer.clear();
+        string_buff.clear();
+        chain_file = format!("{}_{}_trace.bin.gz", chain_base, set_num);
+        len_file = format!("{}_{}_bits.txt", chain_base, set_num)
     }
 
+    let n_fold = set_num;
     let mut data_file_names: Vec<String> = Vec::with_capacity(n_fold);
     let mut test_file_names: Vec<String> = Vec::with_capacity(n_fold); 
 
@@ -263,8 +236,8 @@ pub fn main() {
 
 
         if let Some(ref fimo_running) = fasta_file {
-            max_post_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_max_post", match_chain[i])).unwrap();
-            max_like_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_max_like", match_chain[i])).unwrap();
+            max_post_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_omit_set_{i}_max_post", base_file)).unwrap();
+            max_like_sets[i].generate_fimo(None, fimo_running, &out_dir, &format!("{}_omit_set_{i}_max_like", base_file)).unwrap();
         };
 
         //I'm fist fighting every ounce of memory, here. I don't need OOMs, so I'm only 
@@ -278,7 +251,7 @@ pub fn main() {
         let (test_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!"); 
         let test_use = AllDataUse::new(&test_data, 0.0).expect("AllData file must be valid!");
 
-        let legal_loc_name = format!("{}/legal_locations.txt", chain_files[i]);
+        let legal_loc_name = format!("{}/{}_keep_set_{i}_legal_locations.txt", out_dir.clone(), base_file);
         let mut loc_file = fs::File::create(&legal_loc_name).unwrap();
 
         loc_file.write(print_better(&test_use.legal_coordinate_ranges()).as_bytes());
