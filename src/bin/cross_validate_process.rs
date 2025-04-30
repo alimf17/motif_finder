@@ -123,6 +123,7 @@ pub fn main() {
             a.parse::<usize>().expect("This whole file should be unsigned integers of buffer lengths")
         }).collect();
 
+        println!("{chain_file}");
         let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(chain_file).unwrap());
         
         let mut handle = read_file.by_ref().take(buffer_lens[0] as u64);
@@ -131,6 +132,8 @@ pub fn main() {
 
 
         set_trace_collections.push(bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!").0);
+        
+        println!("set trace check {set_num} {} {}", set_trace_collections[set_num].len(), set_trace_collections[set_num].data_name());
 
         for byte_len in &buffer_lens[1..] {
             buffer.clear();
@@ -141,7 +144,7 @@ pub fn main() {
             set_trace_collections[set_num].append(interim);
 
         }
-        println!("set trace check {set_num} {}", set_trace_collections[set_num].len());
+        println!("set trace check {set_num} {} {}", set_trace_collections[set_num].len(), set_trace_collections[set_num].data_name());
 
         set_num += 1;
         buffer.clear();
@@ -189,6 +192,8 @@ pub fn main() {
 
         let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
+        println!("{all_data_file}");
+        println!("{all_test_file}");
 
         data_file_names.push(all_data_file);
         test_file_names.push(all_test_file);
