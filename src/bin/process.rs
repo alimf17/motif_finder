@@ -226,7 +226,7 @@ pub fn main() {
     //TODO: generate motif_num_traces plot here
     println!("Motif num rhat: {}", rhat(&motif_num_traces, min_len));
 
-    
+  /*  
     println!("Beginning analysis of Lowest BIC motif set");
 
     let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_lowest_bic_set(&data_ref,min_len)).collect::<Vec<_>>();
@@ -269,15 +269,10 @@ pub fn main() {
    
         let trial_a = lowest_bic_motif_set.generate_fimo(None,&fasta,  &out_dir, &save_file);
 
-        let trial_x = lowest_bic_motif_set.generate_ascending_fimo(None,&fasta,  &out_dir, &save_file);
-
         if trial_a.is_err() {
             println!("error in pr gen {:?}", trial_a);
         }
 
-        if trial_x.is_err() {
-            println!("error in cum pr gen {:?}", trial_x);
-        }
     }
     
     //If I don't document this as I'm writing it, it's going to blow a hole 
@@ -338,7 +333,7 @@ pub fn main() {
     }
 
     println!("RMSE lowest BIC {}", lowest_bic_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
-
+*/
 
     println!("Beginning analysis of highest posterior density motif set");
 
@@ -382,15 +377,10 @@ pub fn main() {
    
         let trial_a = highesst_post_motif_set.generate_fimo(None,&fasta,  &out_dir, &save_file);
 
-        let trial_x = highesst_post_motif_set.generate_ascending_fimo(None,&fasta,  &out_dir, &save_file);
-
         if trial_a.is_err() {
             println!("error in pr gen {:?}", trial_a);
         }
 
-        if trial_x.is_err() {
-            println!("error in cum pr gen {:?}", trial_x);
-        }
     }
     
     //If I don't document this as I'm writing it, it's going to blow a hole 
@@ -497,15 +487,10 @@ pub fn main() {
    
         let trial_a = highest_likelihood_motif_set.generate_fimo(None,&fasta,  &out_dir, &save_file);
 
-        let trial_x = highest_likelihood_motif_set.generate_ascending_fimo(None,&fasta,  &out_dir, &save_file);
-
         if trial_a.is_err() {
             println!("error in pr gen {:?}", trial_a);
         }
 
-        if trial_x.is_err() {
-            println!("error in cum pr gen {:?}", trial_x);
-        }
     }
     
     //If I don't document this as I'm writing it, it's going to blow a hole 
