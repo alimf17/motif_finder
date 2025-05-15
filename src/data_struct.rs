@@ -209,7 +209,7 @@ impl AllData {
         let (seq, null_seq, data, starts, start_nulls) = test_sync.expect("We already returned if this was an error.");
 
         println!("synchronized fasta and data");
-        let mut full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height, credibility: credibility};
+        let mut full_data: AllData = AllData {seq: seq, null_seq: null_seq, data: data, start_genome_coordinates: starts, start_nullbp_coordinates: start_nulls, background: background, min_height: min_height, credibility: credibility.abs()};
 
         //I've inserted this as a check to make sure that this isn't so massive
         //that TARJIM can't work with it or save it. Because if it is, you want
@@ -1214,6 +1214,25 @@ impl AllData {
 
     }
 
+    /// This will try to set the minimum height based on the minimum height you give it.
+    /// However, if `min_height <  1.0`, this will set min_height to 1.0 instead. 
+    pub fn set_min_height(&mut self, min_height: f64) {
+        let mut min_height = min_height;
+        if min_height < 1.0 {
+            warn!("Motif finder relies on the minimum height being at least 1.0 for mixing reasons! Setting min_height to 1.0");
+            min_height = 1.0;
+        }
+        self.min_height = min_height;
+    }
+
+    /// This will try to set the penalty for each additional motif to `credibility.abs()`.
+    /// 
+    /// # Panics
+    /// If `credibility.is_nan()`.
+    pub fn set_credibility(&mut self, credibility: f64) {
+        assert!(!credibility.is_nan(), "Do you think NaNs are gonna play well with motif inferences? Come on, dude.");
+        self.credibility = credibility.abs();
+    }
 
 }
 
@@ -1327,6 +1346,7 @@ impl<'a> AllDataUse<'a> {
     pub fn min_height(&self) -> f64 {
         self.min_height
     }
+
 
     pub fn credibility(&self) -> f64 {
         self.credibility

@@ -44,9 +44,6 @@ strum_macros = "0.26.4"
 clap = { version = "4.5.31", features = ["derive"] }
 gzp = "1.0.1"
 
-[dev-dependencies]
-criterion = "0.3"
-
 
 [[bin]]
 name = "preprocess"

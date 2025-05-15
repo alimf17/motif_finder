@@ -1876,6 +1876,65 @@ impl Motif {
 
 
     }
+    
+
+    fn has_multiple_binding_sites(&self, seq: &Sequence, thresh: f64) -> bool {
+
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
+
+        let best_motif = self.best_motif();
+
+        let mut ind: usize;
+
+        let mut store: [Bp; BP_PER_U8];
+
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+        let mut blocks_and_bps: Vec<(usize, usize)> = vec![];
+
+        let mut found_one = false;
+        let mut found_two = false;
+
+        {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..=((block_lens[i])-self.len()) {
+
+                    ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+
+                    let (bind_score, _) = unsafe {self.prop_binding(binding_borrow) };
+
+                    let bound = bind_score > thresh;
+                    //If we previously found a binding site AND now have another one, we found multiple binding sites
+                    if found_one && bound { return true; } 
+                    found_one = found_one || bound;
+
+                }
+
+            }
+        }
+
+        false
+
+    }
 
 
     fn return_bind_score_alt(&self, seq: &Sequence) -> Vec<(f64,bool)> {
@@ -3159,6 +3218,7 @@ impl<'a> MotifSet<'a> {
 
     pub fn ln_prior(&self) -> f64 {
         //println!("motif num {} heights {:?} pwms {:?}",self.motif_num_prior(), self.set.iter().map(|a| a.0.height_prior()).collect::<Vec<_>>(), self.set.iter().map(|a| a.0.pwm_prior(self.data_ref.data().seq())).collect::<Vec<_>>());
+        if !self.set.iter().all(|a| a.0.has_multiple_binding_sites(self.data_ref.data().seq(), -self.data_ref.min_height())) { return -f64::INFINITY; }
         self.motif_num_prior(self.data_ref.credibility()) + self.set.iter().map(|a| a.0.height_prior(self.data_ref.height_dist())+a.0.pwm_prior(self.data_ref.data().seq())).sum::<f64>()
     }
 

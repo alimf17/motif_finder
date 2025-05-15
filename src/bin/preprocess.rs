@@ -112,8 +112,6 @@ fn main() {
 
     println!("c {credibility}");
     if !(credibility > 0.0) {panic!("Motif prior threshold must be a valid strictly positive float");}
-    //SAFETY: This modification is made before any inference is done, preventing data races
-
 
 
     //By the end of this block, init_check_index holds the index where we check what type of
