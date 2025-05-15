@@ -752,6 +752,10 @@ impl Base {
         self.scores
     }
 
+    pub fn taxicab(&self) -> f64 {
+        self.scores.iter().sum::<f64>()
+    }
+
     /// This converts a Base to the graphical representation of it as a simplex
     pub fn as_simplex(&self) -> [f64; BASE_L-1] {
         let probs = self.as_probabilities();
@@ -1650,6 +1654,9 @@ impl Motif {
         self.pwm.len()
     }
 
+    pub fn taxicab(&self) -> f64 {
+        self.peak_height + self.pwm.iter().map(|a| a.taxicab()).sum::<f64>()
+    }
 
 
     //PRIORS
@@ -3203,6 +3210,10 @@ impl<'a> MotifSet<'a> {
         self.set.iter().map(|a| a.0.clone()).collect()
     }
 
+    pub fn taxicab(&self) -> f64 {
+        self.set.iter().map(|a| a.0.taxicab()).sum::<f64>()
+    }
+
     /// This is our prior on the number of motifs
     /// We do not justify this with a maximum entropy prior
     /// Instead, we only want to consider an additional motif if 
@@ -4534,6 +4545,10 @@ impl StrippedMotifSet {
     /// If you use this, the ln density is almost definitely no longer valid
     pub fn mutable_set_iter(&mut self) -> IterMut<'_, Motif> {
         self.set.iter_mut()
+    }
+
+    pub fn taxicab(&self) -> f64 {
+        self.set.iter().map(|a| a.taxicab()).sum::<f64>()
     }
 
 
