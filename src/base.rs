@@ -1264,6 +1264,7 @@ impl Motif {
         }
 
 
+
     }
     
     /// This generates a motif where best_bases is the sequence of `Bp`s with
@@ -2637,11 +2638,20 @@ impl<'a> MotifSet<'a> {
     /// This randomly generates a single `n` Motif MotifSet with valid motifs for data_ref
     pub fn rand_with_n_motifs<R: Rng+?Sized>(n: usize, data_ref: &'a AllDataUse<'a>, rng: &mut R) -> Self {
 
+        let mut n = n;
+
         let mut valid: bool;
 
         let mot_set = loop { //We occasionally seem to randomly generate sets with such high occupancy everywhere as to be ridiculous
 
-            let set: Vec<Motif> = (0..n).map(|_| Motif::rand_mot(data_ref.data().seq(), data_ref.height_dist(), rng)).collect();
+            let set: Vec<Motif> = (0..n).map(|i| {
+                let mut mot = Motif::rand_mot(data_ref.data().seq(), data_ref.height_dist(), rng);
+                println!("rand {i} out of {n}");
+                while !mot.has_multiple_binding_sites(data_ref.data().seq(), -data_ref.min_height()) {
+                    mot = Motif::rand_mot(data_ref.data().seq(), data_ref.height_dist(), rng);
+                }
+                mot
+            }).collect();
 
             let mut signal = data_ref.data().derive_zero();
             for mot in set.iter() {
@@ -2662,6 +2672,7 @@ impl<'a> MotifSet<'a> {
             if valid {
                 break mot_set_try;
             }
+            if n > 1 {n = n-1;}
         };
 
         mot_set
