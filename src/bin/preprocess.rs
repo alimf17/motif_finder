@@ -73,11 +73,11 @@ struct Cli {
     #[arg(short, long)]
     prior: f64,
 
-    /// A scaling of the peak height cutoff for determining whether a region is
-    /// considered peaky or not. More than 1.0 means being stricter about peaks,
-    /// less than 1.0 means being laxer about calling a region peak-y. If this
-    /// is not supplied or infinite, we set it to 1.0. If this is negative, we
-    /// take the absolute value. 
+    /// The number of 1.4826*Median Absolute Deviations away from the median a data 
+    /// a data point has to be to trigger peakiness. Default is 3.0: more, and we  
+    /// filter more. Less, and more gets called potential peaks. If this
+    /// is not supplied or infinite, we set it to 3.0. If this is negative, we
+    /// take its absolute value. 
     #[arg(short, long)]
     height_scale: Option<f64>,
 

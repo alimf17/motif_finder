@@ -3185,24 +3185,49 @@ impl<'a> MotifSet<'a> {
 
     }
 
+    /// Panics: if `n` is not less than the number of motifs
     pub fn nth_motif(&self, n: usize) -> &Motif {
         &self.set[n].0
     }
 
+    /// Panics: if `n` is not less than the number of motifs
     pub fn nth_motif_mut(&mut self, n: usize) -> &mut Motif {
         &mut self.set[n].0
     }
 
+    /// Panics: if `n` is not less than the number of motifs
     pub fn get_nth_motif(&self, n: usize) -> Motif {
         self.set[n].0.clone()
     }
     
+    /// Panics: if `n` is not less than the number of motifs
     pub fn nth_motif_and_scores(&self, n: usize) -> &(Motif, Vec<f64>) {
         &self.set[n]
     }
 
+    /// Panics: if `n` is not less than the number of motifs
     pub fn nth_motif_and_scores_mut(&mut self, n: usize) -> &mut (Motif, Vec<f64>) {
         &mut self.set[n]
+    }
+
+    /// Panics: if `n` is not less than the number of motifs
+    pub fn nth_motif_as_set(&self, n: usize) -> Self {
+
+        let new_set = vec!(self.nth_motif_and_scores(n).clone());
+        let new_sig = new_set[0].0.generate_waveform(self.data_ref);
+
+        let mut new_mot_set = MotifSet {
+            set: new_set,
+            signal: new_sig,
+            ln_post: None,
+            data_ref: self.data_ref
+        };
+
+        _ = new_mot_set.ln_posterior();
+
+        new_mot_set
+        
+
     }
 
     pub fn get_nth_motif_and_scores(&self, n: usize) -> (Motif, Vec<f64>) {
@@ -3336,6 +3361,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
+
     fn replace_motif(&mut self, new_mot: Motif, rem_id: usize) -> f64 {
         let rem_mot = self.nth_motif(rem_id).clone();
         //println!("rep 1");
@@ -3370,6 +3396,31 @@ impl<'a> MotifSet<'a> {
         self.ln_post = None;
         //println!("rep 6");
         self.ln_posterior()
+
+    }
+
+    //Note: this can get really slow if other_set points to a different
+    //      data ref than self does
+    fn combine_motif_sets(&self, other_set: &Self) -> Self {
+
+        let mut new_set = self.clone();
+
+        if !ptr::eq(self.data_ref, other_set.data_ref) {
+            for i in 0..other_set.len() {
+                _ = new_set.add_motif(other_set.get_nth_motif(i));
+            }
+            return new_set;
+        }
+
+        //If we point at the same data waveform, we don't need to reinvent the 
+        //wheel: we already calculated the occupancy traces.
+        new_set.set.append(&mut other_set.set.clone());
+        new_set.signal += &other_set.signal;
+        new_set.ln_post = None;
+
+        _ = new_set.ln_posterior();
+
+        new_set
 
     }
 
@@ -4443,6 +4494,111 @@ impl<'a> MotifSet<'a> {
     pub fn signal_rmse(&self) -> f64 {
         self.signal.rmse_with_wave(self.data_ref.data())
     }
+
+    /// This performs a lasso based on the ln likelihood
+    /// and the lambda you supply on this set. The taxicab metric
+    /// is the sum of the maximum peak heights for all motifs in the set
+    /// Motif order in this set is guaranteed to be returned in order of 
+    /// greatest impact on the likelihood at each step, and we always return
+    /// a motif set with at least one motif. 
+    /// 
+    /// The vector of floats we return is the vector of lasso'd likelihoods 
+    /// after each step, and it will always have a length equal to the number 
+    /// of motifs in `[MotifSet]` we return. The `[Option]<[f64]>` we return is either 
+    /// `Some<the_first_failing_lasso_likelihood>` if there are more motifs
+    /// to potentially add, or `None` if we added all motifs in the set.
+    ///
+    /// For example, suppose you had a `[MotifSet]` with four motifs, numbered
+    /// 0 to 3. In the first step of the lasso, motif 2 has the greatest likelihood
+    /// after subtracting manhattan distance. After accounting for motif 2, then motif 0
+    /// has the best improvement. After that, neither motif 1 nor motif 3 improve the
+    /// likelihood enough to overcome the taxicab metric penalty, so we return the
+    /// `[MotifSet]` with motif 2, then motif 0. 
+    ///
+    /// This function will exploit parallelization if available
+    pub fn lasso_self(&self, lambda: f64) -> (Self, Vec<f64>, Option<f64>) {
+
+        //It is likely an invariant that we have at least two motifs in a motif set.
+        //But I'm defending against an empty motif set in case
+        if self.set.len() < 2 {
+            let likelihood = self.calc_ln_post()-self.ln_prior();
+            let lassoed_like = likelihood-lambda*self.set.get(0).map(|a| a.0.peak_height.abs()).unwrap_or(0.0);
+            return (self.clone(), vec![lassoed_like], None);
+        }
+
+        let mut lasso_likes: Vec<f64> = Vec::new();
+
+        let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64)> = (0..self.set.len()).into_par_iter().map(|i| {
+
+            let single_set = self.nth_motif_as_set(i);
+
+            let likelihood = single_set.calc_ln_post()-single_set.ln_prior();
+            let lassoed_like = likelihood-lambda*single_set.set[0].0.peak_height.abs();
+            (single_set, lassoed_like)
+        }).collect();
+
+        //TODO: I have the vector of single sets with lassod likes. Find the best one, 
+        //      remove it, and use it start my returns
+        let mut target_index: usize = 0;
+        let mut target_lasso: f64 = single_sets_and_lasso_likes[0].1;
+      
+        // We already know we have at least two motifs, since we returned
+        // already if we had less than that in self
+        for index in 1..single_sets_and_lasso_likes.len() {
+            if single_sets_and_lasso_likes[index].1 >= target_lasso {
+                target_index = index;
+                target_lasso = single_sets_and_lasso_likes[index].1;
+            }
+        }
+
+        let (mut motif_set, _ ) = single_sets_and_lasso_likes.swap_remove(target_index);
+        
+        //target_lasso is a float, so it is still alive after this
+        lasso_likes.push(target_lasso);
+
+        //TODO: ITERATE over the remaining motifs by:
+        //      -Finding new best lassoed likelihood
+        //      -Checking it against the previous lassoed likelihood. 
+        //      -If it's better, add it to the set of motifs and reiterate
+        //      -If it's worse, set my last Option to the lassoed likelihood and return 
+        //       the sete I have. 
+
+        while single_sets_and_lasso_likes.len() > 0 {
+
+            single_sets_and_lasso_likes = single_sets_and_lasso_likes.into_par_iter().map(|set_and_lass| {
+                let check_set = motif_set.combine_motif_sets(&set_and_lass.0);
+                let likelihood = check_set.calc_ln_post()-check_set.ln_prior();
+                let lassoed_like = likelihood-lambda*check_set.set[0].0.peak_height.abs();
+                (check_set, lassoed_like)
+            }).collect();
+
+            let mut target_index: Option<usize> = None;
+            //target_lasso is already in scope
+            let mut potential_lasso = single_sets_and_lasso_likes[0].1;
+            for index in 0..single_sets_and_lasso_likes.len() {
+                potential_lasso = potential_lasso.max(single_sets_and_lasso_likes[index].1);
+                if single_sets_and_lasso_likes[index].1 >= target_lasso {
+                    target_index = Some(index);
+                    target_lasso = single_sets_and_lasso_likes[index].1;
+                }
+            }
+
+            match target_index {
+                None => return (motif_set, lasso_likes, Some(potential_lasso)),
+                Some(index) => {
+                    (motif_set, _) = single_sets_and_lasso_likes.swap_remove(index);
+                    lasso_likes.push(target_lasso);
+                },
+            }
+
+            
+        }
+        
+        //If I get to the end without hitting a worse lasso like, return the whole thing with the last option None.
+        (motif_set, lasso_likes, None)
+
+    }
+
 
 }
 

@@ -685,8 +685,13 @@ impl AllData {
         //This is based on the result found here: http://www.gautamkamath.com/writings/gaussian_max.pdf
         //Though I decided to make the coefficient 2.0.sqrt() because I want to err on the side of cutting more
         //Numerical experiments lead me to believe that the true coefficient should be ~1.25 
-        
-        let mut peak_scale: f64 = scale_peak_thresh.unwrap_or(1.0);
+       
+        //Update: this approach is still present in the code, but commented out. If you want it back in, 
+        //uncomment the other definition of peak_thresh and realize that the "default" behavior would 
+        //be based on scale_peak_thresh=1.0. That said, I actually recommend against this approach now.
+        //While it is technically more correct in a vacuum, in practical real life, it ignores definite peaks.
+
+        let mut peak_scale: f64 = scale_peak_thresh.unwrap_or(3.0);
 
         if !(peak_scale.is_finite()) {
             warn!("peak scaling must be a valid finite value! Program will use default scaling.");
@@ -697,9 +702,8 @@ impl AllData {
             peak_scale = peak_scale.abs();
         }
 
-        let peak_thresh = std::f64::consts::SQRT_2*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
-
-        //let peak_thresh = 1.0_f64*(raw_locs_data.len() as f64).ln().sqrt();
+        //let peak_thresh = std::f64::consts::SQRT_2*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
+        let peak_thresh = mad_adjust*peak_scale;
 
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
@@ -929,8 +933,6 @@ impl AllData {
 
         let mad_final = final_med_prep.median()*MAD_ADJUSTER;
         println!("background data sd is set to {}", mad_final);
-
-        trimmed_data_blocks = trimmed_data_blocks.into_iter().map(|a| a.into_iter().map(|(c,b)|(c, b-final_median)).collect::<Vec<(usize,f64)>>()).collect();
 
         //Despite yule_walker_ar_coefficients_with_bic and estimate_t_dist both
         //having the CAPACITY to panic if ar_inference has only empty vectors, 
