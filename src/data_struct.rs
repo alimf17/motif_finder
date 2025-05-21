@@ -876,16 +876,17 @@ impl AllData {
 
 
         ar_blocks.retain(|a| a.len() > data_zone);
-
-        let mut trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
-                                                                     .map(|a| a.clone()).collect();
-       
+        
         //SAFETY: This data block filtering is what allows us to guarentee Kernel
         //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
         //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
         //never rounds down
         data_blocks.retain(|a| (a.len()+1)*spacing > fragment_length);
 
+
+        let mut trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
+                                                                     .map(|a| a.clone()).collect();
+       
         if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
