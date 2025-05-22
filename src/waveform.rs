@@ -8,7 +8,7 @@ use std::fmt;
 use core::f64::consts::PI;
 use core::iter::zip;
 
-use crate::base::{Bp, LN_2, MAX_BASE};
+use crate::base::{Bp, LN_2, MAX_BASE, CAPACITY_FOR_NULL};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
 use crate::data_struct::AllDataUse;
@@ -1462,6 +1462,11 @@ impl<'a> Noise<'a> {
     //It works on the CDF of the |residuals|
     pub(crate) fn ad_calc(&self, spacer: usize) -> f64 {
 
+        //If our null binding is potentially exceeding our ability to track it, this motif set
+        //should be ruled impossible. 
+        if self.extraneous_resids.len() >= CAPACITY_FOR_NULL {
+            return f64::INFINITY;
+        }
         //let time = Instant::now();
         let mut forward: Vec<f64> = self.resids().into_iter().map(|a| a.abs()).collect();
 

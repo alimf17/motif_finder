@@ -48,9 +48,10 @@ fn main() {
 
     let mut rng = rand::thread_rng();
  
-    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(motif_set_bin.as_str()).expect("You initialization file must be valid for inference to work!")); 
+    //let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(motif_set_bin.as_str()).expect("You initialization file must be valid for inference to work!")); 
 
-    let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
+    let mut try_file = File::open(motif_set_bin.as_str()).unwrap();
+    let _ = try_file.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
     let (prep_mot_set, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let mut mot_set = prep_mot_set.reactivate_set(&data);
@@ -70,8 +71,17 @@ fn main() {
 
     println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
 
-    println!("Null binding length: {}", mot_set.calculate_unlimited_nulls().len());
+    let unlimited_nulls = mot_set.calculate_unlimited_nulls();
+    let mut unique_unlimited_nulls = unlimited_nulls.clone();
+    unique_unlimited_nulls.dedup();
 
+    println!("Null binding length: {}", mot_set.calculate_unlimited_nulls().len());
+    println!("{:?}", unique_unlimited_nulls);
+
+    for element in unique_unlimited_nulls {
+       println!("{element} {}", unlimited_nulls.iter().filter(|&a| *a==element).count());
+    }
+       
     //let wave_file = format!("{}_waves", motif_set_bin);
 
     //mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
