@@ -59,20 +59,22 @@ fn main() {
 
     let len = mot_set.len();
 
-    for id in 0..len {
+    /*for id in 0..len {
         let (alt_mot_set, alt_rmse) = mot_set.best_height_set_from_rmse(id).unwrap();
         if alt_rmse < rmse {
             mot_set = alt_mot_set;
             rmse = alt_rmse;
         }
-    }
+    }*/
 
 
     println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
 
-    let wave_file = format!("{}_waves", motif_set_bin);
+    println!("Null binding length: {}", mot_set.calculate_unlimited_nulls().len());
 
-    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
+    //let wave_file = format!("{}_waves", motif_set_bin);
+
+    //mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false);
 
     //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
     //let datas: Vec<AllDataUse> = background_lens.iter().map(|&a| unsafe{ data.with_new_fragment_length(a) }).collect();

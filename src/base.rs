@@ -2974,6 +2974,24 @@ impl<'a> MotifSet<'a> {
         mot.return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0)
     }
 
+    ///This shows the vector of all null binding scores that TARJIM takes into consideration
+    pub fn calculate_nulls(&self) -> Vec<f64> {
+        let mut nulls = self.nth_motif(0).return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0);
+        if self.set.len() > 1 {
+            for i in 1..self.set.len() { nulls.append(&mut self.nth_motif(i).return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0));}
+        }
+        nulls
+    }
+    
+    ///This shows the vector of all null binding scores that TARJIM could theoretically account for
+    pub fn calculate_unlimited_nulls(&self) -> Vec<f64> {
+        let mut nulls = self.nth_motif(0).return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0);
+        if self.set.len() > 1 {
+            for i in 1..self.set.len() { nulls.append(&mut self.nth_motif(i).return_any_null_binds_by_hamming_no_limit(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0));}
+        }
+        nulls
+    }
+
     /// This takes the current MotifSet and sorts its motifs in descending `peak_height()` order
     pub fn sort_by_height(&mut self) {
         self.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
