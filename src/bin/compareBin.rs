@@ -52,6 +52,7 @@ fn main() {
 
     let mut try_file = File::open(motif_set_bin.as_str()).unwrap();
     let _ = try_file.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
+    //let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
     let (prep_mot_set, _bytes): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
     let mut mot_set = prep_mot_set.reactivate_set(&data);
@@ -70,6 +71,8 @@ fn main() {
 
 
     println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
+
+    println!("base raw resids {:?}", data.data().raw_wave());
 
     let unlimited_nulls = mot_set.calculate_unlimited_nulls();
     let mut unique_unlimited_nulls = unlimited_nulls.clone();

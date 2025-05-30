@@ -4687,6 +4687,7 @@ impl StrippedMotifSet {
 
         revived.recalc_signal();
 
+        _ = revived.ln_posterior();
 
         revived
     }

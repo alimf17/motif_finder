@@ -710,7 +710,9 @@ impl AllData {
 
         //The maximum spacing where things can start interfering with one another is 3 kernel sds
         //away, because we decided that fragment lengths should be about 6 kernel sds long
-        let data_zone: usize = 10.max(fragment_length/(spacing));
+        //We're really trying to grab 5kb windows at minimum, but the fragment length might be 
+        //too long sometimes. I doubt it, but on the off chance, we have this extra bit of logic
+        let data_zone: usize = (2500/spacing).max(2*fragment_length/(spacing));
         
         for block in lerped_blocks {
 

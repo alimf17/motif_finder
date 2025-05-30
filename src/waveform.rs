@@ -628,6 +628,11 @@ impl<'a> Waveform<'a> {
 
     }
 
+    /// Gives a list of all the residuals on the active part of the sequence
+    pub fn resids_from_data(&self, data_ref: &AllDataUse) -> Vec<f64> {
+        let residual = self-data_ref.data();
+        residual.wave
+    }
 
 
     pub(crate) fn generate_extraneous_binding(background: &Background, spacer: usize, scaled_heights_array: &[f64]) -> Vec<f64> {
