@@ -72,7 +72,9 @@ fn main() {
 
     println!("Best set RMSE {}\n set {:?}", rmse,mot_set);
 
-    println!("base raw resids {:?}", data.data().raw_wave());
+    //println!("base raw resids {:?}", data.data().raw_wave());
+
+    println!("resids {:?}", (mot_set.ref_signal()-data.data()).raw_wave());
 
     let unlimited_nulls = mot_set.calculate_unlimited_nulls();
     let mut unique_unlimited_nulls = unlimited_nulls.clone();

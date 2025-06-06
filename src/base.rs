@@ -37,9 +37,11 @@ use rand::distributions::{Distribution, Uniform, WeightedIndex};
 
 use  rand_distr::weighted_alias::*;
 
-use statrs::{consts, StatsError};
-use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp, Beta, Categorical, Discrete, DiscreteCDF, DiscreteUniform};
+use statrs::{consts};
+use statrs::distribution::{Continuous, ContinuousCDF, LogNormal, Normal, Exp, Beta, Categorical, Discrete, DiscreteCDF, DiscreteUniform, LogNormalError};
 use statrs::statistics::{Min, Max};
+
+use thiserror::Error;
 
 use ordered_float::*;
 
@@ -53,7 +55,7 @@ use plotters::prelude::*;
 use plotters::coord::types::RangedSlice;
 use plotters::coord::Shift;
 
-use ::num_traits::{Float, Num};
+use ::num_traits::{Float, Num, NumAssignOps};
 use num_traits::Bounded;
 
 use log::warn;
@@ -286,7 +288,7 @@ pub enum Bp {
     T = 3,
 }
 
-trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num + std::fmt::Debug>: Distribution<f64> + Discrete<K ,f64> + DiscreteCDF<K ,f64> {
+trait SampleToBase<K: TryFrom<i64>+Bounded + Clone + Num + NumAssignOps + Ord+ std::fmt::Debug>: Distribution<f64> + Discrete<K ,f64> + DiscreteCDF<K ,f64> {
     fn sample_energy<R: Rng+?Sized>(&self, rng: &mut R) -> f64 {
         (self.sample(rng)+1.0)*BASE_RESOLUTION*SCORE_THRESH
     }
@@ -6177,12 +6179,18 @@ pub struct TruncatedLogNormal {
 
 impl TruncatedLogNormal {
 
-    pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal, StatsError> {
-        if location.is_nan() || scale.is_nan() || scale <= 0.0 || (min > max) || (max < 0.0) {
-            Err(StatsError::BadParams)
+    pub fn new(location: f64, scale: f64, min: f64, max: f64) -> Result<TruncatedLogNormal, TruncatedLogNormalError> {
+        if min.is_nan() || max.is_nan() {
+            Err(TruncatedLogNormalError::NaNPars)
+        } else if min < 0.0 || (max < 0.0) {
+            Err(TruncatedLogNormalError::NegPars)
+        } else if min >= max{
+            Err(TruncatedLogNormalError::BadMinMaxRange)
         } else {
-            let min = if min >= 0.0 {min} else {0.0} ;
-            let ref_dist = LogNormal::new(location, scale).unwrap();
+            let ref_dist = match LogNormal::new(location, scale) {
+                Ok(dist) => dist,
+                Err(err) => return Err(TruncatedLogNormalError::BadLogNormal(err)),
+            };
             Ok(TruncatedLogNormal { location: location, scale: scale, min: min, max: max, ref_dist: ref_dist })
         }
     }
@@ -6196,6 +6204,25 @@ impl TruncatedLogNormal {
     }
 
 }
+#[derive(Error, Debug, Clone)]
+pub enum TruncatedLogNormalError {
+    NaNPars,
+    NegPars,
+    BadMinMaxRange,
+    BadLogNormal(LogNormalError),
+}
+
+impl std::fmt::Display for TruncatedLogNormalError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self{ 
+            Self::NaNPars => write!(f, "Don't submit NaNs for your range"),
+            Self::NegPars => write!(f, "Don't submit negative values for your range"),
+            Self::BadMinMaxRange => write!(f, "Your minimum must be less than your maximum"),
+            Self::BadLogNormal(e) => write!(f, "{}", e),
+        }
+    }
+}
+
 
 impl ::rand::distributions::Distribution<f64> for TruncatedLogNormal {
 
