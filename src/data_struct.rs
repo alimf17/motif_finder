@@ -1551,7 +1551,7 @@ impl AllData {
           //                                        .filter(|a| a.1 <= 0.0001).next().unwrap().0
         let m: Vec<_> = sorted_data.iter().enumerate().map(|(i, &a)| (a, len*normal_dist.sf(a)/((sorted_data.len()-i) as f64))).collect();
         println!("m {:?}", m);
-        peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.001).next().unwrap().0
+        peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.005).next().unwrap().0
     }
 
     fn lerp(data: &Vec<(usize, f64)>, spacer: usize ) -> Vec<(usize, f64)> {
