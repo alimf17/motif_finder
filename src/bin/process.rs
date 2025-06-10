@@ -334,6 +334,77 @@ pub fn main() {
 
     println!("RMSE lowest BIC {}", lowest_bic_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
 */
+    
+    std::mem::drop(buffer);
+    let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
+    println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
+    let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        let tracey = trace.ln_posterior_trace();
+        let mut ordered_tracey = tracey.clone();
+        ordered_tracey.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        let minind = ordered_tracey.len()/10;
+        let maxind = (ordered_tracey.len()*9)/10;
+        let mid = (ordered_tracey[maxind]+ordered_tracey[minind])/2.0;
+        let min_y = mid-(mid-ordered_tracey[minind])*1.5;
+        let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
+        let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
+        
+
+        plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
+
+    }
+        //SAFETY: This is always in bounds, and RGBColor is itself Copy, let 
+        //        alone its shared reference (And RGBColor is also Send and Sync).
+        //        I have to do this the stupid way because the compiler doesn't
+        //        seem to believe me when I tell it this. 
+
+    plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
+
+    let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
+    let plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
+    
+    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
+   
+    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
+    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist_with_noises.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_noise_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
+    };
+    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
+   
+    
+    let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
+    let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+    }; 
+
+    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
+    
+    let mut plot_eth = poloto::plot(format!("{} Approximate Eth Statistic", base_file), "Step", "Ln Likelihood");
+    let plot_eth_file = fs::File::create(format!("{}/{}_eth.svg", out_dir.clone(), base_file).as_str()).unwrap();
+    for (i, trace) in set_trace_collections.iter().enumerate() {
+        let letter = UPPER_LETTERS[i];
+        plot_eth.line(format!("Chain {}", letter), trace.approx_eth_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
+    }; 
+
+    plot_eth.simple_theme(poloto::upgrade_write(plot_eth_file));
 
     println!("Beginning analysis of highest posterior density motif set");
 
@@ -371,7 +442,6 @@ pub fn main() {
 
     let save_file = format!("{}_highest_post", base_file);
 
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
 
     if let Some(fasta) = fasta_file.clone() {
    
@@ -383,6 +453,7 @@ pub fn main() {
 
     }
     
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:
@@ -481,7 +552,6 @@ pub fn main() {
 
     let save_file = format!("{}_highest_likelihood", base_file);
 
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
 
     if let Some(fasta) = fasta_file.clone() {
    
@@ -493,6 +563,7 @@ pub fn main() {
 
     }
     
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:
@@ -557,76 +628,6 @@ pub fn main() {
 
 
 
-    std::mem::drop(buffer);
-    let mut plot_post = poloto::plot(format!("{} Ln Posterior", base_file), "Step", "Ln Posterior");
-    println!("{}/{}_ln_post.svg", out_dir.clone(), base_file);
-    let plot_post_file = fs::File::create(format!("{}/{}_ln_post.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        let tracey = trace.ln_posterior_trace();
-        let mut ordered_tracey = tracey.clone();
-        ordered_tracey.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-        let minind = ordered_tracey.len()/10;
-        let maxind = (ordered_tracey.len()*9)/10;
-        let mid = (ordered_tracey[maxind]+ordered_tracey[minind])/2.0;
-        let min_y = mid-(mid-ordered_tracey[minind])*1.5;
-        let max_y = mid+(ordered_tracey[maxind]-mid)*1.5;
-        let trace_mean = tracey.iter().sum::<f64>()/(tracey.len() as f64);
-        
-
-        plot_post.line(format!("Chain {}", letter), tracey.clone().into_iter().enumerate().map(|(a, b)| (a as f64, b)).crop_below(min_y).crop_above(max_y));//.xmarker(0).ymarker(0);
-
-    }
-        //SAFETY: This is always in bounds, and RGBColor is itself Copy, let 
-        //        alone its shared reference (And RGBColor is also Send and Sync).
-        //        I have to do this the stupid way because the compiler doesn't
-        //        seem to believe me when I tell it this. 
-
-    plot_post.simple_theme(poloto::upgrade_write(plot_post_file));
-
-    let mut plot_tf_num = poloto::plot(format!("{} Motif number", base_file), "Step", "Motifs");
-    let plot_tf_num_file = fs::File::create(format!("{}/{}_tf_num.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_tf_num.line(format!("Chain {}", letter), trace.motif_num_trace().into_iter().enumerate().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_tf_num.simple_theme(poloto::upgrade_write(plot_tf_num_file));
-    
-    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
-    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
-   
-    let mut plot_wave_dist = poloto::plot(format!("{} Wave Distance", base_file), "Step", "RMSD");
-    let plot_wave_dist_file = fs::File::create(format!("{}/{}_wave_dist_with_noises.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_wave_dist.line(format!("Chain {}", letter), trace.wave_rmse_noise_trace(&data_ref,250).into_iter().map(|(a, b)| (a as f64, b))).xmarker(0).ymarker(0);
-    };
-    plot_wave_dist.simple_theme(poloto::upgrade_write(plot_wave_dist_file));
-   
-    
-    let mut plot_like = poloto::plot(format!("{} Ln Likelihood", base_file), "Step", "Ln Likelihood");
-    let plot_like_file = fs::File::create(format!("{}/{}_ln_like.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_like.line(format!("Chain {}", letter), trace.ln_likelihood_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    }; 
-
-    plot_like.simple_theme(poloto::upgrade_write(plot_like_file));
-    
-    let mut plot_eth = poloto::plot(format!("{} Approximate Eth Statistic", base_file), "Step", "Ln Likelihood");
-    let plot_eth_file = fs::File::create(format!("{}/{}_eth.svg", out_dir.clone(), base_file).as_str()).unwrap();
-    for (i, trace) in set_trace_collections.iter().enumerate() {
-        let letter = UPPER_LETTERS[i];
-        plot_eth.line(format!("Chain {}", letter), trace.approx_eth_trace(&data_ref).into_iter().enumerate().map(|(a, b)| (a as f64, b)));//.xmarker(0).ymarker(0);
-    }; 
-
-    plot_eth.simple_theme(poloto::upgrade_write(plot_eth_file));
     
 
     let cluster_per_chain: usize = min_len.min(2000);

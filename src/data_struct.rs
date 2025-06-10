@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use rand::Rng;
 use rand::prelude::SliceRandom;
 
-use statrs::distribution::{Continuous, StudentsT, Normal, ContinuousCDF, LogNormal, Gamma, Gumbel};
+use statrs::distribution::{Continuous, StudentsT, Normal, ContinuousCDF, LogNormal, Gamma, Gumbel, Triangular};
 
 use statrs::statistics::*;
 
@@ -233,9 +233,11 @@ impl<'a> CostFunction for FitMedianHalfNormalDist<'a> {
     }
 }
 
+#[derive(Clone)]
 struct FitGaussianMixture<'a> {
 
     data: &'a Vec<f64>,
+    max_val: f64,
     //weight_middle: f64,
     //sd_middle: f64, 
     //mean_peak: f64, 
@@ -251,7 +253,7 @@ impl<'a> FitGaussianMixture<'a>{
 
 
         let theoretical_middle_dist = Normal::new(0., sd_middle).unwrap();
-        let theoretical_peak_dist = LogNormal::new(mean_peak, sd_peak).unwrap();
+        let theoretical_peak_dist = Triangular::new(0.,mean_peak, sd_peak).unwrap();
 
         let mut theoretical_cdf: Vec<(f64, f64)> = self.data.iter().map(|&d| (d,weight_middle*theoretical_middle_dist.cdf(d)+(1.0-weight_middle)*theoretical_peak_dist.cdf(d))).collect();
 
@@ -278,7 +280,11 @@ impl<'a> CostFunction for FitGaussianMixture<'a> {
             return Err(argmin_error!(InvalidParameter, "mixture models must have four parameters!"));
         }
 
-        if p[0] < 0.5 || p[0] > 1.0 || p[1] <= 0.0 || p[2] <= 0.0 || p[3] <= 0.0 {
+        // Normal >= half density, Normal cannot be more than all density, background sd is
+        // positive, the log normal fitting the bad peaks must exceed the normal substantially, the
+        // sd normal cannot have negative density, and the meanlog cannot effectively exceed the
+        // maximum value of the data
+        if p[0] < 0.5 || p[0] > 1.0 || p[1] <= 0.0 || p[3] <= 0.0 || p[2] <= 0.0 || p[3] >= p[2]{ 
             return Ok(f64::INFINITY);
         }
 
@@ -867,8 +873,11 @@ impl AllData {
         let norm_back = Normal::new(0.0, pars[1]).unwrap();
         let lnorm_peak = LogNormal::new(pars[2], pars[3]).unwrap();
 
-        let peak_thresh = AllData::find_cutoff(pars[0], &norm_back, &lnorm_peak, raw_locs_data.len() , Some(peak_scale));
+        let weight = if pars[2] > 5.0 {1.0} else {pars[0]};
+            
+        let peak_thresh = AllData::find_cutoff(weight, &norm_back, &lnorm_peak, raw_locs_data.len() , Some(peak_scale));
 
+        println!("peak thresh is {peak_thresh}");
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
@@ -1344,15 +1353,16 @@ impl AllData {
 
         sorted_raw_data.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
 
-
+        let max_val = *sorted_raw_data.last().unwrap();
 
         let sd_estimate = 0.25_f64;
 
-        let cost = FitGaussianMixture{ data: &sorted_raw_data};
+        let cost = FitGaussianMixture{ data: &sorted_raw_data, max_val: max_val};
 
 
         let mut rng = rand::thread_rng();
 
+        let a: [Vec<_>;2] = core::array::from_fn(|_| {
         let guess_mean_0: f64 = 0.5+0.25*rng.gen::<f64>();
         let guess_sd_0: f64 = 0.5+0.25* rng.gen::<f64>();
         let guess_mean_1: f64 = 1.0+0.25*rng.gen::<f64>();
@@ -1362,7 +1372,7 @@ impl AllData {
 
         let solver = NelderMead::new(init_simplex).with_sd_tolerance(1e-8).unwrap();
 
-        let executor = Executor::new(cost, solver);
+        let executor = Executor::new(cost.clone(), solver);
 
         //This is fine to unwrap because a rerun would probably fix it: I 
         //do not know what advice to give if this breaks, because it's probably fine
@@ -1376,9 +1386,12 @@ impl AllData {
         let best_vec = res.state().get_best_param().unwrap();
 
         println!("Results {:?}", best_vec);
+        
+         best_vec.to_vec()
 
-        Some(best_vec.to_vec())
+        });
 
+        Some(a[0].clone())
     }
 
     //If weight_normal is less than 0.9999, calculates cutoff where density at log_normal_dist*(1-weight_normal) 
