@@ -234,6 +234,97 @@ impl<'a> CostFunction for FitMedianHalfNormalDist<'a> {
 }
 
 #[derive(Clone)]
+struct FitNormalDist {
+    three_quarters_pdf: Vec<[f64;2]>,
+    
+}
+
+impl FitNormalDist {
+
+    fn new(data: &Vec<f64>) -> Option<Self> {
+        if data.len() < 4 { return None; }
+        
+        //This song and dance is brought to you by "I don't want to sort things if I don't have to"
+        let mut to_copy = if data.is_sorted() { None} else {Some(data.clone())};
+        if let Some(elem) = to_copy.iter_mut().next() { elem.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap()) ;}
+        let data = match to_copy.as_ref() {
+            None => data,
+            Some(elem) => elem,
+        };
+        //End song and dance
+
+
+        let median_cut_index = if data.len() & 1 == 1 { data.len()/2 +1 } else { data.len()/2};
+
+        let q1 = if median_cut_index % 1 == 1 { data[median_cut_index/2] } else { 0.5*(data[median_cut_index/2] + data[median_cut_index/2 -1])};
+
+        let length_after_median = data.len()-median_cut_index;
+
+        let q3_ind = median_cut_index + length_after_median/2;
+
+        let q3 = if length_after_median % 1 == 1 { data[median_cut_index + length_after_median/2]} else { 0.5*(data[median_cut_index + length_after_median/2]+data[median_cut_index + length_after_median/2-1])};
+
+        let iqr = q3-q1;
+
+        let bin_width = 2.0*iqr/( (data.len() as f64).cbrt());
+
+        let num_bins = ((q3-data[0])/bin_width) as usize;
+
+        let mut track_ind = 0_usize;
+
+        let mut lower_threshold = data[0];
+
+        let three_quarters_pdf: Vec<[f64;2]> = (0..num_bins).map(|i| {
+
+            let upper_threshold = data[0]+((i+1) as f64)*bin_width;
+
+            let mut count = 0_usize;
+
+            while data[track_ind] >= lower_threshold && data[track_ind] < upper_threshold && track_ind < q3_ind {
+                count+=1;
+                track_ind += 1;
+            }
+        
+            let midpoint = 0.5*(lower_threshold+upper_threshold);
+
+            lower_threshold = upper_threshold;
+
+            [midpoint, (count as f64)/(bin_width*(data.len() as f64))]
+                
+        }).collect();
+
+        println!("three quart {:?}", three_quarters_pdf);
+        Some(Self{ three_quarters_pdf })
+    }
+    fn distance_from_normal(&self, mean: f64, sd: f64) -> f64 {
+        let norm = Normal::new(mean, sd).unwrap();
+        self.three_quarters_pdf.iter().map(|&a| (a[1]-norm.pdf(a[0])).powi(2)).sum::<f64>()
+    }
+}
+
+impl CostFunction for FitNormalDist {
+    /// Type of the parameter vector
+    type Param = Vec<f64>;
+    /// Type of the return value computed by the cost function
+    type Output = f64;
+
+    /// Apply the cost function to a parameter `p`
+    fn cost(&self, p: &Self::Param) -> Result<Self::Output, ArgminError> {
+
+        if p.len() < 2 {
+            return Err(argmin_error!(InvalidParameter, "normal distribution must have a parameter!"));
+        }
+
+        if p[1] <= 0.0 {
+            return Ok(f64::INFINITY);
+        }
+
+        Ok(self.distance_from_normal(p[0], p[1]))
+    }
+
+}
+
+#[derive(Clone)]
 struct FitGaussianMixture<'a> {
 
     data: &'a Vec<f64>,
@@ -703,10 +794,18 @@ impl AllData {
             None => {
                 warn!("Fit failed to converge! Approximating from mad!");
                 let dat_off = Data::new(sorted_raw_data.iter().map(|&a| (a-median).abs()).collect::<Vec<f64>>());
-                vec![1.0, dat_off.median()*MAD_ADJUSTER, 1.0, 1.0]
+                vec![0.0, dat_off.median()*MAD_ADJUSTER]
             }
         };
-        
+
+        for dat in raw_locs_data.iter_mut() {
+            dat.1 -= pars[0];
+        }
+
+        for dat in sorted_raw_data.iter_mut() {
+            *dat -= pars[0];
+        }
+
         let background_dist = { 
             Background::new(pars[1], f64::INFINITY, (fragment_length as f64)/(WIDE)).expect("We have hard limits on our t distribution fit to prevent an error")//Based on analysis, sd of the kernel is about 1/3 the high fragment length
         } ;
@@ -871,13 +970,8 @@ impl AllData {
         //let peak_thresh = std::f64::consts::SQRT_2*mad_adjust*peak_scale*(raw_locs_data.len() as f64).ln().sqrt();
 
         let norm_back = Normal::new(0.0, pars[1]).unwrap();
-        let lnorm_peak = LogNormal::new(pars[2], pars[3]).unwrap();
-
-        let weight = if pars[2] > 5.0 {1.0} else {pars[0]};
-            
-        let peak_thresh = AllData::find_cutoff(weight, &norm_back, &lnorm_peak, raw_locs_data.len() , Some(peak_scale));
-
-        println!("peak thresh is {peak_thresh}");
+        let peak_thresh = AllData::find_qval_cutoff(&sorted_raw_data, &norm_back, None);
+        println!("peak thresh is {peak_thresh} or in pre terms {}", peak_thresh+pars[0]);
         let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
         let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
 
@@ -1357,18 +1451,17 @@ impl AllData {
 
         let sd_estimate = 0.25_f64;
 
-        let cost = FitGaussianMixture{ data: &sorted_raw_data, max_val: max_val};
-
+        let cost = FitNormalDist::new(&sorted_raw_data)?;
 
         let mut rng = rand::thread_rng();
 
         let a: [Vec<_>;2] = core::array::from_fn(|_| {
-        let guess_mean_0: f64 = 0.5+0.25*rng.gen::<f64>();
+        let guess_mean_0: f64 = -0.1+0.025*rng.gen::<f64>();
         let guess_sd_0: f64 = 0.5+0.25* rng.gen::<f64>();
-        let guess_mean_1: f64 = 1.0+0.25*rng.gen::<f64>();
+        let guess_mean_1: f64 = 0.1+0.025*rng.gen::<f64>();
         let guess_sd_1: f64 = 1.0+0.25*rng.gen::<f64>();
 
-        let init_simplex = vec![vec![0.5, 0.5*sd_estimate, guess_mean_0, guess_sd_0], vec![0.5, 1.5*sd_estimate, guess_mean_0, guess_sd_0], vec![1.0, 0.5*sd_estimate,guess_mean_0, guess_sd_0], vec![0.5, 0.5*sd_estimate, guess_mean_1, guess_sd_0], vec![0.5, 0.5*sd_estimate, guess_mean_0, guess_sd_1]];
+        let init_simplex = vec![vec![guess_mean_0, guess_sd_0], vec![guess_mean_1, guess_sd_0], vec![guess_mean_0, guess_sd_1]];
 
         let solver = NelderMead::new(init_simplex).with_sd_tolerance(1e-8).unwrap();
 
@@ -1449,6 +1542,16 @@ impl AllData {
 
         (bottom_cutoff*top_diff-top_cutoff*bottom_diff)/(top_diff-bottom_diff)
 
+    }
+    
+    fn find_qval_cutoff(sorted_data: &[f64], normal_dist: &Normal, peak_scale: Option<f64>) -> f64 {
+
+        let len = sorted_data.len() as f64;
+        //peak_scale.unwrap_or(1.0)*sorted_data.iter().enumerate().map(|(i, &a)| (a, len*normal_dist.sf(a)/((sorted_data.len()-i) as f64)))
+          //                                        .filter(|a| a.1 <= 0.0001).next().unwrap().0
+        let m: Vec<_> = sorted_data.iter().enumerate().map(|(i, &a)| (a, len*normal_dist.sf(a)/((sorted_data.len()-i) as f64))).collect();
+        println!("m {:?}", m);
+        peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.0001).next().unwrap().0
     }
 
     fn lerp(data: &Vec<(usize, f64)>, spacer: usize ) -> Vec<(usize, f64)> {
@@ -2205,12 +2308,19 @@ mod tests{
 
             let pars = potential_sd.unwrap();
 
-            let norm = Normal::new(0.0, pars[1]).unwrap();
-            let lnorm = LogNormal::new(pars[2], pars[3]).unwrap();
+            let norm = Normal::new(pars[0], pars[1]).unwrap();
+            //let lnorm = LogNormal::new(pars[2], pars[3]).unwrap();
 
             //find_cutoff(weight_normal: f64, normal_dist: &Normal, log_normal_dist: &LogNormal, data_size: usize, peak_scale: Option<f64>)
 
-            let cutoff = AllData::find_cutoff(pars[0], &norm, &lnorm, 928331, None);
+            //let cutoff = AllData::find_cutoff(pars[0], &norm, &lnorm, 928331, None);
+            
+            //find_qval_cutoff(sorted_data: &[f64], normal_dist: &Normal, peak_scale: Option<f64>
+
+            let mut sorted_data = norm_data.clone();
+            sorted_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+            let cutoff = AllData::find_qval_cutoff(&sorted_data, &norm, None);
             println!("cutoff {cutoff}");
 
 
@@ -2225,15 +2335,16 @@ mod tests{
 
             let pars = potential_sd.unwrap();
 
-            let norm = Normal::new(0.0, pars[1]).unwrap();
-            let lnorm = LogNormal::new(pars[2], pars[3]).unwrap();
+            let norm = Normal::new(pars[0], pars[1]).unwrap();
 
             //find_cutoff(weight_normal: f64, normal_dist: &Normal, log_normal_dist: &LogNormal, data_size: usize, peak_scale: Option<f64>)
 
-            let cutoff = AllData::find_cutoff(pars[0], &norm, &lnorm, 185517, None);
+            let mut sorted_data = other_norm_data.clone();
+            sorted_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+            let cutoff = AllData::find_qval_cutoff(&sorted_data, &norm, None);
             println!("cutoff {cutoff}");
 
-            println!("mini cutoff {}", AllData::find_cutoff(pars[0], &norm, &lnorm, other_norm_data.len(), None));
         }
 
     }
