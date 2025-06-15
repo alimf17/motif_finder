@@ -409,7 +409,8 @@ pub fn main() {
     println!("Beginning analysis of highest posterior density motif set");
 
     let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_posterior_set(min_len)).collect::<Vec<_>>();
-    let mut highesst_post_motif_set: StrippedMotifSet = best_motif_sets.iter().min_by(|a,b| a.ln_posterior().partial_cmp(&b.bic(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
+    println!("highest post motif sets posts {:?}", best_motif_sets.iter().map(|a| a.ln_posterior()).collect::<Vec<f64>>());
+    let mut highesst_post_motif_set: StrippedMotifSet = best_motif_sets.iter().max_by(|a,b| a.ln_posterior().partial_cmp(&b.ln_posterior()).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
 
     highesst_post_motif_set.sort_by_height();
 
@@ -518,6 +519,7 @@ pub fn main() {
     println!("Beginning analysis of highest likelihood motif set");
 
     let best_motif_sets: Vec<&StrippedMotifSet> = set_trace_collections.iter().map(|a| a.extract_highest_likelihood_set(&data_ref, min_len)).collect::<Vec<_>>();
+    println!("highest like motif sets posts {:?}", best_motif_sets.iter().map(|a| a.ln_posterior()).collect::<Vec<f64>>());
 
     let mut highest_likelihood_motif_set: StrippedMotifSet = best_motif_sets.iter().max_by(|a,b| a.ln_likelihood(&data_ref).partial_cmp(&b.ln_likelihood(&data_ref)).unwrap()).expect("The set traces should all have at least SOME elements").clone().clone();
 
