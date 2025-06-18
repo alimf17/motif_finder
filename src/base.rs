@@ -2932,8 +2932,7 @@ impl<'a> MotifSet<'a> {
  
     pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
-
-        let mut bincode_file_handle = fs::File::open(bincode_file)?;
+        let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( fs::File::open(bincode_file)?);
 
         let mut buffer: Vec<u8> = Vec::new();
 
