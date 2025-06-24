@@ -1235,6 +1235,8 @@ impl AllData {
 
         let mut i = 0_usize;
 
+        let seq_len = pre_sequence.len();
+
         while i < pre_data.len() {
 
             let mut no_null_base = true;
@@ -1272,7 +1274,7 @@ impl AllData {
                 //10 Seq block 1, 2032 508 203 4212520 203 2030 2031 2032
                 println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                 sequence_blocks.push(bases_batch);
-                starting_coords.push(bp_prior);
+                starting_coords.push(bp_prior % seq_len);
                 start_data.append(&mut float_batch);
             } else {
                 //This gives the 1-indexed position of the null base in vim
@@ -1324,7 +1326,7 @@ impl AllData {
 
             if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
                 null_sequence_blocks.push(bases_batch);
-                null_starts_bps.push(bp_prior);
+                null_starts_bps.push(bp_prior % seq_len);
             }
 
             i += 1;

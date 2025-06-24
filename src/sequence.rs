@@ -330,6 +330,10 @@ impl Sequence {
         self.seq_blocks.len() << 2 //Each u8 contains four bp, so we multiply by 4
     }
 
+    pub fn num_blocks(&self) -> usize {
+        self.block_lens.len()
+    }
+
     pub fn seq_blocks(&self) -> &Vec<u8> {
         &self.seq_blocks
     }

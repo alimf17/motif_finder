@@ -26,8 +26,11 @@ use num_traits::MulAdd;
 
 use plotters::prelude::*;
 
+use plotters::coord::types::RangedCoordf64;
 
 use plotters::prelude::full_palette::ORANGE;
+
+use plotters::coord::Shift;
 
 use rayon::prelude::*;
 
@@ -756,7 +759,7 @@ impl<'a> Waveform<'a> {
             return None;
         }
 
-        let mut locations_and_data: Vec<(Vec<usize>, Vec<f64>)> = Vec::with_capacity(start_lens.len());
+        /*let mut locations_and_data: Vec<(Vec<usize>, Vec<f64>)> = Vec::with_capacity(start_lens.len());
 
         for i in 0..start_lens.len() {
 
@@ -766,7 +769,22 @@ impl<'a> Waveform<'a> {
             locations_and_data.push((small_loc, small_dat));
         }
 
-        Some(locations_and_data)
+        Some(locations_and_data)*/
+
+        (0..self.start_dats.len()).map(|i| self.generate_ith_indexed_locs_and_data(i, start_lens[i])).collect()
+    }
+
+    pub(crate) fn generate_ith_indexed_locs_and_data(&self, i: usize, start_len: usize) ->  Option<(Vec<usize>, Vec<f64>)> {
+
+        if i >= self.start_dats.len() {
+            return None;
+        } 
+
+        let small_loc: Vec<usize> = (0..self.point_lens[i]).map(|j| start_len+(j*self.spacer)).collect();
+        let end_len = if i < (self.start_dats.len()-1) { self.start_dats[i+1] } else { self.wave.len() };
+        let small_dat: Vec<f64> = self.wave[self.start_dats[i]..end_len].to_owned();
+
+        Some((small_loc, small_dat))
 
     }
 
@@ -842,7 +860,8 @@ impl<'a> Waveform<'a> {
 
             let (upper, lower) = left.split_vertically((86).percent_height());
 
-            let mut chart = ChartBuilder::on(&upper)
+            //This starts the block drawing
+            /*let mut chart = ChartBuilder::on(&upper)
                 .set_label_area_size(LabelAreaPosition::Left, 100)
                 .set_label_area_size(LabelAreaPosition::Bottom, 100)
                 .caption("Signal Comparison", ("Times New Roman", 80))
@@ -864,6 +883,10 @@ impl<'a> Waveform<'a> {
             chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
 
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+            */
+            //This ends the block drawing, with a line for the occupancy trace and black dots for the data
+
+            let chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
 
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
@@ -913,7 +936,7 @@ impl<'a> Waveform<'a> {
 
             let (upper, lower) = left.split_vertically((86).percent_height());
 
-            let mut chart = ChartBuilder::on(&upper)
+            /*let mut chart = ChartBuilder::on(&upper)
                 .set_label_area_size(LabelAreaPosition::Left, 100)
                 .set_label_area_size(LabelAreaPosition::Bottom, 100)
                 .caption("Signal Comparison", ("Times New Roman", 80))
@@ -934,6 +957,10 @@ impl<'a> Waveform<'a> {
             chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
 
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+            */
+            
+            let chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+
 
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
@@ -959,7 +986,70 @@ impl<'a> Waveform<'a> {
     
 
     }
-    
+
+    //TODO: 
+    /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
+    /// Mainly because I don't want the hassle of a Result type. 
+    pub fn create_waveform_block_i<'b, DB: DrawingBackend>(&self, data_ref: &AllDataUse, i: usize, zero_loc: usize, trace_color: &'b RGBColor, range: Option<[f64;2]>, draw: &'b DrawingArea<DB, Shift>) -> ChartContext<'b, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>> {
+        let mut build_chart =  ChartBuilder::on(&draw);
+
+        build_chart.set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 100)
+            .x_label_area_size(50)
+            .y_label_area_size(50)
+            .caption("Signal Comparison", ("Times New Roman", 80));
+
+        if i >= self.seq.num_blocks() {
+            return build_chart.build_cartesian_2d(0_f64..1_f64, -1_f64..1_f64).unwrap(); //You're lucky you get this much. 
+        } 
+
+        let sig_block = self.generate_ith_indexed_locs_and_data(i, zero_loc).expect("We designed signal to correspond to data_ref");
+
+        let dat_block = data_ref.data().generate_ith_indexed_locs_and_data(i, zero_loc).expect("Our data BETTER correspond to data_ref");
+
+
+        let [min, max] = match range {
+            Some(r) => if r[0] <= r[1] {r} else {[r[1], r[0]]},
+            None => {
+           
+                let min_signal = sig_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+                let min_data_o = dat_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+                let min = min_signal.min(*min_data_o)-1.0;
+
+                let max_signal = sig_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+                let max_data_o = dat_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+                let max = max_signal.max(*max_data_o)+1.0;
+
+                [min, max]
+            }
+        };
+                
+        let mut chart = build_chart.build_cartesian_2d((dat_block.0[0] as f64)..(*dat_block.0.last().unwrap() as f64), min..max).unwrap();
+
+        chart.configure_mesh()
+            .x_label_style(("serif", 40))
+            .y_label_style(("serif", 40))
+            .x_label_formatter(&|v| format!("{:.0}", v))
+            .x_desc("Genome Location (Bp)")
+            .y_desc("Signal Intensity")
+            .disable_mesh().draw().unwrap();
+
+        const HORIZ_OFFSET: i32 = -5;
+
+        chart.draw_series(dat_block.1.iter().zip(dat_block.0.iter()).map(|(&k, &i)| Circle::new((i as f64, k),3_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+
+
+        chart.draw_series(LineSeries::new(sig_block.1.iter().zip(sig_block.0.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color.clone()).filled()));
+
+        chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
+
+
+        chart
+    }
+
+
     /// Saves an image set of `self` and `alternative` compared to data
     /// to `{signal_directory}/{signal_name}/from_{start}_to_{end}.png 
     /// # Errors
@@ -969,7 +1059,7 @@ impl<'a> Waveform<'a> {
         let current_resid = data_ref.data()-&self;
 
         let zero_locs = data_ref.zero_locs();
-        
+
         let block_lens = data_ref.data().seq().block_lens();
 
         let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
@@ -1018,7 +1108,8 @@ impl<'a> Waveform<'a> {
 
             plot.fill(&WHITE).unwrap();
 
-            let mut chart = ChartBuilder::on(&plot)
+            let mut chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, Some([min, max]), &plot);
+            /*let mut chart = ChartBuilder::on(&plot)
                 .set_label_area_size(LabelAreaPosition::Left, 200)
                 .set_label_area_size(LabelAreaPosition::Bottom, 200)
                 .caption("Signal Comparison", ("Times New Roman", 80))
@@ -1038,10 +1129,13 @@ impl<'a> Waveform<'a> {
 
 
             chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+            */
+            
+            const HORIZ_OFFSET: i32 = -5;
             
             chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
 
-            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
+            //chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
 
         }
 
