@@ -12,6 +12,7 @@ use crate::base::{Bp, LN_2, MAX_BASE, CAPACITY_FOR_NULL};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
 use crate::data_struct::AllDataUse;
+use crate::gene_loci::*;
 
 use log::warn;
 
@@ -800,11 +801,11 @@ impl<'a> Waveform<'a> {
         
         let block_lens = data_ref.data().seq().block_lens();
 
-        let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+        //let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
 
-        let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
+        //let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
 
-        let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+        //let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
 
         let total_dir = format!("{}/{}", signal_directory,signal_name);
 
@@ -814,18 +815,15 @@ impl<'a> Waveform<'a> {
             return;
         };
 
-        for i in 0..blocked_locs_and_signal.len() {
+        for i in 0..zero_locs.len() {
 
             if only_sig {
-                if blocked_locs_and_signal[i].1.iter().all(|&x| x == 0.0) { continue; }
+                if self.read_wave()[self.start_dats[i]..*self.start_dats().get(i+1).unwrap_or(&self.read_wave().len())].iter().all(|&x| x == 0.0) { continue; }
             }
 
-            let loc_block = &blocked_locs_and_signal[i].0;
-            let sig_block = &blocked_locs_and_signal[i].1;
-            let dat_block = &blocked_locs_and_data[i].1;
-            let res_block = &blocked_locs_and_resid[i].1;
+            let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;
 
-            let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            /*let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
             let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
 
             let min = min_signal.min(*min_data_o)-1.0;
@@ -835,7 +833,7 @@ impl<'a> Waveform<'a> {
 
             let max = max_signal.max(*max_data_o)+1.0;
 
-
+*/
             let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
             let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
@@ -886,7 +884,7 @@ impl<'a> Waveform<'a> {
             */
             //This ends the block drawing, with a line for the occupancy trace and black dots for the data
 
-            let chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
 
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
@@ -959,7 +957,7 @@ impl<'a> Waveform<'a> {
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
             */
             
-            let chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+            let (chart, locs) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
 
 
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
@@ -990,7 +988,7 @@ impl<'a> Waveform<'a> {
     //TODO: 
     /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
     /// Mainly because I don't want the hassle of a Result type. 
-    pub fn create_waveform_block_i<'b, DB: DrawingBackend>(&self, data_ref: &AllDataUse, i: usize, zero_loc: usize, trace_color: &'b RGBColor, range: Option<[f64;2]>, draw: &'b DrawingArea<DB, Shift>) -> ChartContext<'b, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>> {
+    pub fn create_waveform_block_i<'b, DB: DrawingBackend>(&self, data_ref: &AllDataUse, i: usize, zero_loc: usize, trace_color: &'b RGBColor, range: Option<[f64;2]>, draw: &'b DrawingArea<DB, Shift>) -> (ChartContext<'b, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>, Vec<usize>) {
         let mut build_chart =  ChartBuilder::on(&draw);
 
         build_chart.set_label_area_size(LabelAreaPosition::Left, 100)
@@ -1000,32 +998,28 @@ impl<'a> Waveform<'a> {
             .caption("Signal Comparison", ("Times New Roman", 80));
 
         if i >= self.seq.num_blocks() {
-            return build_chart.build_cartesian_2d(0_f64..1_f64, -1_f64..1_f64).unwrap(); //You're lucky you get this much. 
+            return (build_chart.build_cartesian_2d(0_f64..1_f64, -1_f64..1_f64).unwrap(), vec![0]); //You're lucky you get this much. 
         } 
 
         let sig_block = self.generate_ith_indexed_locs_and_data(i, zero_loc).expect("We designed signal to correspond to data_ref");
 
         let dat_block = data_ref.data().generate_ith_indexed_locs_and_data(i, zero_loc).expect("Our data BETTER correspond to data_ref");
 
+        let min_signal = sig_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+        let min_data_o = dat_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+        let pre_min = min_signal.min(*min_data_o)-1.0;
+
+        let max_signal = sig_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+        let max_data_o = dat_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+
+        let pre_max = max_signal.max(*max_data_o)+1.0;
 
         let [min, max] = match range {
-            Some(r) => if r[0] <= r[1] {r} else {[r[1], r[0]]},
-            None => {
-           
-                let min_signal = sig_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-                let min_data_o = dat_block.1.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-                let min = min_signal.min(*min_data_o)-1.0;
-
-                let max_signal = sig_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-                let max_data_o = dat_block.1.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-                let max = max_signal.max(*max_data_o)+1.0;
-
-                [min, max]
-            }
+            Some(r) => [pre_min.min(r[0]), pre_max.max(r[1])], 
+            None => [pre_min, pre_max],
         };
-                
+
         let mut chart = build_chart.build_cartesian_2d((dat_block.0[0] as f64)..(*dat_block.0.last().unwrap() as f64), min..max).unwrap();
 
         chart.configure_mesh()
@@ -1046,7 +1040,7 @@ impl<'a> Waveform<'a> {
         chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
 
 
-        chart
+        (chart, dat_block.0)
     }
 
 
@@ -1062,45 +1056,34 @@ impl<'a> Waveform<'a> {
 
         let block_lens = data_ref.data().seq().block_lens();
 
-        let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+        /*let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
         let alterna_locs_and_signal = alternative.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
 
         let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
 
         let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
+        */
 
         let total_dir = format!("{}/{}", signal_directory,signal_name);
 
         /*
-        if let Err(creation) = std::fs::create_dir_all(&total_dir) {
-            warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
-            println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
-            return;
-        };*/
+           if let Err(creation) = std::fs::create_dir_all(&total_dir) {
+           warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
+           println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
+           return;
+           };*/
 
         std::fs::create_dir_all(&total_dir)?;
 
-        for i in 0..blocked_locs_and_signal.len() {
+        for i in 0..zero_locs.len() {
 
 
-            let loc_block = &blocked_locs_and_signal[i].0;
-            let sig_block = &blocked_locs_and_signal[i].1;
-            let alt_block = &alterna_locs_and_signal[i].1;
-            let dat_block = &blocked_locs_and_data[i].1;
-            let res_block = &blocked_locs_and_resid[i].1;
+            let alt_block = alternative.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1; //&alterna_locs_and_signal[i].1;
+            let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;//&blocked_locs_and_resid[i].1;
 
-            let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let min_alter  = alt_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let min_alter  = *alt_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
+            let max_alter  = *alt_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
 
-
-            let max_signal = sig_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let max_alter  = alt_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let max_data_o = dat_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-            let max = max_signal.max(*max_data_o).max(*max_alter)+1.0;
-
-            let min = min_signal.min(*min_data_o).min(*min_alter).min(-max/3.0)-1.0;
 
             let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
@@ -1108,31 +1091,31 @@ impl<'a> Waveform<'a> {
 
             plot.fill(&WHITE).unwrap();
 
-            let mut chart = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, Some([min, max]), &plot);
+            let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, Some([min_alter, max_alter]), &plot);
             /*let mut chart = ChartBuilder::on(&plot)
-                .set_label_area_size(LabelAreaPosition::Left, 200)
-                .set_label_area_size(LabelAreaPosition::Bottom, 200)
-                .caption("Signal Comparison", ("Times New Roman", 80))
-                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
+              .set_label_area_size(LabelAreaPosition::Left, 200)
+              .set_label_area_size(LabelAreaPosition::Bottom, 200)
+              .caption("Signal Comparison", ("Times New Roman", 80))
+              .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
-            chart.configure_mesh()
-                .x_label_style(("serif", 70))
-                .y_label_style(("serif", 70))
-                .x_label_formatter(&|v| format!("{:.0}", v))
-                .x_desc("Genome Location (Bp)")
-                .y_desc("Signal Intensity")
-                .disable_mesh().draw().unwrap();
+              chart.configure_mesh()
+              .x_label_style(("serif", 70))
+              .y_label_style(("serif", 70))
+              .x_label_formatter(&|v| format!("{:.0}", v))
+              .x_desc("Genome Location (Bp)")
+              .y_desc("Signal Intensity")
+              .disable_mesh().draw().unwrap();
+
+              const HORIZ_OFFSET: i32 = -5;
+
+              chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
+
+
+              chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
+             */
 
             const HORIZ_OFFSET: i32 = -5;
 
-            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
-
-
-            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
-            */
-            
-            const HORIZ_OFFSET: i32 = -5;
-            
             chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
 
             //chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
@@ -1197,7 +1180,7 @@ impl<'a> Waveform<'a> {
     }
 
     pub fn start_dats(&self)  -> Vec<usize> {
-         self.start_dats.clone()
+        self.start_dats.clone()
     }
 
     pub fn point_lens(&self)  -> Vec<usize> {
@@ -1230,7 +1213,7 @@ impl<'a, 'b> Add<&'b Waveform<'b>> for &'a Waveform<'a> {
         }
 
         let other_wave = wave2.raw_wave();
-        
+
         Waveform {
             wave: self.wave.iter().zip(other_wave).map(|(a, b)| a+b).collect(),
             spacer: self.spacer,
@@ -1252,7 +1235,7 @@ impl<'a, 'b> AddAssign<&'b Waveform<'b>> for Waveform<'a> {
         }
 
         let other_wave = wave2.raw_wave();
-        
+
         let n = self.wave.len();
 
 
@@ -1274,11 +1257,11 @@ impl<'a, 'b> Sub<&'b Waveform<'b>> for &'a Waveform<'a> {
 
     fn sub(self, wave2: &'b Waveform<'b>) -> Waveform<'a> {
 
-    if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
+        if !std::ptr::eq(self.seq, wave2.seq) || (self.spacer != wave2.spacer()) {
             panic!("These signals do not add! Spacers must be equal and waves must point to the same sequence!");
-    }
+        }
         let other_wave = wave2.raw_wave();
-        
+
         Waveform {
             wave: self.wave.iter().zip(other_wave).map(|(a, b)| a-b).collect(),
             spacer: self.spacer,
@@ -1300,12 +1283,12 @@ impl<'a, 'b> SubAssign<&'b Waveform<'b>> for Waveform<'a> {
         }
 
         let other_wave = wave2.raw_wave();
-        
+
         let n = self.wave.len();
 
         //SAFETY: If we have the same sequence pointer and the same spacer, our lengths are always identical
         assume!(unsafe: other_wave.len() == n);
-        
+
         for i in 0..n {
             self.wave[i] -= other_wave[i];
         }
@@ -1320,7 +1303,7 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
     type Output = Waveform<'a>;
 
     fn mul(self, rhs: f64) -> Waveform<'a> {
-        
+
         Waveform{
             wave: self.wave.iter().map(|a| a*rhs).collect(),
             spacer: self.spacer,
@@ -1400,7 +1383,7 @@ impl Background {
     pub fn new(sigma_background : f64, df : f64, fragment_length: f64) -> Result<Background, Box<dyn Error>> {
 
         let dist = BackgroundDist::new(sigma_background, df)?;
-        
+
         let kernel: [Kernel; KernelWidth::COUNT * KernelVariety::COUNT] = core::array::from_fn(|a| {
             let var = KernelVariety::VARIANTS[a/KernelWidth::COUNT];
             let wid = KernelWidth::VARIANTS[a % KernelWidth::COUNT];
@@ -1425,7 +1408,7 @@ impl Background {
         const MAX_DT_FLOAT: f64 = 15.96875;
         const EXP_OFFSET: u64 = (1023_u64-12) << 52;
         let mut bit_check: u64 = calc.to_bits();
-       
+
         if calc.abs() < MIN_DT_FLOAT {
             bit_check = (calc.signum()*MIN_DT_FLOAT).to_bits();
         } else if calc.abs() > MAX_DT_FLOAT {
@@ -1436,7 +1419,7 @@ impl Background {
 
 
     }
-    
+
     #[allow(dead_code)]
     fn get_near_f64(calc: f64) -> f64 {
         f64::from_bits(Self::get_near_u64(calc))
@@ -1447,8 +1430,8 @@ impl Background {
 
         let bitprep = Self::get_near_u64(calc);
         (((bitprep & 0x8_000_000_000_000_000) >> 51) 
-      + ((bitprep & 0x7_fff_f00_000_000_000) >> 44)) as usize
-        
+         + ((bitprep & 0x7_fff_f00_000_000_000) >> 44)) as usize
+
     }
 
     pub fn ln_cd_and_sf(&self, calc: f64) -> (f64, f64) {
@@ -1523,8 +1506,8 @@ impl<'a> Noise<'a> {
     pub(crate) fn extraneous_resids(&self) -> Vec<f64> {
         self.extraneous_resids.clone()
     }
-    
-    
+
+
     pub(crate) fn dist(&self) -> BackgroundDist {
         self.background.dist.clone()
     }
@@ -1541,10 +1524,10 @@ impl<'a> Noise<'a> {
 
     }
 
-    
+
     pub(crate) fn rmse_noise(&self, spacer: usize) -> f64 {
 
-        
+
         let extra = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
 
         let a = self.resids.iter().map(|&a| a.powi(2)).sum::<f64>();
@@ -1586,7 +1569,7 @@ impl<'a> Noise<'a> {
             //We actually rely on the symmetry around 0 implying the fact that SF < 0.5 for all the absolute values of residuals
             let cdf = 2.0*self.background.dist.cdf(f)-1.0; //ln(CDF-(1-CDF)) = ln(1-SF-SF) = ln(1-2SF) = ln_1p(-2SF)
             let ln_sf = self.background.dist.ln_sf(f)+LN_2; //ln(1-(1-2SF)) = ln(2SF) = ln(2)+ln(SF)
-            //The forumula uses (2n-2i+1), but also goes from 1 to n, not 0 to n-1
+                                                            //The forumula uses (2n-2i+1), but also goes from 1 to n, not 0 to n-1
             let coeff = 2.0-((2*i+1) as f64)/(n as f64);
 
             a_d -= coeff*ln_sf+2.0*cdf;
@@ -1594,7 +1577,7 @@ impl<'a> Noise<'a> {
         a_d
     }
 
-    
+
     //Note: this is kinda bad for some of the main body, but it's Fine(tm)
     fn low_val(la: f64) -> f64 {
 
@@ -1627,7 +1610,7 @@ impl<'a> Noise<'a> {
         //This is basically caused by cdf implementations that return 0.0.
         //My FastT implementation can't, but the statrs normal DOES. 
         if a == f64::INFINITY { return -f64::INFINITY;} 
-        
+
         let hi = Self::high_val(a);
         if a >= HIGH_CUT {return hi;}
 
@@ -1669,287 +1652,287 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
 
         sum
     }
-}
+    }
 
 
 
 
 #[cfg(test)]
-mod tests{
-   
-    use super::*;
-    use crate::sequence::{Sequence, NullSequence};
-    use rand::Rng;
-    use std::time::Instant;
+    mod tests{
 
-    /*fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
+        use super::*;
+        use crate::sequence::{Sequence, NullSequence};
+        use rand::Rng;
+        use std::time::Instant;
 
-        let h = 0.00001;
-        let back = n.background;
-        let ad = n.ad_calc(1);
-        let mut grad = vec![0_f64; n.resids.len()]; 
-        for i in 0..grad.len() {
-             let mut n_res = n.resids();
-             n_res[i] += h;
-             let nnoise = Noise::new(n_res, vec![], back);
-             grad[i] = (nnoise.ad_calc()-ad)/h;
-        }
-        grad
-    }*/
+        /*fn empirical_noise_grad(n: &Noise) -> Vec<f64>{
 
-    #[test]
-    fn wave_check(){
+          let h = 0.00001;
+          let back = n.background;
+          let ad = n.ad_calc(1);
+          let mut grad = vec![0_f64; n.resids.len()]; 
+          for i in 0..grad.len() {
+          let mut n_res = n.resids();
+          n_res[i] += h;
+          let nnoise = Noise::new(n_res, vec![], back);
+          grad[i] = (nnoise.ad_calc()-ad)/h;
+          }
+          grad
+          }*/
 
-        let sd = 5;
-        let height = 2.0;
-        let _spacer = 5;
-        let k = Kernel::new(sd as f64, height, KernelWidth::Wide, KernelVariety::Gaussian);
+        #[test]
+        fn wave_check(){
 
-        let kern = k.get_curve();
-        let kernb = &k*4.0;
+            let sd = 5;
+            let height = 2.0;
+            let _spacer = 5;
+            let k = Kernel::new(sd as f64, height, KernelWidth::Wide, KernelVariety::Gaussian);
+
+            let kern = k.get_curve();
+            let kernb = &k*4.0;
 
 
-        println!("kern len {}", (kern.len()));
-        assert!(kern.len() == 6*(sd as  usize)+1);
+            println!("kern len {}", (kern.len()));
+            assert!(kern.len() == 6*(sd as  usize)+1);
 
-        assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
+            assert!(kern.iter().zip(kernb.get_curve()).map(|(&a,b)| ((b/a)-4.0).abs() < 1e-6).fold(true, |acc, mk| acc && mk));
 
-        assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
-    }
-
-    #[test]
-    fn real_wave_check(){
-        let k = Kernel::new(5.0, 2.0, KernelWidth::Wide, KernelVariety::Gaussian);
-        //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
-        let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
-        let mut signal = Waveform::create_zero(&seq, 5);
-
-        let zeros: Vec<usize> = vec![0, 465, 892]; //Blocks terminate at bases 136, 737, and 1180
-
-        let null_zeros: Vec<usize> = vec![144, 813];
-
-        //This is in units of number of u8s
-        let null_sizes: Vec<usize> = vec![78,17];
-
-        println!("pre do {:?}", signal.raw_wave());
-        unsafe{
-
-        signal.place_peak(&k, 1, 20);
-
-        let t = Instant::now();
-        //kmer_propensities is tested by inspection, not asserts, because coming up with a good assert case was hard and I didn't want to
-        //It passed the inspections I gave it, though
-        println!("duration {:?}", t.elapsed());
-
-        println!("{:?}", signal.raw_wave());
-        println!("start dats {:?}", signal.start_dats());
-        println!("point lens {:?}", signal.point_lens());
-        //Waves are in the correct spot
-
-        let ind = signal.start_dats()[1]+4;
-        println!("{ind} {:?}", &signal.raw_wave()[15..25]);
-        assert!((signal.raw_wave()[ind]-2.0).abs() < 1e-6);
-
-        signal.place_peak(&k, 1, 2);
-
-        //Waves are not contagious
-        assert!(signal.raw_wave()[0..signal.start_dats()[1]].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
-
-        //point_lens: Vec<usize>,
-        //start_dats: Vec<usize>,
-        //
-
-        signal.place_peak(&k, 1, 67);
-
-        //Waves are not contagious
-        assert!(signal.raw_wave()[(signal.start_dats[2])..(signal.start_dats[2]+signal.point_lens[2])].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
-
-        signal.place_peak(&k, 2, 20);
-
-        let ind2 = signal.start_dats()[2]+4;
-
-        //Waves are in the correct spot
-        assert!((signal.raw_wave()[ind2]-2.0).abs() < 1e-6);
-
-        //This is a check just for miri
-        signal.place_peak(&k, 2, 70);
-
-        //This is a check to make sure that miri can catch it when I obviously screw up. This test is designed to have UB. Do NOT uncomment it unless you're checking that Miri can catch stuff
-        //signal.place_peak(&k, 2, 456);
-
+            assert!((k.get_sd()-(sd as f64)).abs() < 1e-6);
         }
 
-        let base_w = &signal*0.4;
+        #[test]
+        fn real_wave_check(){
+            let k = Kernel::new(5.0, 2.0, KernelWidth::Wide, KernelVariety::Gaussian);
+            //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
+            let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
+            let mut signal = Waveform::create_zero(&seq, 5);
+
+            let zeros: Vec<usize> = vec![0, 465, 892]; //Blocks terminate at bases 136, 737, and 1180
+
+            let null_zeros: Vec<usize> = vec![144, 813];
+
+            //This is in units of number of u8s
+            let null_sizes: Vec<usize> = vec![78,17];
+
+            println!("pre do {:?}", signal.raw_wave());
+            unsafe{
+
+                signal.place_peak(&k, 1, 20);
+
+                let t = Instant::now();
+                //kmer_propensities is tested by inspection, not asserts, because coming up with a good assert case was hard and I didn't want to
+                //It passed the inspections I gave it, though
+                println!("duration {:?}", t.elapsed());
+
+                println!("{:?}", signal.raw_wave());
+                println!("start dats {:?}", signal.start_dats());
+                println!("point lens {:?}", signal.point_lens());
+                //Waves are in the correct spot
+
+                let ind = signal.start_dats()[1]+4;
+                println!("{ind} {:?}", &signal.raw_wave()[15..25]);
+                assert!((signal.raw_wave()[ind]-2.0).abs() < 1e-6);
+
+                signal.place_peak(&k, 1, 2);
+
+                //Waves are not contagious
+                assert!(signal.raw_wave()[0..signal.start_dats()[1]].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+
+                //point_lens: Vec<usize>,
+                //start_dats: Vec<usize>,
+                //
+
+                signal.place_peak(&k, 1, 67);
+
+                //Waves are not contagious
+                assert!(signal.raw_wave()[(signal.start_dats[2])..(signal.start_dats[2]+signal.point_lens[2])].iter().fold(true, |acc, ch| acc && ((ch-0.0).abs() < 1e-6)));
+
+                signal.place_peak(&k, 2, 20);
+
+                let ind2 = signal.start_dats()[2]+4;
+
+                //Waves are in the correct spot
+                assert!((signal.raw_wave()[ind2]-2.0).abs() < 1e-6);
+
+                //This is a check just for miri
+                signal.place_peak(&k, 2, 70);
+
+                //This is a check to make sure that miri can catch it when I obviously screw up. This test is designed to have UB. Do NOT uncomment it unless you're checking that Miri can catch stuff
+                //signal.place_peak(&k, 2, 456);
+
+            }
+
+            let base_w = &signal*0.4;
 
 
-        let background: Background = Background::new(0.25, 2.64, 25.0).unwrap();
+            let background: Background = Background::new(0.25, 2.64, 25.0).unwrap();
 
-        let mut rng = rand::thread_rng();
+            let mut rng = rand::thread_rng();
 
-        let null_makeup: Vec<Vec<usize>> = null_sizes.iter().map(|&a| (0..(4*a)).map(|_| rng.gen_range(0_usize..4)).collect::<Vec<usize>>()).collect::<Vec<Vec<usize>>>();
+            let null_makeup: Vec<Vec<usize>> = null_sizes.iter().map(|&a| (0..(4*a)).map(|_| rng.gen_range(0_usize..4)).collect::<Vec<usize>>()).collect::<Vec<Vec<usize>>>();
 
-        println!("{:?} null sizes", null_makeup.iter().map(|a| a.len()).collect::<Vec<_>>());
+            println!("{:?} null sizes", null_makeup.iter().map(|a| a.len()).collect::<Vec<_>>());
 
-        let invented_null: NullSequence =  NullSequence::new(null_makeup);
-
-
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, 3.0, 4.126)};
-
-        let noise: Noise = signal.produce_noise(&data_seq);
-
-        let noi: Vec<f64> = noise.resids();
+            let invented_null: NullSequence =  NullSequence::new(null_makeup);
 
 
-        let raw_resid = &signal-data_seq.data();
+            let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, 3.0, 4.126)};
 
-        let _w = raw_resid.raw_wave();
+            let noise: Noise = signal.produce_noise(&data_seq);
 
-        println!("Noi {:?}", noi);
+            let noi: Vec<f64> = noise.resids();
+
+
+            let raw_resid = &signal-data_seq.data();
+
+            let _w = raw_resid.raw_wave();
+
+            println!("Noi {:?}", noi);
 
 
 
-        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer. Also, moved threshold to 4*spread
-        let fake_extraneous: Vec<f64> = vec![1.5, 1.47029800996013, 1.47029800996013, 1.38467451957995, 1.38467451957995, 1.25290531711691, 1.25290531711691, 1.08922355561054, 1.08922355561054, 0.90979598956895, 0.90979598956895, 0.730128383939957, 0.730128383939957, 0.562966648277099, 0.562966648277099, 0.417055950679791, 0.417055950679791, 0.296848048625422, 0.296848048625422, 0.203002924854919, 0.203002924854919, 0.13338242618908, 0.13338242618908, 0.0842021442512006, 0.0842021442512006, 0.051071182101899, 0.051071182101899, 0.0297616421165554, 0.0297616421165554, 0.0166634948073635, 0.0166634948073635, 0.00896403434250891, 0.00896403434250891, 0.00463307311235515, 0.00463307311235515, 0.00230071601898669, 0.00230071601898669, 0.00109770362832071, 0.00109770362832071, 0.000503193941853768, 0.000503193941853768, 0.00022162254034805, 0.00022162254034805, 9.37822556622304e-05, 9.37822556622304e-05, 3.81290197742989e-05, 3.81290197742989e-05, 1.48942564587766e-05, 1.48942564587766e-05, 5.58997975811801e-06, 5.58997975811801e-06, 2.01571841644728e-06, 2.01571841644728e-06, 6.98357357367463e-07, 6.98357357367463e-07, 2.32462970355435e-07, 2.32462970355435e-07, 7.43460797875875e-08, 7.43460797875875e-08, 2.28449696170689e-08, 2.28449696170689e-08, 6.7445241934213e-09, 6.7445241934213e-09, 1.91311144428907e-09, 1.91311144428907e-09, 5.21383692185988e-10, 5.21383692185988e-10, 1.36522061467319e-10, 1.36522061467319e-10, 3.43460226846833e-11, 3.43460226846833e-11, 8.30191510755152e-12, 8.30191510755152e-12, 1.92800583770048e-12, 1.92800583770048e-12, 4.30196251333215e-13, 4.30196251333215e-13, 9.22259461905713e-14, 9.22259461905713e-14, 1.89962483236413e-14, 1.89962483236413e-14, 3.75933283071791e-15, 3.75933283071791e-15, 7.14795710294863e-16, 7.14795710294863e-16];
+            //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer. Also, moved threshold to 4*spread
+            let fake_extraneous: Vec<f64> = vec![1.5, 1.47029800996013, 1.47029800996013, 1.38467451957995, 1.38467451957995, 1.25290531711691, 1.25290531711691, 1.08922355561054, 1.08922355561054, 0.90979598956895, 0.90979598956895, 0.730128383939957, 0.730128383939957, 0.562966648277099, 0.562966648277099, 0.417055950679791, 0.417055950679791, 0.296848048625422, 0.296848048625422, 0.203002924854919, 0.203002924854919, 0.13338242618908, 0.13338242618908, 0.0842021442512006, 0.0842021442512006, 0.051071182101899, 0.051071182101899, 0.0297616421165554, 0.0297616421165554, 0.0166634948073635, 0.0166634948073635, 0.00896403434250891, 0.00896403434250891, 0.00463307311235515, 0.00463307311235515, 0.00230071601898669, 0.00230071601898669, 0.00109770362832071, 0.00109770362832071, 0.000503193941853768, 0.000503193941853768, 0.00022162254034805, 0.00022162254034805, 9.37822556622304e-05, 9.37822556622304e-05, 3.81290197742989e-05, 3.81290197742989e-05, 1.48942564587766e-05, 1.48942564587766e-05, 5.58997975811801e-06, 5.58997975811801e-06, 2.01571841644728e-06, 2.01571841644728e-06, 6.98357357367463e-07, 6.98357357367463e-07, 2.32462970355435e-07, 2.32462970355435e-07, 7.43460797875875e-08, 7.43460797875875e-08, 2.28449696170689e-08, 2.28449696170689e-08, 6.7445241934213e-09, 6.7445241934213e-09, 1.91311144428907e-09, 1.91311144428907e-09, 5.21383692185988e-10, 5.21383692185988e-10, 1.36522061467319e-10, 1.36522061467319e-10, 3.43460226846833e-11, 3.43460226846833e-11, 8.30191510755152e-12, 8.30191510755152e-12, 1.92800583770048e-12, 1.92800583770048e-12, 4.30196251333215e-13, 4.30196251333215e-13, 9.22259461905713e-14, 9.22259461905713e-14, 1.89962483236413e-14, 1.89962483236413e-14, 3.75933283071791e-15, 3.75933283071791e-15, 7.14795710294863e-16, 7.14795710294863e-16];
 
-        let generated_extraneous = Waveform::generate_extraneous_binding(data_seq.background_ref(),5, &[1.5]);
+            let generated_extraneous = Waveform::generate_extraneous_binding(data_seq.background_ref(),5, &[1.5]);
 
-        println!("theoretical extra {:?}, gen extra {:?}", fake_extraneous, generated_extraneous);
+            println!("theoretical extra {:?}, gen extra {:?}", fake_extraneous, generated_extraneous);
 
-        assert!(fake_extraneous.len() == generated_extraneous.len(), "Not even generating the right length of kernel from binding heights!");
+            assert!(fake_extraneous.len() == generated_extraneous.len(), "Not even generating the right length of kernel from binding heights!");
 
-        for i in 0..fake_extraneous.len() {
-            assert!((fake_extraneous[i]-generated_extraneous[i]).abs() < 1e-7, "generated noise not generating correctly");
+            for i in 0..fake_extraneous.len() {
+                assert!((fake_extraneous[i]-generated_extraneous[i]).abs() < 1e-7, "generated noise not generating correctly");
+            }
+
+
         }
 
 
-    }
+
+        #[test]
+        fn noise_check(){
 
 
+            let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
 
-    #[test]
-    fn noise_check(){
+            let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4],vec![], &background);
+            let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4],vec![], &background);
 
-        
-        let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
+            assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
 
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4],vec![], &background);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2, 1.4],vec![], &background);
+            println!("{:?}", n1.resids());
+            println!("ad_calc {}", n1.ad_calc(1));
 
-        assert!(((&n1*&n2.resids())+1.59).abs() < 1e-6);
+            //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
+            //breaking if we have an EXACT zero coincidentally. 
+            let mut noise_arr = n1.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
+            noise_arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            let noise_length = noise_arr.len();
+            let mut ad_try = (noise_length as f64)/2.0;
 
-        println!("{:?}", n1.resids());
-        println!("ad_calc {}", n1.ad_calc(1));
+            for i in 0..noise_length {
 
-        //The + f64::MIN_POSITIVE is meant to do nothing for most input, but allow us to avoid
-        //breaking if we have an EXACT zero coincidentally. 
-        let mut noise_arr = n1.resids().into_iter().map(|a| a.abs()+f64::MIN_POSITIVE).collect::<Vec<f64>>();
-        noise_arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-        let noise_length = noise_arr.len();
-        let mut ad_try = (noise_length as f64)/2.0;
+                //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
+                //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
+                let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
 
-        for i in 0..noise_length {
+                let cdf = n1.dist().cdf(noise_arr[i]);
+                let sf = 1.0-cdf;
 
-            //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
-            //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
-            let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
+                let real_cdf = (cdf-sf);
+                let real_ln_sf = (sf-cdf).ln_1p();
 
-            let cdf = n1.dist().cdf(noise_arr[i]);
-            let sf = 1.0-cdf;
 
-            let real_cdf = (cdf-sf);
-            let real_ln_sf = (sf-cdf).ln_1p();
-            
+                ad_try -= mult*real_ln_sf+2.0*real_cdf;
+            }
 
-            ad_try -= mult*real_ln_sf+2.0*real_cdf;
-        }
+            println!("ad_try {}", ad_try);
 
-        println!("ad_try {}", ad_try);
+            assert!((n1.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory without extraneous binding");
 
-        assert!((n1.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory without extraneous binding");
- 
-        //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
-        //let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
+            //This is based on a peak with height 1.5 after accounting for binding and an sd equal to 5*spacer
+            //let fake_extraneous: Vec<f64> = vec![1.50000000, 1.47029801, 1.47029801, 1.38467452, 1.38467452, 1.25290532, 1.25290532, 1.08922356, 1.08922356, 0.90979599, 0.90979599];
 
-        let fake_extraneous: Vec<f64> = vec![1.5];
-        
-        let mut extra_resids = Waveform::generate_extraneous_binding(&background, 1, &fake_extraneous);//n1_with_extraneous.extraneous_resids();
+            let fake_extraneous: Vec<f64> = vec![1.5];
 
-        let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
+            let mut extra_resids = Waveform::generate_extraneous_binding(&background, 1, &fake_extraneous);//n1_with_extraneous.extraneous_resids();
 
-        let mut extraneous_noises = n1_with_extraneous.resids().into_iter().map(|a| a.abs()).collect::<Vec<f64>>();
+            let n1_with_extraneous = n1.noise_with_new_extraneous(fake_extraneous);
 
-        extraneous_noises.append(&mut extra_resids);
+            let mut extraneous_noises = n1_with_extraneous.resids().into_iter().map(|a| a.abs()).collect::<Vec<f64>>();
 
-        extraneous_noises.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            extraneous_noises.append(&mut extra_resids);
 
-        let noise_length = extraneous_noises.len();
-        let mut ad_try = (noise_length as f64)/2.0;
-        
-        for i in 0..noise_length {
+            extraneous_noises.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
-            //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
-            //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
-            let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
+            let noise_length = extraneous_noises.len();
+            let mut ad_try = (noise_length as f64)/2.0;
 
-            let cdf = n1.dist().cdf(extraneous_noises[i]);
-            let sf = 1.0-cdf;
+            for i in 0..noise_length {
 
-            let real_cdf = (cdf-sf);
-            let real_ln_sf = (sf-cdf).ln_1p();
-            
+                //let ln_cdf = n1.dist().ln_cdf(noise_arr[i]);
+                //let ln_sf = n1.dist().ln_sf(noise_arr[noise_length-1-i]);
+                let mult = 2.0+ (-2.0*((i+1) as f64)+1.0)/(noise_length as f64);
 
-            ad_try -= mult*real_ln_sf+2.0*real_cdf;
-        }
+                let cdf = n1.dist().cdf(extraneous_noises[i]);
+                let sf = 1.0-cdf;
 
-        println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(1), ad_try);
+                let real_cdf = (cdf-sf);
+                let real_ln_sf = (sf-cdf).ln_1p();
 
-        assert!((n1_with_extraneous.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
 
-        //This was for when I was using the Anderson Darling statistic. Since using the eth statistic, I don't have a gold standard to compare against. 
-        //Calculated these with the ln of the numerical derivative of the fast implementation
-        //of the pAD function in the goftest package in R
-        //This uses Marsaglia's implementation, and is only guarenteed up to 8
-        /*let calced_ads: [(f64, f64); 6] = [(1.0, -0.644472305368), 
-                                           (0.46, 0.026743661078),
-                                           (0.82, -0.357453548256),
-                                           (2.82, -3.221007453503),
-                                           (3.84, -4.439627768456),
-                                           (4.24, -4.865014182520)];
+                ad_try -= mult*real_ln_sf+2.0*real_cdf;
+            }
 
-        for pairs in calced_ads {
+            println!("extraneous ad {} ad_try {}", n1_with_extraneous.ad_calc(1), ad_try);
+
+            assert!((n1_with_extraneous.ad_calc(1)-ad_try).abs() < 1e-6, "AD calculation not matching theory with extraneous binding");
+
+            //This was for when I was using the Anderson Darling statistic. Since using the eth statistic, I don't have a gold standard to compare against. 
+            //Calculated these with the ln of the numerical derivative of the fast implementation
+            //of the pAD function in the goftest package in R
+            //This uses Marsaglia's implementation, and is only guarenteed up to 8
+            /*let calced_ads: [(f64, f64); 6] = [(1.0, -0.644472305368), 
+              (0.46, 0.026743661078),
+              (0.82, -0.357453548256),
+              (2.82, -3.221007453503),
+              (3.84, -4.439627768456),
+              (4.24, -4.865014182520)];
+
+              for pairs in calced_ads {
 
             //I'm considering 5% error mission accomplished for these
-           //We're fighting to make sure this approximation is roughly
-           //compaitble with another approximation with propogated errors
-           //This will not be an exact science
+            //We're fighting to make sure this approximation is roughly
+            //compaitble with another approximation with propogated errors
+            //This will not be an exact science
             println!("Noi {} {} {} {}",Noise::ad_like(pairs.0), pairs.1, Noise::ad_like(pairs.0)-pairs.1, (Noise::ad_like(pairs.0)-pairs.1)/pairs.1);
             assert!(((Noise::ad_like(pairs.0)-pairs.1)/pairs.1).abs() < 5e-2); 
 
-        } */
+            } */
+
+
+
+        }
+
+        #[test]
+        #[should_panic(expected = "Residuals aren't the same length?!")]
+        fn panic_noise() {
+
+            let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
+            let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], vec![], &background);
+            let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], vec![], &background);
+
+            let _ = &n1*&n2.resids();
+        }
+
+
+
+
+
+
 
 
 
     }
-
-    #[test]
-    #[should_panic(expected = "Residuals aren't the same length?!")]
-    fn panic_noise() {
-        
-        let background: Background = Background::new(0.25, 2.64, 5.0).unwrap();
-        let n1 = Noise::new(vec![0.4, 0.4, 0.3, 0.2, -1.4], vec![], &background);
-        let n2 = Noise::new(vec![0.4, 0.4, 0.3, -0.2], vec![], &background);
-
-        let _ = &n1*&n2.resids();
-    }
-
-
-
-
-
-
-
-
-
-}
 
 

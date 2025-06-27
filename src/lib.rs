@@ -3,6 +3,7 @@ pub mod waveform;
 pub mod modified_t;
 pub mod base;
 pub mod data_struct;
+pub mod gene_loci;
 
 use crate::modified_t::SymmetricBaseDirichlet;
 
