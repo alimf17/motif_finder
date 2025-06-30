@@ -102,12 +102,39 @@ impl Locus {
         (location >= cut_back) && (location < cut_forward)
     }
 
+    pub fn which_regulate_locus(&self, locations: &[u64], chr_name: Option<&str>) -> Vec<bool> {
+
+        if let Some(name) = chr_name {
+            if &self.chromosome != name {return vec![false; locations.len()];}
+        };
+
+        //I don't bother defining a behavior on overflow for self.end+REGULATORY_DISTANCE
+        //There aren't even _genomes_ that overflow a u64.
+        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(REGULATORY_DISTANCE), self.end)} else { (self.start, self.end+REGULATORY_DISTANCE) };
+
+        locations.iter().map(|&location| (location >= cut_back) && (location < cut_forward)).collect()
+    }
+
+    pub fn any_regulate_locus(&self, locations: &[u64], chr_name: Option<&str>) -> bool {
+
+        if let Some(name) = chr_name {
+            if &self.chromosome != name {return false;}
+        };
+
+        //I don't bother defining a behavior on overflow for self.end+REGULATORY_DISTANCE
+        //There aren't even _genomes_ that overflow a u64.
+        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(REGULATORY_DISTANCE), self.end)} else { (self.start, self.end+REGULATORY_DISTANCE) };
+
+        locations.iter().map(|&location| (location >= cut_back) && (location < cut_forward)).any(|x| x)
+    }
+
+
     ///This returns the limits of where the gene locus should be drawn given a plotting window from `start` to `end`
     ///Returns `None` if `chr_name` is `Some(string) != Some(self.chromosome)`, 
     ///if the plotting range doesn't intersect the gene locus, or if `start >= end`
-    pub fn yield_boundaries_in_range(&self, start: u64, end: u64, chr_name: Option<&str>) -> Option<(u64, u64)> {
+    pub fn yield_boundaries_in_range(&self, start: u64, end: u64, chr_name: &Option<&str>) -> Option<(u64, u64)> {
 
-        if let Some(name) = chr_name {
+        if let Some(name) = *chr_name {
             if &self.chromosome != name {return None;}
         };
 
@@ -116,6 +143,35 @@ impl Locus {
         Some((self.start.max(start), self.end.min(end)))
 
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn name_copy(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn locus_bounds(&self) -> (u64, u64) {
+        (self.start, self.end)
+    }
+    
+    pub fn positively_oriented(&self) -> bool {
+        self.positively_oriented
+    }
+
+    pub fn chromosome_name(&self) -> &str { 
+        &self.chromosome
+    }
+    
+    pub fn locus_type(&self) -> &str {
+        &self.sequence_ontology
+    }
+
+    pub fn go_terms(&self) -> &HashSet<u64> {
+        &self.go_terms
+    }
+
 }
 
 
@@ -169,7 +225,37 @@ impl GenomeAnnotations {
         ontology_sections
     }
 
+    //    pub fn yield_boundaries_in_range(&self: Locus, start: u64, end: u64, chr_name: Option<&str>) -> Option<(u64, u64)> {
 
+    //The lifetime of the returned &str is connected to the lifetime of the locus names. This is only guarenteed to be correct if binned_loci was made by self.bin_by_locus() if it's Some
+    pub fn collect_ranges<'a>(&'a self, start: u64, end: u64, chr_name: &Option<&str>, ontologies: Option<&[&str]>, binned_loci: Option<&HashMap<String, Vec<&'a Locus>>>) -> Vec<Vec<(&'a str, u64, u64)>> {
+
+        match ontologies {
+
+            None => vec![self.loci.iter().map(|a| a.yield_boundaries_in_range(start, end, chr_name).map(|b| (a.name(), b.0, b.1))).filter_map(|a| a).collect()],
+            Some(onts) => {
+
+                match binned_loci {
+                    None => {
+                        let bins = self.bin_by_locus();
+                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1))).filter_map(|l| l).collect()).collect()
+                    }, 
+
+                    Some(bins) => {
+                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1))).filter_map(|l| l).collect()).collect()
+                    },
+
+                }
+
+            },
+
+        }
+
+    }
+    
+    pub fn loci(&self) -> &Vec<Locus> {
+        &self.loci
+    }
 }
 
 /* pub struct GenomeAnnotations {

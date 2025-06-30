@@ -1,5 +1,6 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Range};
 use std::cmp::{max, min};
+use std::collections::{HashSet, HashMap};
 use std::error::Error;
 use std::fmt;
 
@@ -230,6 +231,19 @@ impl std::fmt::Display for WaveCreationError {
 
 impl Error for WaveCreationError {}
 
+/// This is an error that results from poor interpretation of Waveform blocks
+#[derive(Clone, Debug)]
+pub struct BadLength {}
+
+impl std::fmt::Display for BadLength {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "You're not respecting the block structure of this Waveform!")
+    }
+
+}
+
+impl Error for BadLength {}
 /// This is the struct which holds occupancy traces. 
 /// This needs to uphold a lot of invariants, and thus initialization and usage
 /// are both quite finicky. 
@@ -350,6 +364,49 @@ impl<'a> Waveform<'a> {
 
         peakiness
 
+    }
+
+    //For now, cannot account for chromosome names
+    ///Yields the loci that this occupancy trace could be regulating, based on a set of `GenomeAnnotations`.
+    /// # Errors
+    ///    If `start_genome_coordinates` does not have the same length as `self.start_dats()`
+    pub fn return_regulated_loci<'b>(&self, min_strength: Option<f64>, start_genome_coordinates: &[usize], annotations: &'b GenomeAnnotations) -> Result<Vec<&'b Locus>, BadLength> {
+        if start_genome_coordinates.len() != self.start_dats.len() {
+            return Err(BadLength {});
+        }
+
+        let min_strength = min_strength.unwrap_or(0.0);
+
+        let positions: Vec<_> = self.start_dats.iter().zip(self.point_lens.iter()).zip(start_genome_coordinates.iter()).map(|((&div, &points), &bp_coord)| {
+
+            self.wave[div..(div+points)].iter().enumerate().filter_map(move |(i, &dat)| if dat > min_strength { Some((bp_coord + i*self.spacer) as u64) } else {None})
+
+        }).flatten().collect();
+        
+        Ok(annotations.loci().iter().filter(|l| l.any_regulate_locus(&positions, None)).collect())
+    }
+
+    pub fn return_go_terms(&self, min_strength: Option<f64>, start_genome_coordinates: &[usize], annotations: &GenomeAnnotations) -> Result<Vec<(u64, usize)>, BadLength> {
+
+        let regulated_loci = self.return_regulated_loci(min_strength, start_genome_coordinates, annotations)?;
+
+        let mut hit_terms: HashMap::<u64, usize> = HashMap::with_capacity(regulated_loci.len());
+
+        for locus in regulated_loci {
+
+            for go_term in locus.go_terms() {
+
+                match hit_terms.get_mut(go_term) {
+                    None => {hit_terms.insert(*go_term, 1);},
+                    Some(hits) => *hits += 1,
+                }
+
+            }
+        }
+
+        let mut ordered_go_terms: Vec<(u64, usize)> = hit_terms.into_iter().collect();
+        ordered_go_terms.sort_unstable_by(|a,b| b.1.cmp(&a.1));
+        Ok(ordered_go_terms)
     }
 
     //Returns None if data_ind is >= length of the backing vector
