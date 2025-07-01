@@ -178,12 +178,12 @@ fn main() {
         println!("Fragment length {fragment} ln LIKELIHOOD {} ln prior {} height {} height prop {}", set.ln_likelihood(), set.ln_prior(), set.nth_motif(0).peak_height(), (accep as f64)/(num_moves as f64));
 
         //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("TrpR_Fragment_higher_{:04}", fragment).as_str());
-        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_init_attempt_{:04}", fragment).as_str());
+        set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_init_attempt_{:04}", fragment).as_str(), None, None);
         //set.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("ArgR_Fragment_higher_{:04}", fragment).as_str());
 
         let (new, _) = set.propose_new_motif(&mut rng).unwrap();
 
-        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_attempt_{:04}", fragment).as_str());
+        new.save_set_trace_and_sub_traces("/Users/afarhat/Downloads", format!("tryout_attempt_{:04}", fragment).as_str(), None, None);
 
    }
 

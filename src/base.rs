@@ -21,6 +21,7 @@ use crate::MAX_TF_NUM;
 use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety, MULT_CONST_FOR_H, ADD_CONST_FOR_H};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
+use crate::gene_loci::*;
 
 use crate::{THRESH, NECESSARY_MOTIF_IMPROVEMENT};
 use crate::data_struct::{AllData, AllDataUse};
@@ -3108,7 +3109,7 @@ impl<'a> MotifSet<'a> {
     /// - `{dir}/from_{start}_to_{end}/Strongest_{i}_motifs.png`, the sum of occupancy from base pair `start` to `end` for the set of the `i`th strongest motifs, generated only if the sum has positive occupancy
     /// # Errors
     /// If `dir` does not exist and cannot be created
-    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let mut motif_set = self.clone();
 
@@ -3135,7 +3136,7 @@ impl<'a> MotifSet<'a> {
         outfile_handle.write(&buffer).expect("We just created this file");
 
         
-        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false);
+        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false, annotations, ontologies);
 
         let mut cumulative_signal = self.signal.derive_zero();
 
@@ -3144,13 +3145,13 @@ impl<'a> MotifSet<'a> {
 
                 let signal_name = format!("Motif_{}",i);
                 let sub_signal = motif_set.nth_motif(i).generate_waveform(self.data_ref);
-                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &GREEN, true);
+                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &GREEN, true,annotations, ontologies);
 
                 cumulative_signal += &sub_signal;
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
-                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &plotters::prelude::full_palette::PURPLE, true);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &plotters::prelude::full_palette::PURPLE, true, annotations, ontologies);
                 
                 }
 
@@ -5009,11 +5010,11 @@ impl StrippedMotifSet {
    
     /// This saves `self`'s occupancy traces in a file called `{output_dir}/{file_name}_new_occupancy`.
     /// See `[MotifSet::save_set_trace_and_sub_traces]()` for more detail. 
-    pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str) -> Result<(), Box<dyn Error+Send+Sync>>  {
+    pub fn save_this_trace(&self, data_ref: &AllDataUse, output_dir: &str, file_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>>  {
 
         let current_active = &self.reactivate_set(data_ref);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, file_name)
+        current_active.save_set_trace_and_sub_traces(output_dir, file_name, annotations, ontologies)
 
     }
 
@@ -5328,13 +5329,13 @@ impl<'a> SetTrace<'a> {
     /// This saves the occupancy trace of the current active set in the directory 
     /// `{output_dir}/{run_name}/{zeroth_step}_new_occupancy`. For more details, 
     /// see `[MotifSet::save_set_trace_and_sub_traces]()`
-    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_trace(&self, output_dir: &str, run_name: &str, zeroth_step: usize, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let current_active = &self.active_set;
 
         let file_name = format!("{}/{:0>7}", run_name,zeroth_step);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, &file_name)
+        current_active.save_set_trace_and_sub_traces(output_dir, &file_name, annotations, ontologies)
 
     }
 
@@ -6110,7 +6111,7 @@ impl<'a> TemperSetTraces<'a> {
 
 
 
-    pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
+    /*pub fn save_trace_and_clear(&mut self, output_dir: &str, run_name: &str, zeroth_step: usize) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         self.parallel_traces[0].0.save_trace(output_dir, run_name, zeroth_step)?;
         self.parallel_traces[0].0.save_and_drop_history(output_dir, run_name, zeroth_step)?;
@@ -6119,7 +6120,7 @@ impl<'a> TemperSetTraces<'a> {
 
         Ok(())
 
-    }
+    }*/
 
     pub fn save_trace_by_gzip_and_clear<W1: Write, W2: Write, W3: Write>(&mut self, gz_writer: W1, length_writer: &mut W2, savestate_writer: W3) -> Result<(), Box<dyn Error+Send+Sync>> {
 

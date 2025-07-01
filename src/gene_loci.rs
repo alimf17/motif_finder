@@ -1,16 +1,21 @@
 use std::collections::{HashSet, HashMap, VecDeque};
 use std::error::Error;
+use std::io::{BufReader, BufRead};
+
+use itertools::Itertools;
 
 use thiserror::Error;
 
+use once_cell::sync::Lazy;
+
 use regex::Regex;
 
-///The maximum number of base pairs a TF locus can be before 
-///it can be considered to be regulating a gene locus, potentially
-///I have set this to 1kb based on the "close range" values indicated in
-///Chen et al's 2020 paper "Determinants of transcription factor regulatory range"
-///in Nature Communications. 
-pub const REGULATORY_DISTANCE: u64 = 1000;
+
+static GENE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("gene=").unwrap());
+static ID_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("ID=").unwrap());
+static ONT_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("Ontology_term=").unwrap());
+static GO_PARSE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"go_\w+=([a-zA-Z -]+\|\d+\|\|,?)+;").unwrap());
+static GO_TERM_ANALYZE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"([\w ]+)\[GO:(\d{7})\]").unwrap());
 
 /// This is the struct that tells you where and what the locus is
 #[derive(Debug,Clone)]
@@ -54,11 +59,11 @@ impl Locus {
         let id_regex = Regex::new("ID=").unwrap();
         let ont_regex = Regex::new("Ontology_term=").unwrap();
         
-        let name = annotations.iter().find(|x| gene_regex.is_match(*x)).unwrap_or_else(|| annotations.iter().find(|x| id_regex.is_match(*x)).unwrap_or(&"=")).split('=').collect::<Vec<_>>()[1].to_owned();
+        let name = annotations.iter().find(|x| GENE_REGEX.is_match(*x)).unwrap_or_else(|| annotations.iter().find(|x| ID_REGEX.is_match(*x)).unwrap_or(&"=")).split('=').collect::<Vec<_>>()[1].to_owned();
 
         let mut go_terms: HashSet<u64> = HashSet::new();
 
-        if let Some(term_matches) = annotations.iter().find(|x| ont_regex.is_match(*x)) {
+        if let Some(term_matches) = annotations.iter().find(|x| ONT_REGEX.is_match(*x)) {
             go_terms = term_matches.split(",").map(|x| x.replace("GO:", "").parse::<u64>()).filter_map(|x| x.ok()).collect();
         }
 
@@ -89,41 +94,41 @@ impl Locus {
 
     }
 
-    pub fn can_regulate_locus(&self, location: u64, chr_name: Option<&str>) -> bool {
+    pub fn can_regulate_locus(&self, location: u64,regulatory_distance: u64,  chr_name: Option<&str>) -> bool {
 
         if let Some(name) = chr_name {
             if &self.chromosome != name {return false;}
         };
 
-        //I don't bother defining a behavior on overflow for self.end+REGULATORY_DISTANCE
+        //I don't bother defining a behavior on overflow for self.end+regulatory_distance
         //There aren't even _genomes_ that overflow a u64. 
-        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(REGULATORY_DISTANCE), self.end)} else { (self.start, self.end+REGULATORY_DISTANCE) };
+        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(regulatory_distance), self.end)} else { (self.start, self.end+regulatory_distance) };
 
         (location >= cut_back) && (location < cut_forward)
     }
 
-    pub fn which_regulate_locus(&self, locations: &[u64], chr_name: Option<&str>) -> Vec<bool> {
+    pub fn which_regulate_locus(&self, locations: &[u64], regulatory_distance: u64, chr_name: Option<&str>) -> Vec<bool> {
 
         if let Some(name) = chr_name {
             if &self.chromosome != name {return vec![false; locations.len()];}
         };
 
-        //I don't bother defining a behavior on overflow for self.end+REGULATORY_DISTANCE
+        //I don't bother defining a behavior on overflow for self.end+regulatory_distance
         //There aren't even _genomes_ that overflow a u64.
-        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(REGULATORY_DISTANCE), self.end)} else { (self.start, self.end+REGULATORY_DISTANCE) };
+        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(regulatory_distance), self.end)} else { (self.start, self.end+regulatory_distance) };
 
         locations.iter().map(|&location| (location >= cut_back) && (location < cut_forward)).collect()
     }
 
-    pub fn any_regulate_locus(&self, locations: &[u64], chr_name: Option<&str>) -> bool {
+    pub fn any_regulate_locus(&self, locations: &[u64],regulatory_distance: u64, chr_name: Option<&str>) -> bool {
 
         if let Some(name) = chr_name {
             if &self.chromosome != name {return false;}
         };
 
-        //I don't bother defining a behavior on overflow for self.end+REGULATORY_DISTANCE
+        //I don't bother defining a behavior on overflow for self.end+regulatory_distance
         //There aren't even _genomes_ that overflow a u64.
-        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(REGULATORY_DISTANCE), self.end)} else { (self.start, self.end+REGULATORY_DISTANCE) };
+        let (cut_back, cut_forward) = if self.positively_oriented {(self.start.saturating_sub(regulatory_distance), self.end)} else { (self.start, self.end+regulatory_distance) };
 
         locations.iter().map(|&location| (location >= cut_back) && (location < cut_forward)).any(|x| x)
     }
@@ -132,7 +137,7 @@ impl Locus {
     ///This returns the limits of where the gene locus should be drawn given a plotting window from `start` to `end`
     ///Returns `None` if `chr_name` is `Some(string) != Some(self.chromosome)`, 
     ///if the plotting range doesn't intersect the gene locus, or if `start >= end`
-    pub fn yield_boundaries_in_range(&self, start: u64, end: u64, chr_name: &Option<&str>) -> Option<(u64, u64)> {
+    pub fn yield_locus_boundaries_in_range(&self, start: u64, end: u64, chr_name: &Option<&str>) -> Option<(u64, u64)> {
 
         if let Some(name) = *chr_name {
             if &self.chromosome != name {return None;}
@@ -148,7 +153,7 @@ impl Locus {
         &self.name
     }
 
-    pub fn name_copy(&self) -> String {
+    pub fn name_clone(&self) -> String {
         self.name.clone()
     }
 
@@ -181,9 +186,8 @@ impl GenomeAnnotations {
 
         let file = std::fs::read_to_string(gff_file_name)?;
 
-        let go_parse_regex = Regex::new(r"go_\w+=([a-zA-Z -]+\|\d+\|\|,?)+;").unwrap();
 
-        let go_meanings: HashMap<u64, String> = go_parse_regex.find_iter(&file).map(|a| a.as_str().split(&['=','|',',']).collect::<VecDeque<_>>()).map(|mut b| {
+        let go_meanings: HashMap<u64, String> = GO_PARSE_REGEX.find_iter(&file).map(|a| a.as_str().split(&['=','|',',']).collect::<VecDeque<_>>()).map(|mut b| {
             println!("other_match {:?}",b);
             let go_type = b.pop_front().expect("anything the go parse regex matches is definitionally not empty").to_owned();
             (0..(b.len()/4)).filter_map(move |i| b[4*i+1].parse::<u64>().map(|c| {
@@ -214,7 +218,7 @@ impl GenomeAnnotations {
 
     //Implementation note: I don't use the implementation from loci_with_ontology so that I don't have to iterate over
     //all the possible sequence ontologies a bajillion times
-    pub fn bin_by_locus(&self) -> HashMap<String, Vec<&Locus>> {
+    pub fn bin_by_ontology(&self) -> HashMap<String, Vec<&Locus>> {
         let mut ontology_sections: HashMap<String, Vec<&Locus>> = HashMap::with_capacity(self.sequence_ontologies.len());
         let _: Vec<_> = self.loci.iter().map(|locus| {
             match ontology_sections.get_mut(&locus.sequence_ontology) {
@@ -225,24 +229,24 @@ impl GenomeAnnotations {
         ontology_sections
     }
 
-    //    pub fn yield_boundaries_in_range(&self: Locus, start: u64, end: u64, chr_name: Option<&str>) -> Option<(u64, u64)> {
+    //    pub fn yield_locus_boundaries_in_range(&self: Locus, start: u64, end: u64, chr_name: Option<&str>) -> Option<(u64, u64)> {
 
-    //The lifetime of the returned &str is connected to the lifetime of the locus names. This is only guarenteed to be correct if binned_loci was made by self.bin_by_locus() if it's Some
-    pub fn collect_ranges<'a>(&'a self, start: u64, end: u64, chr_name: &Option<&str>, ontologies: Option<&[&str]>, binned_loci: Option<&HashMap<String, Vec<&'a Locus>>>) -> Vec<Vec<(&'a str, u64, u64)>> {
+    //The lifetime of the returned &str is connected to the lifetime of the locus names. This is only guarenteed to be correct if binned_loci was made by self.bin_by_ontology() if it's Some
+    pub fn collect_ranges<'a>(&'a self, start: u64, end: u64, chr_name: &Option<&str>, ontologies: Option<&[&str]>, binned_loci: Option<&HashMap<String, Vec<&'a Locus>>>) -> Vec<Vec<(&'a str, u64, u64, bool)>> {
 
         match ontologies {
 
-            None => vec![self.loci.iter().map(|a| a.yield_boundaries_in_range(start, end, chr_name).map(|b| (a.name(), b.0, b.1))).filter_map(|a| a).collect()],
+            None => vec![self.loci.iter().map(|a| a.yield_locus_boundaries_in_range(start, end, chr_name).map(|b| (a.name(), b.0, b.1, a.positively_oriented()))).filter_map(|a| a).collect()],
             Some(onts) => {
 
                 match binned_loci {
                     None => {
-                        let bins = self.bin_by_locus();
-                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1))).filter_map(|l| l).collect()).collect()
+                        let bins = self.bin_by_ontology();
+                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_locus_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1, l.positively_oriented()))).filter_map(|l| l).collect()).collect()
                     }, 
 
                     Some(bins) => {
-                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1))).filter_map(|l| l).collect()).collect()
+                        onts.iter().filter_map(|&c| bins.get(c)).map(|a| a.iter().map(|l| l.yield_locus_boundaries_in_range(start, end, chr_name).map(|b| (l.name(), b.0, b.1, l.positively_oriented()))).filter_map(|l| l).collect()).collect()
                     },
 
                 }
@@ -253,8 +257,67 @@ impl GenomeAnnotations {
 
     }
     
+    //STRONGLY recommend using this with the ontology, probably the CDS ontology. There can be redundancies, which we will ignore.
+    //Also, note that if a gene has multiple names in different `Locus`es in `self`, even if that gene is represented on the same line of the tsv, 
+    //we will find and modify all of the different `Locus`es. This is to account for the possibility that the different loci diverged from the same evolutionary source, 
+    //but had two different names. 
+    pub fn add_go_terms_from_tsv_proteome<'b>(&mut self, ontology: Option<&'b str>, tsv_file_name: &'b str) -> Result<(), Box<dyn Error+Send+Sync>> {
+        
+        let f = std::fs::File::open(tsv_file_name)?;
+        let f = BufReader::new(f);
+
+        let gene_name_locs: HashMap<String, usize> = self.loci.iter().filter_map(|a| match ontology {
+            Some(ont) => if a.locus_type() == ont { Some(a) } else {None},
+            None => Some(a)
+        }).enumerate().map(|(i,a)| (a.name_clone(), i)).collect();
+
+        let lines = f.lines().skip(1); //these tsvs have column symbols we're ignoring
+
+        for line in lines {
+            //_entry, _reviewed, _entry_name,  _protein_names,  gene_names, _organism,  _length, _gene_names_ordered_locus, _gene_names_orf, _gene_names_primary, _gene_names_synonyms, go_ids,go
+            let Some(split_line): Option<Vec<_>> = line.ok().map(|a| a.split('\t').map(|b| b.to_owned()).collect()) else {continue;}; 
+
+            let Some(gene_names) = split_line.get(4) else {continue;};
+            let Some(go_ids) = split_line.get(11) else {continue;};
+            let Some(go) = split_line.get(12) else {continue;};
+
+            let go_terms: Vec<u64> = go_ids.split("; ").map(|x| x.replace("GO:", "").parse::<u64>()).filter_map(|x| x.ok()).collect();
+            let go_meanings: Vec<(u64, String)> = go.split("; ").filter_map(|x| GO_TERM_ANALYZE_REGEX.captures(x).map(|cap| cap.extract()))
+                                                                .filter_map(|(_, [description, go_term])| {
+                                                                    let go_term: Option<u64> = go_term.parse().ok();
+                                                                    go_term.map(|a| (a, description.to_owned()))
+                                                                }).collect();
+                //let Some((_, [description, go_term])) = GO_TERM_ANALYZE_REGEX.captures(x).map(|cap| cap.extract()) else {continue;};
+                //let Some(go_term): Option<u64> = go_term.parse() else {continue;};
+
+                //(go_term, description)
+            //}).collect();
+
+            for &locus_ind in gene_names.split(' ').filter_map(|a| gene_name_locs.get(a)) {
+
+                let locus_changing: &mut Locus = self.loci.get_mut(locus_ind).expect("We extracted this from the indices of loci");
+
+                //If the go term already exists, we don't care
+                for go_term in go_terms.iter() { _ = locus_changing.go_terms.insert(*go_term);}
+            
+                for (term, meaning) in go_meanings.iter() {
+                    if self.go_meanings.get(term).is_none() { self.go_meanings.insert(*term, meaning.clone()) ;}
+                }
+
+            }
+
+        } 
+
+        Ok(())
+
+    }
+
     pub fn loci(&self) -> &Vec<Locus> {
         &self.loci
+    }
+
+    pub fn ontologies(&self) -> &HashSet<String> {
+        &self.sequence_ontologies
     }
 }
 
@@ -270,7 +333,7 @@ impl std::fmt::Display for GenomeAnnotations {
 
         //guessing on capacity
         let mut output: String = String::with_capacity(self.loci.len()*100);
-        let ontology_sections = self.bin_by_locus();
+        let ontology_sections = self.bin_by_ontology();
 
         let _: Vec<_> = ontology_sections.iter().map(|(name, loci)| {
             output.push_str(&format!("{name}\n"));

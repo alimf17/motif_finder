@@ -5,6 +5,7 @@ use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT, ECOLI_FREQ};
 use motif_finder::data_struct::{AllData, AllDataUse};
+use motif_finder::gene_loci::*;
 
 use clap::{Parser, ValueEnum};
 
@@ -96,14 +97,25 @@ struct Cli {
     /// This is an optional argument to pick a genome to run FIMO against
     /// If this is not supplied, FIMO will not be run.
     #[arg(short, long)]
-    fasta_file: Option<String>
+    fasta_file: Option<String>,
+
+    /// This is an optional argument if you want to annotate your occupancy
+    /// traces with gene loci and analyze go terms. This should point to a gff file
+    #[arg(short, long)]
+    gff_file: Option<String>,
+
+    /// This is an extremely optional argument if you want more annotations
+    /// for your genes with more go terms. This should point to a tsv file
+    /// like you'd get from uniprot
+    #[arg(short, long)]
+    additional_annotations_file: Option<String>,
 
 }
 
 
 pub fn main() {
 
-    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, discard_num, fasta_file} = Cli::parse(); 
+    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, discard_num, fasta_file, gff_file, additional_annotations_file} = Cli::parse(); 
 
     let min_chain = discard_num.unwrap_or(0);
 
@@ -201,6 +213,12 @@ pub fn main() {
     
         buffer.clear();
     }
+ 
+    let mut annotations = gff_file.map(|a| GenomeAnnotations::from_gff_file(&a).ok()).flatten(); 
+
+    if let Some(additional_annotations) = additional_annotations_file {
+        annotations.as_mut().map(|a| a.add_go_terms_from_tsv_proteome(Some("CDS"), &additional_annotations));
+    };
 
     let all_data_file = set_trace_collections[0].data_name().to_owned();
    
@@ -454,7 +472,7 @@ pub fn main() {
 
     }
     
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file, annotations.as_ref(), Some(&["CDS"]));
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:
@@ -565,7 +583,7 @@ pub fn main() {
 
     }
     
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file);
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file,annotations.as_ref(), Some(&["CDS"]));
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:

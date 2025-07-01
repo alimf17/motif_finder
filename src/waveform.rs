@@ -370,7 +370,7 @@ impl<'a> Waveform<'a> {
     ///Yields the loci that this occupancy trace could be regulating, based on a set of `GenomeAnnotations`.
     /// # Errors
     ///    If `start_genome_coordinates` does not have the same length as `self.start_dats()`
-    pub fn return_regulated_loci<'b>(&self, min_strength: Option<f64>, start_genome_coordinates: &[usize], annotations: &'b GenomeAnnotations) -> Result<Vec<&'b Locus>, BadLength> {
+    pub fn return_regulated_loci<'b>(&self, min_strength: Option<f64>, regulatory_distance: u64, start_genome_coordinates: &[usize], annotations: &'b GenomeAnnotations) -> Result<Vec<&'b Locus>, BadLength> {
         if start_genome_coordinates.len() != self.start_dats.len() {
             return Err(BadLength {});
         }
@@ -383,12 +383,12 @@ impl<'a> Waveform<'a> {
 
         }).flatten().collect();
         
-        Ok(annotations.loci().iter().filter(|l| l.any_regulate_locus(&positions, None)).collect())
+        Ok(annotations.loci().iter().filter(|l| l.any_regulate_locus(&positions, regulatory_distance, None)).collect())
     }
 
-    pub fn return_go_terms(&self, min_strength: Option<f64>, start_genome_coordinates: &[usize], annotations: &GenomeAnnotations) -> Result<Vec<(u64, usize)>, BadLength> {
+    pub fn return_go_terms(&self, min_strength: Option<f64>, regulatory_distance: u64, start_genome_coordinates: &[usize], annotations: &GenomeAnnotations) -> Result<Vec<(u64, usize)>, BadLength> {
 
-        let regulated_loci = self.return_regulated_loci(min_strength, start_genome_coordinates, annotations)?;
+        let regulated_loci = self.return_regulated_loci(min_strength,regulatory_distance, start_genome_coordinates, annotations)?;
 
         let mut hit_terms: HashMap::<u64, usize> = HashMap::with_capacity(regulated_loci.len());
 
@@ -850,7 +850,9 @@ impl<'a> Waveform<'a> {
     /// `{signal_directory}/{signal_name}/from_{start}_to_{end}.png, and once 
     /// to `{signal_directory}/from_{start}_to_{end}/{signal_name}.png
     /// If this fails, will simply warn you but won't return a hard error
-    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, only_sig: bool) {
+    /// If `annotations` is Some, will save loci as well. If `ontologies` 
+    /// is Some while `annotations` is Some, will only save the ontologies included on top
+    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, only_sig: bool, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) {
 
         let current_resid = data_ref.data()-&self;
 
@@ -872,6 +874,28 @@ impl<'a> Waveform<'a> {
             return;
         };
 
+        let (ontology_count, ontology_vec, ontology_bins) = match annotations {
+
+            None => (0_u32,None, None),
+            Some(annotates) => {
+                let bins = annotates.bin_by_ontology();
+                match ontologies {
+                    Some(onts) => (onts.len() as u32, Some(onts.iter().map(|&a| a.to_owned()).collect::<Vec<String>>()), Some(bins)),
+                    None => (annotates.ontologies().len() as u32, Some(annotates.ontologies().iter().map(|a| a.to_owned()).collect()), Some(bins))
+                }
+            }
+
+        };
+
+
+        const LOCUS_HEIGHT: u32 = 100;
+
+        let height_loci: u32 = ontology_count*LOCUS_HEIGHT;
+
+        let height: u32 = 1500+height_loci;
+
+
+
         for i in 0..zero_locs.len() {
 
             if only_sig {
@@ -880,24 +904,25 @@ impl<'a> Waveform<'a> {
 
             let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;
 
-            /*let min_signal = sig_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let min_data_o = dat_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-            let min = min_signal.min(*min_data_o)-1.0;
-
-            let max_signal = sig_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-            let max_data_o = dat_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
-
-            let max = max_signal.max(*max_data_o)+1.0;
-
-*/
             let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
-            let plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
+            let big_plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
 
             let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
-            plot.fill(&WHITE).unwrap();
+            big_plot.fill(&WHITE).unwrap();
+
+            let (loci, plot) = big_plot.split_vertically(height_loci);
+
+            let mut remain_loci = loci;
+            
+            let locus_spaces: Vec<_> = (0..ontology_count).map(move |_| {
+                let (locus_space, remainder) = remain_loci.split_vertically(LOCUS_HEIGHT);
+                remain_loci = remainder;
+                locus_space
+            }).collect();
+
+
 
             let (left, right) = plot.split_horizontally((95).percent_width());
 
@@ -915,34 +940,24 @@ impl<'a> Waveform<'a> {
 
             let (upper, lower) = left.split_vertically((86).percent_height());
 
-            //This starts the block drawing
-            /*let mut chart = ChartBuilder::on(&upper)
-                .set_label_area_size(LabelAreaPosition::Left, 100)
-                .set_label_area_size(LabelAreaPosition::Bottom, 100)
-                .caption("Signal Comparison", ("Times New Roman", 80))
-                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
-
-            chart.configure_mesh()
-                .x_label_style(("serif", 40))
-                .y_label_style(("serif", 40))
-                .x_label_formatter(&|v| format!("{:.0}", v))
-                .x_desc("Genome Location (Bp)")
-                .y_desc("Signal Intensity")
-                .disable_mesh().draw().unwrap();
-
-            const HORIZ_OFFSET: i32 = -5;
-
-            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
-
-
-            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
-
-            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
-            */
-            //This ends the block drawing, with a line for the occupancy trace and black dots for the data
-
             let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
 
+            for (i, locus_space) in locus_spaces.iter().enumerate() {
+                if let Some(ontology) = ontology_vec.as_ref().map(|a| a.get(i)).flatten() {
+ 
+                   let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(&[ontology]), ontology_bins.as_ref());
+
+                   let mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
+
+                   draw_loc.configure_mesh().disable_mesh().draw().unwrap();
+
+                   //TODO: make rectangles draw gene loci
+                   //      make text boxes on top of rectangles
+                   //      make an annotation for which way the gene locus goes 
+
+
+                };
+            }
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
                 let tup = data_ref.background_ref().cd_and_sf(a);
