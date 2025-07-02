@@ -28,7 +28,7 @@ use num_traits::MulAdd;
 
 use plotters::prelude::*;
 
-use plotters::coord::types::RangedCoordf64;
+use plotters::coord::types::{RangedCoordf64, RangedCoordu64};
 
 use plotters::prelude::full_palette::ORANGE;
 
@@ -880,8 +880,10 @@ impl<'a> Waveform<'a> {
             Some(annotates) => {
                 let bins = annotates.bin_by_ontology();
                 match ontologies {
-                    Some(onts) => (onts.len() as u32, Some(onts.iter().map(|&a| a.to_owned()).collect::<Vec<String>>()), Some(bins)),
-                    None => (annotates.ontologies().len() as u32, Some(annotates.ontologies().iter().map(|a| a.to_owned()).collect()), Some(bins))
+//                    Some(onts) => (onts.len() as u32, Some(onts.iter().map(|&a| a.to_owned()).collect::<Vec<String>>()), Some(bins)),
+//                     None => (annotates.ontologies().len() as u32, Some(annotates.ontologies().iter().map(|a| a.to_owned()).collect()), Some(bins))
+                    Some(onts) => (onts.len() as u32, Some(onts.clone().into_iter().map(|&a| a).collect::<Vec<&str>>()), Some(bins)),
+                    None => (annotates.ontologies().len() as u32, Some(annotates.ontologies().iter().map(|a| a.as_str()).collect()), Some(bins)),
                 }
             }
 
@@ -906,7 +908,7 @@ impl<'a> Waveform<'a> {
 
             let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
-            let big_plot = BitMapBackend::new(&signal_file, (3300, 1500)).into_drawing_area();
+            let big_plot = BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area();
 
             let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
@@ -914,7 +916,7 @@ impl<'a> Waveform<'a> {
 
             let (loci, plot) = big_plot.split_vertically(height_loci);
 
-            let mut remain_loci = loci;
+            /*let mut remain_loci = loci;
             
             let locus_spaces: Vec<_> = (0..ontology_count).map(move |_| {
                 let (locus_space, remainder) = remain_loci.split_vertically(LOCUS_HEIGHT);
@@ -922,7 +924,7 @@ impl<'a> Waveform<'a> {
                 locus_space
             }).collect();
 
-
+*/
 
             let (left, right) = plot.split_horizontally((95).percent_width());
 
@@ -941,22 +943,33 @@ impl<'a> Waveform<'a> {
             let (upper, lower) = left.split_vertically((86).percent_height());
 
             let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+/*
+            if let Some(ref ontology_collection) = ontology_vec {
+                let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(ontology_collection), ontology_bins.as_ref());
+                for (k, locus_space) in locus_spaces.iter().enumerate() {
 
-            for (i, locus_space) in locus_spaces.iter().enumerate() {
-                if let Some(ontology) = ontology_vec.as_ref().map(|a| a.get(i)).flatten() {
- 
-                   let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(&[ontology]), ontology_bins.as_ref());
+                    let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
 
-                   let mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
 
-                   draw_loc.configure_mesh().disable_mesh().draw().unwrap();
+                    let mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
 
-                   //TODO: make rectangles draw gene loci
-                   //      make text boxes on top of rectangles
-                   //      make an annotation for which way the gene locus goes 
+                    draw_loc.configure_mesh().disable_mesh().draw().unwrap();
+
+                    draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
+                        Rectangle::new([(start, 0.0), (end, 1.0)], CYAN.filled()) +
+                        Text::new(format!("{:?}", name), (14, 0), ("serif", 10).into_font())
+                    })).unwrap();
+
+                    //TODO: make rectangles draw gene loci
+                    //      make text boxes on top of rectangles
+                    //      make an annotation for which way the gene locus goes 
 
 
                 };
+            }*/
+
+            if let Some(ref ontology_collection) = ontology_vec{
+                let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
             }
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
@@ -984,11 +997,13 @@ impl<'a> Waveform<'a> {
 
             let by_loc_file = format!("{}/{}.png", by_loc_dir, signal_name);
 
-            let plot = BitMapBackend::new(&by_loc_file, (3300, 1500)).into_drawing_area();
+            let big_plot = BitMapBackend::new(&by_loc_file, (3300, height)).into_drawing_area();
 
             let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
             plot.fill(&WHITE).unwrap();
+            
+            let (loci, plot) = big_plot.split_vertically(height_loci);
 
             let (left, right) = plot.split_horizontally((95).percent_width());
 
@@ -1029,8 +1044,11 @@ impl<'a> Waveform<'a> {
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
             */
             
-            let (chart, locs) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
 
+            if let Some(ref ontology_collection) = ontology_vec{
+                let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
+            }
 
             let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
 
@@ -1197,7 +1215,41 @@ impl<'a> Waveform<'a> {
         Ok(())
 
     }
+    /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
+    /// Mainly because I don't want the hassle of a Result type. 
+    pub fn create_block_annotations<'b, DB: DrawingBackend>(&self, start_loc: usize, end_loc: usize, annotations: &GenomeAnnotations, ontology_collection: &[&str], ontology_bins: Option<&HashMap<String, Vec<&Locus>>>, locus_color: &'b RGBColor, total_locus_space: &'b DrawingArea<DB, Shift>) -> Vec<ChartContext<'b, DB, Cartesian2d<RangedCoordu64, RangedCoordf64>>> {
+    
+        let locus_spaces = total_locus_space.split_evenly((ontology_collection.len(),1));
 
+        let loci_to_draw =  annotations.collect_ranges(start_loc as u64, end_loc as u64, &None, Some(ontology_collection), ontology_bins);
+
+
+        locus_spaces.iter().enumerate().map(|(k, locus_space)| {
+
+            let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
+
+            let mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d((start_loc as u64)..(end_loc as u64), 0.0..1.0).unwrap();
+
+            draw_loc.configure_mesh().disable_mesh().draw().unwrap();
+
+            draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
+                Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()) 
+            })).unwrap();
+            
+            draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
+                    Text::new(format!("{:?}", name), (*start, 1.0), ("serif", 10).into_font())
+            })).unwrap();
+
+            draw_loc
+            //TODO: make rectangles draw gene loci
+            //      make text boxes on top of rectangles
+                    //      make an annotation for which way the gene locus goes 
+
+
+        }).collect()
+
+
+    }
     pub(crate) fn with_removed_blocks(&self, remove: &[usize]) -> Option<WaveformDef> {
 
         let mut new_wave = self.wave.clone();
