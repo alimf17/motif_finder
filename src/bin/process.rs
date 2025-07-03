@@ -131,6 +131,16 @@ pub fn main() {
 
     let mut buffer: Vec<u8> = Vec::new();
 
+    let mut potential_annotations: Option<GenomeAnnotations> = gff_file.as_ref().map(|a| match GenomeAnnotations::from_gff_file(a) {
+        Err(e) => {println!("genome annotations went wrong: {:?}. Continuing without them.", e); None},
+        Ok(annotated) => Some(annotated),
+    }).flatten();
+
+    if let Some(added_annotations) = additional_annotations_file { potential_annotations.as_mut().map(|a| {
+        let ontology = if a.ontologies().contains("CDS") { Some("CDS") } else if a.ontologies().contains("gene") { Some("gene")} else {None};
+        if let Err(e) = a.add_go_terms_from_tsv_proteome(ontology, &added_annotations) { println!("Adding terms went wrong {:?}. Left the genome annotations unmodified.", e);};
+    });};
+
     //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
@@ -214,11 +224,11 @@ pub fn main() {
         buffer.clear();
     }
  
-    let mut annotations = gff_file.map(|a| GenomeAnnotations::from_gff_file(&a).ok()).flatten(); 
+    /*let mut annotations = gff_file.map(|a| GenomeAnnotations::from_gff_file(&a).ok()).flatten(); 
 
     if let Some(additional_annotations) = additional_annotations_file {
         annotations.as_mut().map(|a| a.add_go_terms_from_tsv_proteome(Some("CDS"), &additional_annotations));
-    };
+    };*/
 
     let all_data_file = set_trace_collections[0].data_name().to_owned();
    
@@ -444,7 +454,10 @@ pub fn main() {
     println!("Highest Posterior Density motif set: {:?}", highesst_post_motif_set);
     let mut activated = highesst_post_motif_set.reactivate_set(&data_ref);
 
-    activated.sort_by_height();
+    //activated.sort_by_height();
+
+
+    let (likes, first_failure,gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
 
     println!("Cumulative analysis of highest posterior density motif set");
 
@@ -472,7 +485,7 @@ pub fn main() {
 
     }
     
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file, annotations.as_ref(), Some(&["CDS"]));
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file, potential_annotations.as_ref(), Some(&["CDS"]));
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:
@@ -583,7 +596,7 @@ pub fn main() {
 
     }
     
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file,annotations.as_ref(), Some(&["CDS"]));
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file,potential_annotations.as_ref(), Some(&["CDS"]));
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:

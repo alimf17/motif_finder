@@ -386,6 +386,12 @@ impl<'a> Waveform<'a> {
         Ok(annotations.loci().iter().filter(|l| l.any_regulate_locus(&positions, regulatory_distance, None)).collect())
     }
 
+    /// This takes the waveform, finds the genes that are hit and their associated go terms.
+    /// When things go well, it returns a vector of go terms from most potential genes regulated by this
+    /// to least. The vector is a vector of tuples: first element of each tuple is the go term, second 
+    /// is the count of number of relevant genes hit by the go term.
+    /// # Errors
+    ///    If `start_genome_coordinates` does not have the same length as `self.start_dats()`
     pub fn return_go_terms(&self, min_strength: Option<f64>, regulatory_distance: u64, start_genome_coordinates: &[usize], annotations: &GenomeAnnotations) -> Result<Vec<(u64, usize)>, BadLength> {
 
         let regulated_loci = self.return_regulated_loci(min_strength,regulatory_distance, start_genome_coordinates, annotations)?;
