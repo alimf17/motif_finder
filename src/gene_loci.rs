@@ -319,6 +319,10 @@ impl GenomeAnnotations {
     pub fn ontologies(&self) -> &HashSet<String> {
         &self.sequence_ontologies
     }
+
+    pub fn go_explanations(&self) -> &HashMap<u64, String> {
+        &self.go_meanings
+    }
 }
 
 /* pub struct GenomeAnnotations {

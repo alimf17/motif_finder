@@ -444,12 +444,12 @@ pub fn main() {
 
     
 
-
+/*
     highesst_post_motif_set.set_iter().enumerate().for_each(|(i,m)| {
         let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
         draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
     });
-
+*/
 
     println!("Highest Posterior Density motif set: {:?}", highesst_post_motif_set);
     let mut activated = highesst_post_motif_set.reactivate_set(&data_ref);
@@ -469,6 +469,12 @@ pub fn main() {
     for (i, like) in cumulative_lns.into_iter().enumerate() {
         let mot_ref = activated.get_nth_motif(i);
         println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
+        if let Some(go_names) = go_terms.as_ref() {
+
+            let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
+            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{:#?}", &format_terms);
+        };
     }
 
 
@@ -558,19 +564,37 @@ pub fn main() {
 
     
 
-
+/*
     highest_likelihood_motif_set.set_iter().enumerate().for_each(|(i,m)| {
         let prep: Vec<[(usize, f64); BASE_L]> = m.pwm_ref().iter().map(|b| core::array::from_fn(|a| (a, b.scores()[a]))).collect();
         draw_pwm(&prep, format!("{}/{}_best_trace_pwm_{}.png", out_dir.clone(), base_file, i).as_str());
     });
-
+*/
 
     println!("Highest Likelihood motif set: {:?}", highest_likelihood_motif_set);
     let mut activated = highest_likelihood_motif_set.reactivate_set(&data_ref);
 
-    activated.sort_by_height();
+
+    let (likes, first_failure,gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
 
     println!("Cumulative analysis of highest likelihood motif set");
+
+    let cumulative_lns = activated.ln_posts_by_strength();
+
+    let cumulative_noises = activated.distances_by_strength();
+
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    for (i, like) in cumulative_lns.into_iter().enumerate() {
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
+        if let Some(go_names) = go_terms.as_ref() {
+
+            let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
+            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{:#?}", &format_terms);
+        };
+    }
+
 
     let cumulative_lns = activated.ln_posts_by_strength();
 
