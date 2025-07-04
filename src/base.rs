@@ -3258,6 +3258,8 @@ impl<'a> MotifSet<'a> {
         self.set.iter().map(|a| a.1.iter().map(|&b| b)).flatten().collect()
     }
 
+    pub fn num_motifs(&self) -> usize { self.set.len() }
+    
     pub fn len(&self) -> usize {
         self.set.len()
     }

@@ -188,7 +188,6 @@ impl GenomeAnnotations {
 
 
         let go_meanings: HashMap<u64, String> = GO_PARSE_REGEX.find_iter(&file).map(|a| a.as_str().split(&['=','|',',']).collect::<VecDeque<_>>()).map(|mut b| {
-            println!("other_match {:?}",b);
             let go_type = b.pop_front().expect("anything the go parse regex matches is definitionally not empty").to_owned();
             (0..(b.len()/4)).filter_map(move |i| b[4*i+1].parse::<u64>().map(|c| {
                 let mut function = go_type.clone();

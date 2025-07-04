@@ -1007,7 +1007,7 @@ impl<'a> Waveform<'a> {
 
             let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
-            plot.fill(&WHITE).unwrap();
+            big_plot.fill(&WHITE).unwrap();
             
             let (loci, plot) = big_plot.split_vertically(height_loci);
 
@@ -1093,6 +1093,7 @@ impl<'a> Waveform<'a> {
             .y_label_area_size(50)
             .caption("Signal Comparison", ("Times New Roman", 80));
 
+
         if i >= self.seq.num_blocks() {
             return (build_chart.build_cartesian_2d(0_f64..1_f64, -1_f64..1_f64).unwrap(), vec![0]); //You're lucky you get this much. 
         } 
@@ -1128,8 +1129,8 @@ impl<'a> Waveform<'a> {
 
         const HORIZ_OFFSET: i32 = -5;
 
-        chart.draw_series(dat_block.1.iter().zip(dat_block.0.iter()).map(|(&k, &i)| Circle::new((i as f64, k),3_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
+        chart.draw_series(dat_block.1.iter().zip(dat_block.0.iter()).map(|(&k, &i)| Circle::new((i as f64, k),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
         chart.draw_series(LineSeries::new(sig_block.1.iter().zip(sig_block.0.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color.clone()).filled()));
 
@@ -1243,7 +1244,7 @@ impl<'a> Waveform<'a> {
             })).unwrap();
             
             draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
-                    Text::new(format!("{:?}", name), (*start, 1.0), ("serif", 10).into_font())
+                    Text::new(format!("{}", name), (*start, 0.5), ("serif", 40).into_font())
             })).unwrap();
 
             draw_loc

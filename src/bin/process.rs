@@ -466,14 +466,14 @@ pub fn main() {
     let cumulative_noises = activated.distances_by_strength();
 
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
-    for (i, like) in cumulative_lns.into_iter().enumerate() {
+    for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
-        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
         if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
         if let Some(go_names) = go_terms.as_ref() {
 
             let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
-            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{:#?}", &format_terms);
+            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{}\n", &format_terms.join("\n"));
         };
     }
 
@@ -584,14 +584,14 @@ pub fn main() {
     let cumulative_noises = activated.distances_by_strength();
 
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
-    for (i, like) in cumulative_lns.into_iter().enumerate() {
+    for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
-        println!("{i}\t{}\t{}\t{}\t{like}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i]);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
         if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
         if let Some(go_names) = go_terms.as_ref() {
 
             let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
-            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{:#?}", &format_terms);
+            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{}\n", &format_terms.join("\n"));
         };
     }
 
@@ -1153,4 +1153,5 @@ mod tests {
     }
 
 }
+
 
