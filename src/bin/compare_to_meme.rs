@@ -52,7 +52,7 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     println!("No change");
-    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, false, &mut rng).unwrap();
+    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, HandleImpossibleMotif::LeaveUnchanged, false, &mut rng).unwrap();
 
     let mut rmse = f64::INFINITY;
 

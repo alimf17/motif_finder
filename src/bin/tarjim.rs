@@ -147,12 +147,17 @@ fn main() {
         },
         (Some(InitialType::Meme), Some(meme_file)) => {
             println!("meme match");
-            match MotifSet::set_from_meme(&meme_file , &data_ref, Some(ECOLI_FREQ),MAX_E_VAL, true, &mut rng) { 
-                Err(e) => {
+            match MotifSet::set_from_meme(&meme_file , &data_ref, None,MAX_E_VAL, HandleImpossibleMotif::OmitFromSet, true, &mut rng)
+                            .map_err(|_| { 
+                                println!("Errored when omitting bad sets. Swithing to alternate parsing"); 
+                                MotifSet::set_from_meme(&meme_file , &data_ref, None,MAX_E_VAL, HandleImpossibleMotif::MakePossible, true, &mut rng)
+                            }) {
+                Err(Err(e)) => {
                     println!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     eprintln!("Meme file did not parse. Using random initial condition instead. Reason:\n {}", e);
                     None
                 },
+                Err(Ok(m)) => Some(m),
                 Ok(m) => Some(m),
             }
         },

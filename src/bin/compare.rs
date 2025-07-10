@@ -54,7 +54,7 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     println!("Freq change");
-    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,Some(ECOLI_FREQ), f64::INFINITY, false, &mut rng).unwrap();
+    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,Some(ECOLI_FREQ), f64::INFINITY, HandleImpossibleMotif::LeaveUnchanged, false, &mut rng).unwrap();
 
     let mut rmse = f64::INFINITY;
 
@@ -72,7 +72,7 @@ fn main() {
     mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false, None, None);
 
     println!("No change");
-    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, false, &mut rng).unwrap();
+    let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, HandleImpossibleMotif::LeaveUnchanged, false, &mut rng).unwrap();
 
     let mut rmse = f64::INFINITY;
 

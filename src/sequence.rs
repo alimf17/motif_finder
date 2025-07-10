@@ -393,6 +393,7 @@ impl Sequence {
     }
 
     pub(crate) fn id_of_u64_kmer(&self, k: usize, kmer: u64) -> Option<usize> {
+        if k < MIN_BASE || k > MAX_BASE {return None;}
         self.kmer_id_dict[k-MIN_BASE].get(&kmer).copied()
     }
 
@@ -531,7 +532,7 @@ impl Sequence {
 
 
     //We exploit the ordering of the u64 versions of kmer to binary search
-    pub fn kmer_in_seq(&self, kmer: &Vec<Bp>) -> bool {
+    pub fn kmer_in_seq(&self, kmer: &[Bp]) -> bool {
 
         let look_for = Self::kmer_to_u64(kmer);
 

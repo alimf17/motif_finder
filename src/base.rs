@@ -390,14 +390,14 @@ pub struct Base {
 #[derive(Debug)]
 pub enum InvalidBase {
     NegativeBase,
-    NoSingleBestBase,
+    NoSingleBestBase(Vec<Bp>),
 }
 
 impl fmt::Display for InvalidBase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            InvalidBase::NegativeBase => "No negative values allowed in a Base!",
-            InvalidBase::NoSingleBestBase => "Every Base needs one best value == 0.0!",
+            InvalidBase::NegativeBase => "No negative values allowed in a Base!".to_owned(),
+            InvalidBase::NoSingleBestBase(bps) => format!("Every Base needs one best value == 0.0! {:?}", bps),
         };
         write!(f, "{}",message)?;
         Ok(())
@@ -507,9 +507,11 @@ impl Base {
 
         let mut count_max: usize = 0;
 
+        let mut maxes: Vec<Bp> = Vec::with_capacity(BASE_L);
+
         for i in 0..props.len() {
             any_neg |= props[i] < 0.0 ;
-            if props[i] == max_prop { count_max += 1;}
+            if props[i] == max_prop { count_max += 1; maxes.push(BP_ARRAY[i]);}
         }
 
         if any_neg{
@@ -517,7 +519,7 @@ impl Base {
         }
 
         if count_max > 1 {
-            return Err(InvalidBase::NoSingleBestBase);
+            return Err(InvalidBase::NoSingleBestBase(maxes));
         }
 
         let sum = props.iter().sum::<f64>();
@@ -569,7 +571,7 @@ impl Base {
             sum += *prop
         }
 
-        if too_many_max { return Err(InvalidBase::NoSingleBestBase);}
+        if too_many_max { return Err(InvalidBase::NoSingleBestBase(props.iter().enumerate().filter_map(|(i,&s)| if s == max {Some(BP_ARRAY[i])} else {None}).collect()));}
         let scores: [f64; BASE_L] = core::array::from_fn(|a| {
             let mut val = (props[a]/sum + (max/sum)*PWM_CONVERTER).log2() - (2.0*(max/sum)*PWM_CONVERTER).log2();
 
@@ -2734,7 +2736,7 @@ impl<'a> MotifSet<'a> {
     /// of reasons, from an empty matrix, an alphabet of the wrong length, 
     /// a column of the wrong length, an inability to parse floats from the meme
     /// file, or a negative value in the PWM.
-    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: bool, rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
+    pub fn set_from_meme<R: Rng+?Sized>(meme_file_name: &str, data_ref: &'a AllDataUse<'a>, background_dist: Option<[f64; BASE_L]>, e_value_cutoff: f64, make_poss: HandleImpossibleMotif, discretize: bool, rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
         let meme_file_string = fs::read_to_string(meme_file_name)?;
         let meme_as_vec = meme_file_string.split("\n").collect::<Vec<_>>();
@@ -2765,7 +2767,7 @@ impl<'a> MotifSet<'a> {
             //    break;
             //}
 
-            let mut base_vec: Vec<Base> = Vec::with_capacity(MAX_BASE);
+            let mut base_vec: Vec<Result<Base, (InvalidBase, [f64;BASE_L])>> = Vec::with_capacity(MAX_BASE);
 
             for i in 1..(motif_len+1) {
                 let mut scores: [ f64; BASE_L] = [0.0; BASE_L];
@@ -2778,24 +2780,73 @@ impl<'a> MotifSet<'a> {
 
 
                 //NOTE: in my motif runs, this was true. For assessing the raw PWMs, this is false
-                base_vec.push(Base::from_pwm(scores, background_dist, false).expect("We really shouldn't have negative bases in a meme file?"));
+                base_vec.push(Base::from_pwm(scores, background_dist, discretize).map_err(|a| (a, scores)));
             }
 
-            let mut motif = Motif::raw_pwm(base_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
+            let num_poss_motifs: usize = base_vec.iter().map(|a| match a {
+                Ok(_) => 1,
+                Err((InvalidBase::NoSingleBestBase(maxes), _)) => maxes.len(),
+                _ => 0,
+            }).product::<usize>();
 
-            if make_poss {
-                let poss_hamming = motif.scramble_to_close_random_valid(data_ref.data().seq(), rng);
+            if num_poss_motifs == 0 { return Err(Box::new(InvalidBase::NegativeBase)); }
 
-                match poss_hamming {
-                    Some(hamming) => warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming)),
-                    None => (),
-                };
+            let mut motif_check: Vec<Vec<Base>> = vec![Vec::with_capacity(base_vec.len()); num_poss_motifs];
 
+            let mut hold_chunk: usize = 1;
+
+            for element in base_vec {
+
+                match element {
+                    Ok(base) => {for motif in motif_check.iter_mut() { motif.push(base.clone())}},
+                    Err((InvalidBase::NoSingleBestBase(maxes), props)) => {
+
+                        let prop_vec: Vec<Base> = maxes.iter().map(|a| {
+                            let mut props_alt = props;
+                            props_alt[*a as usize] += 0.00001;
+                            Base::from_pwm(props_alt, background_dist, discretize).expect("We resolved the error")
+                        }).collect();
+
+                        let num_alts = prop_vec.len();
+
+                        for i in 0..num_poss_motifs {
+                            let which_base = prop_vec[(i/hold_chunk) % num_alts].clone();
+                            motif_check[i].push(which_base);
+                        }
+                        
+                        hold_chunk *= num_alts;
+                    },
+                    Err(elsing) => return Err(Box::new(elsing.0)),
+           
+                }
             }
 
-            println!("init motif {mot_num} {:?}", motif);
+            let grab_from: Vec<Motif> = motif_check.iter().filter_map(|a| {
 
-            set.push(motif);    
+                let mot_check = a.iter().map(|a| a.best_base()).collect::<Vec<Bp>>();
+                if data_ref.data().seq().kmer_in_seq(&mot_check) { Some(Motif::raw_pwm(a.clone(), data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian))} else {None}
+            }).collect();
+
+            if grab_from.len() > 0 {
+                set.push(grab_from.choose(rng).expect("we already know this is non empty").clone());
+                continue;
+            }
+
+            match make_poss {
+               HandleImpossibleMotif::OmitFromSet => continue, 
+               HandleImpossibleMotif::MakePossible => {
+                   let mot_vec = motif_check.choose(rng).expect("know this is non empty").clone();
+                   let mut motif = Motif::raw_pwm(mot_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
+                   let Some(hamming) = motif.scramble_to_close_random_valid(data_ref.data().seq(), rng) else { unreachable!();};
+                   set.push(motif);
+                   warn!("{}", format!("Motif number {} from the MEME file does not exist in the parts of the sequence with peaks! Moving it to a valid motif within a Hamming distance of {}!", mot_num, hamming));
+               },
+               HandleImpossibleMotif::LeaveUnchanged => {
+                   let mot_vec = motif_check.choose(rng).expect("know this is non empty").clone();
+                   let mut motif = Motif::raw_pwm(mot_vec, data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
+                   set.push(motif);
+               },
+            }
 
         }
 
@@ -4796,6 +4847,13 @@ impl Debug for MotifSet<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, " ln_post: {:?}, \n set: {:#?}", self.ln_post, self.set)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum HandleImpossibleMotif {
+    MakePossible,
+    OmitFromSet,
+    LeaveUnchanged,
 }
 
 /// This is a MotifSet, freed from data that it was inferred from and its 
