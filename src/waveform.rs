@@ -948,7 +948,7 @@ impl<'a> Waveform<'a> {
 
             let (upper, lower) = left.split_vertically((86).percent_height());
 
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, &upper);
 /*
             if let Some(ref ontology_collection) = ontology_vec {
                 let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(ontology_collection), ontology_bins.as_ref());
@@ -1050,7 +1050,7 @@ impl<'a> Waveform<'a> {
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
             */
             
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, None, &upper);
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, &upper);
 
             if let Some(ref ontology_collection) = ontology_vec{
                 let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
@@ -1188,7 +1188,7 @@ impl<'a> Waveform<'a> {
 
             plot.fill(&WHITE).unwrap();
 
-            let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[0], trace_color, Some([min_alter, max_alter]), &plot);
+            let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, Some([min_alter, max_alter]), &plot);
             /*let mut chart = ChartBuilder::on(&plot)
               .set_label_area_size(LabelAreaPosition::Left, 200)
               .set_label_area_size(LabelAreaPosition::Bottom, 200)
@@ -1655,6 +1655,48 @@ impl<'a> Noise<'a> {
 
     }
 
+
+    pub(crate) fn noise_densities(&self, nclass: usize) -> Vec<(f64, f64)> {
+
+    
+        if (nclass == 0) || (nclass == 1) { return vec![];}
+
+        let mut min = f64::INFINITY;
+        let mut max = -f64::INFINITY;
+
+        for &n in self.resids.iter() { min = min.min(n); max = max.max(n); }
+
+        max += max * f64::EPSILON;
+
+        let range = max-min;
+        let increment = range/(nclass as f64);
+
+        let mut lower_bound = min;
+        let mut upper_bound = min+increment;
+        let mut midpoint = (lower_bound+upper_bound)/2.0;
+
+        let mut densities: Vec<(f64, f64)> = Vec::with_capacity(nclass);
+
+        let mut resid_clone = self.resids.clone();
+
+        resid_clone.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
+
+        let mut resid_iter = resid_clone.into_iter();
+
+        for _ in 0..nclass {
+            
+            let (prior, new): (Vec<_>, Vec<_>) = resid_iter.partition(|&x| x<upper_bound);
+            resid_iter = new.into_iter();
+            let density = (prior.len() as f64)/(self.resids.len() as f64);
+            densities.push((midpoint, density));
+            lower_bound += increment;
+            upper_bound += increment;
+            midpoint += increment;
+        }
+
+        densities
+
+    }
 
     pub(crate) fn rmse_noise(&self, spacer: usize) -> f64 {
 

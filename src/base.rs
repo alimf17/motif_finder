@@ -2967,6 +2967,10 @@ impl<'a> MotifSet<'a> {
         self.ln_post = None;
     }
 
+    pub fn resids_hist(&self, nclass: usize) -> Vec<(f64, f64)> {
+        self.signal.produce_noise(self.data_ref).noise_densities(nclass)
+    }
+
     fn calc_motif_null_binds(&self, mot: &Motif) -> Vec<f64> {
     
         mot.return_any_null_binds_by_hamming(self.data_ref.null_seq(), self.data_ref.min_height(), self.data_ref.offset()*2.0)

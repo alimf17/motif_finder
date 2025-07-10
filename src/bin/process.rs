@@ -456,6 +456,12 @@ pub fn main() {
 
     //activated.sort_by_height();
 
+    let resid_hist = activated.resids_hist(200);
+
+    let mids : Vec<f64> = resid_hist.iter().map(|a| a.0).collect();
+    let ress : Vec<f64> = resid_hist.iter().map(|a| a.1).collect();
+
+    println!("Densities: {:?}\n Resids: {:?}", mids, ress);
 
     let (likes, first_failure,gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
 
@@ -465,6 +471,11 @@ pub fn main() {
 
     let cumulative_noises = activated.distances_by_strength();
 
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    for i in 0..activated.num_motifs() {
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
+    }
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
     for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
@@ -573,6 +584,13 @@ pub fn main() {
 
     println!("Highest Likelihood motif set: {:?}", highest_likelihood_motif_set);
     let mut activated = highest_likelihood_motif_set.reactivate_set(&data_ref);
+    
+    let resid_hist = activated.resids_hist(200);
+
+    let mids : Vec<f64> = resid_hist.iter().map(|a| a.0).collect();
+    let ress : Vec<f64> = resid_hist.iter().map(|a| a.1).collect();
+
+    println!("Densities: {:?}\n Resids: {:?}", mids, ress);
 
 
     let (likes, first_failure,gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
@@ -583,6 +601,11 @@ pub fn main() {
 
     let cumulative_noises = activated.distances_by_strength();
 
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    for i in 0..activated.num_motifs() {
+        let mot_ref = activated.get_nth_motif(i);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
+    }
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
     for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
