@@ -2850,6 +2850,7 @@ impl<'a> MotifSet<'a> {
 
         }
 
+        if set.len() == 0 { return Err(Box::new(MemeParseError::GivesEmptySet));}
 
         let mut signal = data_ref.data().derive_zero();
 
@@ -4825,6 +4826,7 @@ pub enum MemeParseError {
     InvalidMotifLength{ motif_num: usize, captured_length: usize },
     ColumnLengthFailure{ line_num: usize },
     FloatParseFailure{ line_num: usize },
+    GivesEmptySet,
 }
 
 impl fmt::Display for MemeParseError {
@@ -4835,6 +4837,7 @@ impl fmt::Display for MemeParseError {
             MemeParseError::InvalidMotifLength{ motif_num, captured_length } => write!(f, "The MEME matrix in position {motif_num} is of length {captured_length}, which is not in the range [{MIN_BASE}, {MAX_BASE}]"),
             MemeParseError::ColumnLengthFailure{ line_num } => write!(f, "The items on line {line_num} are fewer than the claimed number of columns from the base pair alphabet!"),
             MemeParseError::FloatParseFailure{ line_num } => write!(f, "The items on line {line_num} do not parse to floats, even though they should be part of a matrix!"),
+            MemeParseError::GivesEmptySet => write!(f, "With this setting, you get any empty set of motifs!")
         }
     }
 }
