@@ -2008,6 +2008,8 @@ impl Motif {
 
     fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
+        if seq.seq_blocks().len() == 0 { return Vec::new();}
+
         let cutoff = -min_height-distribution_cutoff;
 
         let standin_height = self.peak_height+distribution_cutoff;
@@ -2156,6 +2158,8 @@ impl Motif {
     
     fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
 
+        if seq.seq_blocks().len() == 0 { return Vec::new();}
+        
         let cutoff = -min_height-distribution_cutoff;
 
         let standin_height = self.peak_height+distribution_cutoff;

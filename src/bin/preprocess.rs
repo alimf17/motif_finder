@@ -81,6 +81,13 @@ struct Cli {
     #[arg(short, long)]
     height_scale: Option<f64>,
 
+    /// A boolean that is false if you are not retaining occupancy trace that is not 
+    /// nearby binding. Default is false. BIG HUGE IMPORTANT NOTE: 
+    /// DO NOT SET THIS TO TRUE, AT ALL, EVER, FOR A DATA SET YOU WILL DO INFERENCE ON.
+    /// EVER, AT ALL, PERIOD. NO NO NO. YOUR INFERENCE WILL BE FAR SLOWER, IF IT WORKS
+    /// AT ALL. DO NOT. DON'T. NO. THIS IS ONLY TO GENERATE A DATA SET TO DO COMPARISONS ON
+    #[arg(short, long)]
+    retain_null: Option<bool>
 }
 
 
@@ -104,7 +111,7 @@ fn main() {
     //    being considered. Will only work if (9), (10), (11), and (12) included -prep 
     //
 
-    let Cli { name: name, output_dir: output_dir, fasta: fasta_file, data: data_file, circular: is_circular, length_of_fragment: fragment_length, spacing: spacing, min_height: min_height, prior: credibility, height_scale: peak_cutoff}= Cli::parse();
+    let Cli { name: name, output_dir: output_dir, fasta: fasta_file, data: data_file, circular: is_circular, length_of_fragment: fragment_length, spacing: spacing, min_height: min_height, prior: credibility, height_scale: peak_cutoff, retain_null: retain_null}= Cli::parse();
 
     assert!(spacing > 0, "The spacing cannot be zero!");
     assert!(fragment_length > spacing, "The fragment length must be strictly greater than the spacing!");
@@ -122,7 +129,7 @@ fn main() {
     println!("Args parsed");
 
 
-    let total_data: AllData  = AllData::create_inference_data(&fasta_file, &data_file, &output_dir, is_circular, fragment_length, spacing, min_height, credibility, &NULL_CHAR, peak_cutoff).unwrap();
+    let total_data: AllData  = AllData::create_inference_data(&fasta_file, &data_file, &output_dir, is_circular, fragment_length, spacing, min_height, credibility, &NULL_CHAR, peak_cutoff, retain_null).unwrap();
 
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();

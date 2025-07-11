@@ -426,7 +426,7 @@ impl AllData {
     /// - If your fasta file does not exist. 
     /// - If your fasta file is blank
     /// - If your fasta file does not start every other line with `>`
-    /// - If your fasta file has bases other than A, C, G, or T
+    /// - If your fasta file has bases other than A, C, G, or T, or your null character, if provided
     /// - If your data file does not exist. 
     /// - If your data file is blank
     /// - If `spacer = 0`
@@ -442,7 +442,7 @@ impl AllData {
     ///   This can also technically cause a panic if there are errors on the fasta
     ///   file that are super late into a fasta file that large. 
     pub fn create_inference_data(fasta_file: &str, data_file: &str, output_dir: &str, is_circular: bool, 
-                                 fragment_length: usize, spacing: usize, min_height: f64, credibility: f64, null_char: &Option<char>, peak_scale: Option<f64>) -> Result<Self, AllProcessingError> {
+                                 fragment_length: usize, spacing: usize, min_height: f64, credibility: f64, null_char: &Option<char>, peak_scale: Option<f64>, retain_null: Option<bool>) -> Result<Self, AllProcessingError> {
 
 
         let pre_sequence = Self::process_fasta(fasta_file, *null_char);
@@ -453,7 +453,7 @@ impl AllData {
             Err(e) => Err(e.clone()),
         };
 
-        let (pre_data, background,min_height, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, min_height, is_circular, peak_scale)?;
+        let (pre_data, background,min_height, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, min_height, is_circular, peak_scale, retain_null.unwrap_or(false))?;
  
         println!("processed data");
 
@@ -650,7 +650,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>), AllProcessingError> {
        
         if spacing == 0 {
             let err = DataProcessError::BadSpacer(BadSpacerError);
@@ -981,45 +981,48 @@ impl AllData {
         //too long sometimes. I doubt it, but on the off chance, we have this extra bit of logic
         let data_zone: usize = (100/spacing).max(4*fragment_length/spacing); //(2500/spacing).max(2*fragment_length/(spacing));
         
-        for block in lerped_blocks {
 
-            //Even though I only match positive peaks, I match on b.abs() because it lets me
-            //make stronger assumptions about any data NOT included in the actual inference
-            let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
-  
+        if retain_null { data_blocks = lerped_blocks;} else {
+            for block in lerped_blocks {
 
-            let mut next_ar_ind = 0_usize;
-            let mut curr_data_start: usize;
-
-            let mut check_ind = 0_usize;
-
-            while check_ind < block.len() {
-
-                if poss_peak_vec[check_ind] {
-                    curr_data_start = if (next_ar_ind + data_zone) > check_ind {next_ar_ind} else {check_ind-data_zone}; //the if should only ever activate on the 0th block
-                    if curr_data_start > next_ar_ind { ar_blocks.push(block[next_ar_ind..curr_data_start].to_vec()); }
-
-                    next_ar_ind = block.len().min(check_ind+data_zone+1);
+                //Even though I only match positive peaks, I match on b.abs() because it lets me
+                //make stronger assumptions about any data NOT included in the actual inference
+                let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
 
 
+                let mut next_ar_ind = 0_usize;
+                let mut curr_data_start: usize;
 
-                    while check_ind < next_ar_ind {
-                        if poss_peak_vec[check_ind] {
-                            next_ar_ind = block.len().min(check_ind+data_zone+1);
+                let mut check_ind = 0_usize;
+
+                while check_ind < block.len() {
+
+                    if poss_peak_vec[check_ind] {
+                        curr_data_start = if (next_ar_ind + data_zone) > check_ind {next_ar_ind} else {check_ind-data_zone}; //the if should only ever activate on the 0th block
+                        if curr_data_start > next_ar_ind { ar_blocks.push(block[next_ar_ind..curr_data_start].to_vec()); }
+
+                        next_ar_ind = block.len().min(check_ind+data_zone+1);
+
+
+
+                        while check_ind < next_ar_ind {
+                            if poss_peak_vec[check_ind] {
+                                next_ar_ind = block.len().min(check_ind+data_zone+1);
+                            }
+                            check_ind += 1;
                         }
+
+                        if spacing < BASE_L {
+
+                            next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
+
+                        }
+
+
+                        data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
+                    } else {
                         check_ind += 1;
                     }
-
-                    if spacing < BASE_L {
-                    
-                        next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
-
-                    }
-
-
-                    data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
-                } else {
-                    check_ind += 1;
                 }
             }
         }
@@ -1028,13 +1031,13 @@ impl AllData {
         println!("sorted data data away from background inference data");
 
 
-        if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+        if !retain_null && (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
 
         println!("past first");
 
-        if ar_blocks.len() == 0 {
+        if !retain_null && ar_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
         }
 
@@ -1042,7 +1045,7 @@ impl AllData {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
         }
 
-        if !cut { //This code is only run if the genome is circular and has no missing data
+        if !retain_null && !cut { //This code is only run if the genome is circular and has no missing data
 
             let starts_data = data_blocks[0][0].0 < ar_blocks[0][0].0;
             let ends_data = (*(*data_blocks.last().unwrap()).last().unwrap()).0 > 
@@ -1156,13 +1159,13 @@ impl AllData {
         let mut trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
                                                                      .map(|a| a.clone()).collect();
        
-        if (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+        if !retain_null && (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
 
         println!("past second");
 
-        if ar_blocks.len() == 0 {
+        if !retain_null && ar_blocks.len() == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
         }
 
@@ -1186,7 +1189,7 @@ impl AllData {
         //quite related to AD
         if length_of_data < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
 
-        let ar_info = ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
+        let ar_info = if !retain_null { ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>()} else {Vec::new()} ;
         let data_info = data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
 
         println!("AR lens, start loc, and end datas {:?}", ar_info);
