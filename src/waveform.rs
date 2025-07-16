@@ -9,6 +9,7 @@ use std::fmt;
 use core::f64::consts::PI;
 use core::iter::zip;
 
+use crate::MAX_TF_NUM;
 use crate::base::{Bp, LN_2, MAX_BASE, CAPACITY_FOR_NULL};
 use crate::sequence::{Sequence, BP_PER_U8};
 use crate::modified_t::*;
@@ -1719,7 +1720,7 @@ impl<'a> Noise<'a> {
 
         //If our null binding is potentially exceeding our ability to track it, this motif set
         //should be ruled impossible. 
-        if self.extraneous_resids.len() >= CAPACITY_FOR_NULL {
+        if self.extraneous_resids.len() >= CAPACITY_FOR_NULL*MAX_TF_NUM {
             return f64::INFINITY;
         }
         //let time = Instant::now();

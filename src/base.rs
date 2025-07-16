@@ -581,6 +581,47 @@ impl Base {
         Ok(Base::new(scores))
 
     }
+    pub fn from_pwm_alt(props: [f64; BASE_L], background_dist: Option<[f64; BASE_L]>, discretize: bool) -> Result<Base, InvalidBase> {
+
+        let mut props = props;
+
+        let mut background = background_dist.unwrap_or([0.25; BASE_L]);
+
+        let mut sum: f64 = 0.0;
+        
+
+        let mut too_many_max: bool = false;
+
+        for prop in background {
+            if prop <= 0.0 {
+                eprintln!("Your background distribution needs to have positive density");
+                return Err(InvalidBase::NegativeBase); }
+            sum += prop;
+        }
+
+        background = core::array::from_fn(|a| background[a]/(sum*0.25));
+
+        let mut max = 0_f64;
+        let mut sum: f64 = 0.0;
+        for (i, prop) in props.iter_mut().enumerate() {
+            if *prop < 0.0 { return Err(InvalidBase::NegativeBase); }
+            *prop = *prop * background[i];
+            if *prop >= max {
+                if *prop == max { too_many_max = true;} else { too_many_max = false; max = *prop;}
+            }
+            sum += *prop
+        }
+
+        if too_many_max { return Err(InvalidBase::NoSingleBestBase(props.iter().enumerate().filter_map(|(i,&s)| if s == max {Some(BP_ARRAY[i])} else {None}).collect()));}
+        let scores: [f64; BASE_L] = core::array::from_fn(|a| {
+            let mut val = if props[a] == 0.0 {-PWM_CONVERTER} else {(props[a]/sum).log2()}; // (props[a]/sum + (max/sum)*PWM_CONVERTER).log2() - (2.0*(max/sum)*PWM_CONVERTER).log2();
+
+            if discretize { base_ceil(val) } else {val} 
+        });
+
+        Ok(Base::new(scores))
+
+    }
 
     /// This takes a Base and converts it to set of probabilities of binding from a MEME PWM
     /// by dividing out a background distribution. If discretize is true, 
@@ -1199,7 +1240,7 @@ impl Motif {
         meme_pwm.truncate(MAX_BASE);
 
         let try_pwm = meme_pwm.into_iter().map(|a| {
-            Base::from_pwm(a, background_dist, true)
+            Base::from_pwm_alt(a, background_dist, true)
         }).collect::<Result<Vec<Base>, _>>();
 
         let mut pwm = try_pwm?;
@@ -2010,7 +2051,9 @@ impl Motif {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
 
-        let cutoff = -min_height-distribution_cutoff;
+        //This 0.01 is just a way to omit more if there's a "technically 0 but float precision is
+        //mean" score
+        let cutoff = -min_height-distribution_cutoff+0.01;
 
         let standin_height = self.peak_height+distribution_cutoff;
         
@@ -2751,6 +2794,7 @@ impl<'a> MotifSet<'a> {
 
         let start_matrix_lines: Vec<usize> = meme_as_vec.iter().enumerate().filter(|&(_,a)| re.is_match(a)).map(|(n, _)| n).collect();
 
+        let num_motifs_possibly_possible = start_matrix_lines.len();
         if start_matrix_lines.len() == 0 { return Err(Box::new(MemeParseError::EmptyMatrix)); }
 
         let mut set: Vec<Motif> = Vec::new();
@@ -2793,6 +2837,11 @@ impl<'a> MotifSet<'a> {
                 _ => 0,
             }).product::<usize>();
 
+            println!("num_poss_motifs {} {}", set.len(), num_poss_motifs);
+            if num_poss_motifs >= 0b1_0000_0000_0000_0000{ //auto omit any motif with more than 2^16 possible "best" motifs, because OOMs suck
+                continue;
+            }
+
             if num_poss_motifs == 0 { return Err(Box::new(InvalidBase::NegativeBase)); }
 
             let mut motif_check: Vec<Vec<Base>> = vec![Vec::with_capacity(base_vec.len()); num_poss_motifs];
@@ -2825,14 +2874,18 @@ impl<'a> MotifSet<'a> {
                 }
             }
 
-            let grab_from: Vec<Motif> = motif_check.iter().filter_map(|a| {
+            let grab_from: Vec<(Motif, usize)> = motif_check.iter().filter_map(|a| {
 
                 let mot_check = a.iter().map(|a| a.best_base()).collect::<Vec<Bp>>();
-                if data_ref.data().seq().kmer_in_seq(&mot_check) { Some(Motif::raw_pwm(a.clone(), data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian))} else {None}
+                if data_ref.data().seq().kmer_in_seq(&mot_check) { 
+                    let mot = Motif::raw_pwm(a.clone(), data_ref.min_height(), KernelWidth::Wide, KernelVariety::Gaussian);
+                    let extra_binding = mot.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0).len();
+                    if extra_binding >= (CAPACITY_FOR_NULL) { None } else {Some((mot, extra_binding))}
+                } else {None}
             }).collect();
 
             if grab_from.len() > 0 {
-                set.push(grab_from.choose(rng).expect("we already know this is non empty").clone());
+                set.push(grab_from.iter().min_by(|a,b| a.1.cmp(&b.1)).expect("we already know this is non empty").0.clone());
                 continue;
             }
 

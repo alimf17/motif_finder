@@ -146,7 +146,7 @@ fn main() {
             None
         },
         (Some(InitialType::Meme), Some(meme_file)) => {
-            println!("meme match");
+            println!("meme match {:?}", meme_file);
             match MotifSet::set_from_meme(&meme_file , &data_ref, None,MAX_E_VAL, HandleImpossibleMotif::OmitFromSet, true, &mut rng)
                             .map_err(|_| { 
                                 println!("Errored when omitting bad sets. Swithing to alternate parsing"); 
