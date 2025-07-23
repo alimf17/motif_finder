@@ -680,7 +680,27 @@ impl Base {
 
         Base { scores: att}
     }
-    
+   
+    /// This generates a random Base by sampling energy penalties
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
+    /// favoring less strict penalities, and then picking a best Bp uniformly
+    pub fn rand_new_prior<R: Rng + ?Sized>(rng: &mut R) -> Base {
+
+
+        let best = rng.gen_range(0..BASE_L);
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_PENALTY_PRIOR.sample_energy(rng));
+
+        let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut att =  [0.0_f64; BASE_L];
+
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
+
+
+        Base { scores: att}
+    }
+
+
     /// This generates a random Base by uniformly sampling energy penalties 
     /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
     /// then picking a best Bp uniformly
@@ -708,6 +728,16 @@ impl Base {
         Base::rand_new(rng).make_best(best)
 
     }
+
+    /// This generates a random Base with best as its best Bp by sampling energy penalties
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH, favoring
+    /// less strict penalities
+    pub fn from_bp_prior<R: Rng + ?Sized>(best: Bp, rng: &mut R) -> Base {
+
+        Base::rand_new_prior(rng).make_best(best)
+
+    }
+
 
     /// This generates a random Base with best as its best Bp by uniformly sampling 
     /// energy penalties from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH
@@ -1325,6 +1355,44 @@ impl Motif {
 
 
     }
+
+    /// This generates a motif where best_bases is the sequence of `Bp`s with
+    /// the best matches. Then, it generates energy penalties randomly, favoring
+    /// stricter penalties and using discretely spaced penalties
+    pub fn from_motif_prior<R: Rng + ?Sized>(best_bases: Vec<Bp>, height_dist: &impl ::rand::distributions::Distribution<f64>, rng: &mut R) -> Motif {
+
+        let mut best_bases = best_bases;
+        while best_bases.len() < MIN_BASE {
+            best_bases.push(Bp::A);
+        }
+
+        best_bases.truncate(MAX_BASE);
+
+        let mut pwm: Vec<Base> = best_bases.iter().map(|a| Base::from_bp_prior(*a, rng)).collect();
+        exact_capacity(&mut pwm, MAX_BASE);
+
+        //let height_dist: truncatedlognormal = truncatedlognormal::new(log_height_mean, log_height_sd, min_height, max_height).unwrap();
+
+
+        let sign: f64 = rng.gen();
+        let sign: f64 = if sign < PROB_POS_PEAK {1.0} else {-1.0};
+
+        let peak_height: f64 = sign*height_dist.sample(rng);
+
+        let kernel_width: KernelWidth = rng.gen();
+        let kernel_variety: KernelVariety = rng.gen();
+
+        Motif {
+            peak_height: peak_height,
+            kernel_width: kernel_width,
+            kernel_variety: kernel_variety,
+            pwm: pwm,
+        }
+
+
+
+    }
+
     
     /// This generates a motif where best_bases is the sequence of `Bp`s with
     /// the best matches. Then, it generates energy penalties randomly, uniformly
@@ -1741,7 +1809,9 @@ impl Motif {
             //There are three off bases per position, and self.len() positions. Hence, this form
             //prior += BASE_RESOLUTION.ln() * (((BASE_L-1)*self.len()) as f64);
 
-            prior += self.pwm.iter().map(|a| a.prior_per_base()).sum::<f64>();
+            //We're assuming the prior is uniform with length 1.0 based on this is too strict
+            //otherwise
+           // prior += self.pwm.iter().map(|a| a.prior_per_base()).sum::<f64>();
 
             prior
 
