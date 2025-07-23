@@ -222,11 +222,16 @@ fn main() {
 
     let start_inference_time = Instant::now();
 
+    if Some(InitialType::Meme) == initial_type {
+        initialization_chains.iter_and_swap(steps_per_exchange_attempt*10, true, rand::thread_rng);
+        println!("Finished initializing without motif number changes");
+    }
+
     for step in 0..pushes {
 
         println!("push {step}");
         
-        initialization_chains.iter_and_swap(steps_per_exchange_attempt, rand::thread_rng);
+        initialization_chains.iter_and_swap(steps_per_exchange_attempt, false, rand::thread_rng);
 
         if step % save_step == 0 {
 
@@ -235,7 +240,7 @@ fn main() {
             while try_save_trace < save_trial {
             
                 let savestate_handle = std::fs::File::create(&savestate_file).unwrap();
-                let Err(e) = initialization_chains.save_trace_by_gzip_and_clear(trace_handle.by_ref(), len_file_handle.by_ref(), savestate_handle) else {step_penalty = 0; break;};
+                let Err(e) = initialization_chains.save_trace_by_gzip_and_clear(trace_handle.by_ref(), len_file_handle.by_ref(), savestate_handle) else {step_penalty = 0; initialization_chains.print_acceptances();break;};
                 try_save_trace += 1;
                 eprintln!("Error trying to save trace in step {step}: {:?}. Times occured: {try_save_trace}", e);
                 if try_save_trace >= save_trial {

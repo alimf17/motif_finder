@@ -261,6 +261,13 @@ static BASE_CHOOSE_DIST: Lazy<Categorical> = Lazy::new(|| {
     Categorical::new(&weights).unwrap()
 });
 
+static BASE_PENALTY_PRIOR: Lazy<Categorical> = Lazy::new(|| {
+    let front_load = 0.9_f64; //This will break things if it's not between 0 and 1, exclusive
+    let mut weights: Vec<f64> = vec![1.0; NUM_BASE_VALUES];
+    weights[0] = front_load*(NUM_BASE_VALUES as f64)/(1.0-front_load);
+    Categorical::new(&weights).unwrap()
+});
+
 static BASE_CHOOSE_ALT: Lazy<DiscreteUniform> = Lazy::new(|| DiscreteUniform::new(0, (NUM_BASE_VALUES-1) as i64 ).unwrap());
 
 //These were determined through numerical experiments and rough fits
@@ -792,6 +799,12 @@ impl Base {
         let summed = props.iter().sum::<f64>();
         let ret: [f64; BASE_L] = core::array::from_fn(|a| props[a]/summed); // self.scores.iter().map(|&a| a/summed).collect::<Vec<_>>().try_into().unwrap();
         ret
+    }
+
+    /// This gives the ln density of the Base vector as a function of its penalties.
+    /// This uses `[BASE_PENALTY_PRIOR]` as the prior for the secondary penalties
+    pub fn prior_per_base(&self) -> f64 {
+        self.all_non_best().into_iter().map(|a| BASE_PENALTY_PRIOR.energy_ln_pmf(self[a])).sum()
     }
 
     pub fn scores(&self) -> [f64; BASE_L] {
@@ -1726,7 +1739,9 @@ impl Motif {
 
             //For each base position, the probability that each of the three off bases are off as they is 1/number possible off values
             //There are three off bases per position, and self.len() positions. Hence, this form
-            prior += BASE_RESOLUTION.ln() * (((BASE_L-1)*self.len()) as f64);
+            //prior += BASE_RESOLUTION.ln() * (((BASE_L-1)*self.len()) as f64);
+
+            prior += self.pwm.iter().map(|a| a.prior_per_base()).sum::<f64>();
 
             prior
 
@@ -5353,7 +5368,7 @@ impl<'a> SetTrace<'a> {
     pub fn thermo_beta(&self) -> f64 { self.thermo_beta }
 
     ///This runs the monte carlo move for an individual trace
-    pub fn advance<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, burning_in: bool, rng: &mut R) { 
+    pub fn advance<R: Rng + ?Sized>(&mut self, track: Option<&mut MoveTracker>, burning_in: bool, no_motif_change: bool, rng: &mut R) { 
 
         let which_move = PICK_MOVE.sample(rng);
 
@@ -5386,7 +5401,7 @@ impl<'a> SetTrace<'a> {
             },
             
             3 => {
-                if MAX_TF_NUM == 1 {
+                if MAX_TF_NUM == 1 || no_motif_change {
                     let extend: bool = rng.gen();
                     which_variant = if extend {2} else {3};
                 }
@@ -6266,15 +6281,13 @@ impl<'a> TemperSetTraces<'a> {
     /// steps between attempting parallel tempering steps. 
     /// First, on all adjacent pairs starting with the index `1` trace, then
     /// all adjacent pairs starting with the index `0` trace
-    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, rng_maker: fn() -> R) {
-
-
+    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, no_motif_change: bool, rng_maker: fn() -> R) {
 
         for _ in 0..iters_before_swaps {
        
             self.parallel_traces.par_iter_mut().for_each(|(set, track, _)| {
                 let mut rng = rng_maker();
-                set.advance(track.as_mut(), false, &mut rng); 
+                set.advance(track.as_mut(), no_motif_change, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
             });
         }
 
@@ -6335,20 +6348,22 @@ impl<'a> TemperSetTraces<'a> {
     }
 
 
-    pub fn print_acceptances(&self, track: TrackingOptions) {
+    pub fn print_acceptances(&self) {
 
-        let tracker = self.track.min(track);
+        let tracker = self.track;
 
         match tracker {
             TrackingOptions::NoTracking => (),
             TrackingOptions::TrackTrueTrace => {
                 println!("Motif lengths: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.0.len()).collect::<Vec<_>>());
                 println!("Motif heights: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.0.peak_height()).collect::<Vec<_>>());
+                println!("Motif strings: {:?}", self.parallel_traces[0].0.active_set.set.iter().map(|a| a.0.best_motif_string()).collect::<Vec<_>>());
                 self.parallel_traces[0].1.as_ref().map(|a| a.give_status());},
             TrackingOptions::TrackAllTraces => { _ = self.parallel_traces.iter().map(|b| { 
                 println!("Thermodynamic beta: {}", b.0.thermo_beta);
                 println!("Motif lengths: {:?}", b.0.active_set.set.iter().map(|a| a.0.len()).collect::<Vec<_>>());
                 println!("Motif heights: {:?}", b.0.active_set.set.iter().map(|a| a.0.peak_height()).collect::<Vec<_>>());
+                println!("Motif strings: {:?}", b.0.active_set.set.iter().map(|a| a.0.best_motif_string()).collect::<Vec<_>>());
                 b.1.as_ref().map(|a| a.give_status())
             }).collect::<Vec<_>>();},
         }

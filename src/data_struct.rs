@@ -987,7 +987,10 @@ impl AllData {
 
                 //Even though I only match positive peaks, I match on b.abs() because it lets me
                 //make stronger assumptions about any data NOT included in the actual inference
-                let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
+                //let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
+                
+                //Trying what happens on NOT abs filtering
+                let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| *b > peak_thresh).collect();
 
 
                 let mut next_ar_ind = 0_usize;

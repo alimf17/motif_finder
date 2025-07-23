@@ -29,7 +29,9 @@ use plotters::prelude::full_palette::ORANGE;
 fn main() {
     //let file_out_trp = "/Users/afarhat/Downloads/NC_000913.2_TrpR_lb_ratio_unstranded_minus_mean_25_data.bin";
 
-    let file_out_trp = "/expanse/lustre/scratch/alimf/temp_project/ProcessedData/IPOD_HR_min_height_1.0_try_again.bin";
+//    let file_out_trp = "/expanse/lustre/scratch/alimf/temp_project/ProcessedData/IPOD_HR_min_height_1.0_try_again.bin";
+
+    let file_out_trp = "/work/hdd/bbgs/alimf/AlterProcessedData/IPOD_HR_unstat_omit_neg_wind.bin";
 
     let mut try_bincode : ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(file_out_trp).expect("You initialization file must be valid for inference to work!"));
 
@@ -41,6 +43,6 @@ fn main() {
 
     buffer.clear();
 
-    data.save_data_to_directory("/expanse/lustre/scratch/alimf/temp_project/ProcessedData", "IPOD_HR_min_height_1.0_try_again_plain");
+    data.save_data_to_directory("/work/hdd/bbgs/alimf", "IPOD_HR_unstat_no_neg_plain");
 
 }
