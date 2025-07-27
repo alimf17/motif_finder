@@ -834,7 +834,7 @@ impl Base {
     /// This gives the ln density of the Base vector as a function of its penalties.
     /// This uses `[BASE_PENALTY_PRIOR]` as the prior for the secondary penalties
     pub fn prior_per_base(&self) -> f64 {
-        self.all_non_best().into_iter().map(|a| BASE_PENALTY_PRIOR.energy_ln_pmf(self[a])).sum()
+        self.all_non_best().into_iter().map(|a| BASE_CHOOSE_ALT.energy_ln_pmf(self[a])).sum()
     }
 
     pub fn scores(&self) -> [f64; BASE_L] {
@@ -1809,9 +1809,7 @@ impl Motif {
             //There are three off bases per position, and self.len() positions. Hence, this form
             //prior += BASE_RESOLUTION.ln() * (((BASE_L-1)*self.len()) as f64);
 
-            //We're assuming the prior is uniform with length 1.0 based on this is too strict
-            //otherwise
-           // prior += self.pwm.iter().map(|a| a.prior_per_base()).sum::<f64>();
+            prior += self.pwm.iter().map(|a| a.prior_per_base()).sum::<f64>();
 
             prior
 
@@ -4136,9 +4134,9 @@ impl<'a> MotifSet<'a> {
 
         let self_slant = self.data_ref.propensity_minmer(Sequence::kmer_to_u64(&self.nth_motif(id).best_motif()) & MINMER_MASK);
 
-        let threshold = if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
+        let threshold = 1_usize; //if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
 
-        let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold+1);
+        let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold);
 
         //If we don't have any new kmers within the hamming distance, we immediately fail
         if kmer_ids.len() < 2 {return None;}
@@ -4161,7 +4159,7 @@ impl<'a> MotifSet<'a> {
         let add_mot = self.nth_motif(id).scramble_by_id_to_valid(*new_kmer_id, false, self.data_ref.data().seq());
  
         //let num_alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1).len() as f64;
-        let alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold+1);
+        let alter_kmers = self.data_ref.data().seq().all_kmers_within_hamming(&add_mot.best_motif(), threshold);
 
         let alter_slant = self.data_ref.data().seq().kmer_id_minmer_vec(&alter_kmers, self.nth_motif(id).len()).iter().map(|&a| self.data_ref.propensity_minmer(a)).collect::<Vec<_>>();
 
@@ -6698,7 +6696,8 @@ mod tester{
             let base_b = Base::rand_new(&mut rng);
             let dist_1 = base_a.dist_sq(Some(&base_b));
             let dist_2 = base_b.dist_sq(Some(&base_a));
-            println!("{base_a:?} {base_b:?} {dist_1} {dist_2}");
+
+            println!("{base_a:?} {base_b:?} {dist_1} {dist_2} {}", base_a.prior_per_base());
 
             let scores: [f64; BASE_L] = [0.0, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH, rng.gen::<f64>()*SCORE_THRESH];
             let mut base_true_rand = Base { scores: scores};
@@ -6707,6 +6706,8 @@ mod tester{
             let base_e = Base { scores: [0.0, SCORE_THRESH, SCORE_THRESH, SCORE_THRESH]};
 
         }
+
+        println!("alts {} {} {} {}", BASE_CHOOSE_ALT.energy_ln_pmf(-0.25), BASE_CHOOSE_ALT.energy_ln_pmf(-0.5), BASE_CHOOSE_ALT.energy_ln_pmf(-0.75), BASE_CHOOSE_ALT.energy_ln_pmf(-1.0));
 
     }
 
