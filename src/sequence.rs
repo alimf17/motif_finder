@@ -1156,7 +1156,7 @@ mod tests {
         let duration = start.elapsed();
         println!("Done search {} found {} bp {:?}", bp, in_it, duration);
 
-        let thresh: usize = 3;
+        let thresh: usize = 1;
 
         let mut rng = rand::thread_rng();
 
@@ -1170,6 +1170,7 @@ mod tests {
             let mut all_exist_in_seq = true;
             for &valid in &legal_mot_ids {
                 let val_u64 = sequence.idth_unique_kmer(b_l,valid);
+                println!("{:?} {:?}", mot, Sequence::u64_to_kmer(val_u64, b_l));
                 all_within_hamming &= Sequence::u64_kmers_within_hamming(mot_u64, val_u64, thresh);
                 all_exist_in_seq &= sequence.kmer_in_seq(&(Sequence::u64_to_kmer(val_u64, b_l)));
             }

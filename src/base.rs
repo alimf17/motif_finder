@@ -4134,7 +4134,7 @@ impl<'a> MotifSet<'a> {
 
         let self_slant = self.data_ref.propensity_minmer(Sequence::kmer_to_u64(&self.nth_motif(id).best_motif()) & MINMER_MASK);
 
-        let threshold = 1_usize; //if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
+        let threshold = 2_usize; //if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
 
         let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold);
 
