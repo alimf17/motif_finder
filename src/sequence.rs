@@ -540,6 +540,98 @@ impl Sequence {
 
     }
 
+    fn u64_hammings(kmer_a: u64, kmer_b: u64) -> usize {
+
+        let mut check: u64 =  kmer_a ^ kmer_b;
+
+        let mut hamming: usize = 0;
+
+        while (check > 0) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
+            hamming += ((check & U64_BITMASK) > 0) as usize;
+            check = check >> 2;
+        }
+
+        hamming
+
+    }
+
+    //This is meant to give me a list of proportions of distances between kmers 
+    //in the slice with hamming distance 1, 2, ... up to kmer length
+    //
+    //I also want something that tells me the minimum hamming distance to no longer
+    //have a kmer with a primary sequence that is unable to reach another
+    fn hamming_distribute(kmers: &[u64], kmer_len: usize) -> Vec<usize> {
+
+        if kmers.len() < 2 { return vec![kmers.len(), kmer_len-1];}
+
+        let num_links = (kmers.len() * (kmers.len()-1)); //Not divided by 2: I want to ensure both orders are accounted for, though I'll exploit symmetry 
+
+        let mut num_has_neighbors: Vec<usize> = vec![0; kmer_len-1];
+
+        for i in 0..kmers.len() {
+            let mut min_neighbors_at_distance: usize = kmer_len;
+            for j in 0..(kmers.len()) {
+                if i == j { continue;}
+                if min_neighbors_at_distance == 1 {break;}
+                if Sequence::u64_kmers_within_hamming(kmers[i], kmers[j], min_neighbors_at_distance-1) {
+                    min_neighbors_at_distance = Sequence::u64_hammings(kmers[i], kmers[j]);
+                }
+            }
+
+            //println!(" {} {min_neighbors_at_distance} {:?}", kmers.len(), num_has_neighbors);
+            for k in (min_neighbors_at_distance-1)..num_has_neighbors.len() { num_has_neighbors[k] += 1;}
+            //println!(" {min_neighbors_at_distance} {:?} end", num_has_neighbors);
+
+        }
+
+        println!("{} {:?}", kmers.len(), num_has_neighbors);
+        (num_has_neighbors.into_iter().map(|a| (kmers.len())-a).collect())
+
+    }
+
+    ///This produces an array where the `i`th element is the minimum
+    ///hamming distance for no `MIN_BASE+i`mer to have no hamming distance neighbors
+    pub fn min_no_isolates(&self) -> [Option<usize>; MAX_BASE+1-MIN_BASE] {
+        core::array::from_fn(|i| {
+            println!("{i} start");
+            let s = Sequence::hamming_distribute(&self.kmer_dict[i], i+MIN_BASE).into_iter().position(|a| a == 0).map(|a| a+1);
+            println!("{i} {:?}", s);
+            s
+        })
+    }
+
+    fn count_average_hamming_neighbors(&self, len: usize, hamming: usize) -> (f64, f64) {
+ 
+        let mut hamming_neighbor_counts: Vec<usize> = self.kmer_dict[len].iter().map(|a| self.kmer_dict[len].iter().map(|b| Sequence::u64_kmers_within_hamming(*a, *b, hamming)).filter(|a| *a).count()).collect();
+
+        if hamming_neighbor_counts.len() == 0 { return (0.0, 0.0); }
+
+        hamming_neighbor_counts.sort_unstable();
+
+        let neigh_count = hamming_neighbor_counts.len();
+        let median = if (neigh_count & 1) == 0 { 0.5_f64 * ((hamming_neighbor_counts[neigh_count/2] + hamming_neighbor_counts[neigh_count/2 -1]) as f64) }  else {hamming_neighbor_counts[neigh_count/2] as f64};
+
+        let mean = (hamming_neighbor_counts.into_iter().sum::<usize>() as f64)/(neigh_count as f64);
+
+        (median, mean)
+
+    }
+
+
+    ///This produces an array where the `i`th element is None if a `MIN_BASE+i`mer has no neighbors
+    ///(should not be able to happen), and is Some('minumum hamming distance to guarantee neighbors
+    ///for `MIN_BASE+i`mers`', 'median neighbors count at this distance', 'mean neighbors count at 
+    ///this distance')
+    pub fn diagnose_hamming_optimum(&self) -> [Option<(usize, f64, f64)>;MAX_BASE+1-MIN_BASE] {
+
+        let no_isolates = self.min_no_isolates();
+
+        core::array::from_fn(|i| no_isolates[i].map(|hamming| {
+            let avegs = self.count_average_hamming_neighbors(i+MIN_BASE, hamming);
+            (hamming, avegs.0, avegs.1)
+        }))
+    }
+
     fn u64_kmers_have_hamming(kmer_a: u64, kmer_b: u64, distance: usize) -> bool {
 
         let mut check: u64 =  kmer_a ^ kmer_b;

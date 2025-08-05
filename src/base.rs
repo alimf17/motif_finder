@@ -4134,7 +4134,9 @@ impl<'a> MotifSet<'a> {
 
         let self_slant = self.data_ref.propensity_minmer(Sequence::kmer_to_u64(&self.nth_motif(id).best_motif()) & MINMER_MASK);
 
-        let threshold = 2_usize; //if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
+        let mut threshold = *([5_usize, 5, 6, 6, 6, 6,6, 7].choose(rng).expect("this always has elements"));//if self.nth_motif(id).len() < 10 {1} else { self.nth_motif(id).len()/2-3};
+
+        if self.nth_motif(id).len() > 17 {threshold +=1;}
 
         let kmer_ids = self.data_ref.data().seq().all_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold);
 
@@ -4769,7 +4771,9 @@ impl<'a> MotifSet<'a> {
             }
         }
 
+        println!("single sets {:?}", single_sets_and_lasso_likes);
         let (mut motif_set, _ ) = single_sets_and_lasso_likes.swap_remove(target_index);
+        println!("single sets after remove {target_index} {:?}", single_sets_and_lasso_likes);
         
         //target_lasso is a float, so it is still alive after this
         lasso_likes.push(target_lasso);
@@ -4783,28 +4787,31 @@ impl<'a> MotifSet<'a> {
 
         while single_sets_and_lasso_likes.len() > 0 {
 
-            single_sets_and_lasso_likes = single_sets_and_lasso_likes.into_par_iter().map(|set_and_lass| {
+            let combined_sets_and_likes : Vec<_> = single_sets_and_lasso_likes.par_iter().map(|set_and_lass| {
                 let check_set = motif_set.combine_motif_sets(&set_and_lass.0);
                 let likelihood = check_set.calc_ln_post()-check_set.ln_prior();
-                let lassoed_like = likelihood-lambda*check_set.set[0].0.peak_height.abs();
+                let lassoed_like = likelihood-lambda*set_and_lass.0.set[0].0.peak_height.abs();
                 (check_set, lassoed_like)
             }).collect();
 
             let mut target_index: Option<usize> = None;
             //target_lasso is already in scope
-            let mut potential_lasso = single_sets_and_lasso_likes[0].1;
-            for index in 0..single_sets_and_lasso_likes.len() {
-                potential_lasso = potential_lasso.max(single_sets_and_lasso_likes[index].1);
-                if single_sets_and_lasso_likes[index].1 >= target_lasso {
+            let mut potential_lasso = combined_sets_and_likes[0].1;
+            for index in 0..combined_sets_and_likes.len() {
+                potential_lasso = potential_lasso.max(combined_sets_and_likes[index].1);
+                if combined_sets_and_likes[index].1 >= target_lasso {
                     target_index = Some(index);
-                    target_lasso = single_sets_and_lasso_likes[index].1;
+                    target_lasso = combined_sets_and_likes[index].1;
                 }
             }
 
             match target_index {
                 None => return (motif_set, lasso_likes, Some(potential_lasso)),
                 Some(index) => {
-                    (motif_set, _) = single_sets_and_lasso_likes.swap_remove(index);
+                    println!("single sets {:?}", single_sets_and_lasso_likes);
+                    (motif_set, _) = combined_sets_and_likes[index].clone();
+                    _ = single_sets_and_lasso_likes.swap_remove(index);
+                    println!("single sets after remove {index} {:?}", single_sets_and_lasso_likes);
                     lasso_likes.push(target_lasso);
                 },
             }

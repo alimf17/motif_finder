@@ -977,7 +977,7 @@ impl AllData {
 
         //The maximum spacing where things can start interfering with one another is 3 kernel sds
         //away, because we decided that fragment lengths should be about 6 kernel sds long
-        let data_zone: usize = (100/spacing).max(4*fragment_length/spacing); //(2500/spacing).max(2*fragment_length/(spacing));
+        let data_zone: usize = (100/spacing).max(2*fragment_length/spacing); //(2500/spacing).max(2*fragment_length/(spacing));
         
 
         if retain_null { data_blocks = lerped_blocks;} else {
