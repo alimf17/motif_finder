@@ -685,6 +685,22 @@ impl Sequence {
         hamming <= threshold
     }
 
+    //Returns None if the hamming distance is over the threshold or if the kmers are identical, Some(hamming distance) otherwise
+    fn u64_kmers_hamming_if_different_and_under_threshold(kmer_a: u64, kmer_b: u64, threshold: usize) -> Option<usize> {
+        
+        let mut check: u64 =  kmer_a ^ kmer_b;
+
+        let mut hamming: usize = 0;
+
+        while (check > 0) && (hamming <= threshold) { //This is guaranteed to terminate in k operations or sooner, with my specific kmer impelementation
+            hamming += ((check & U64_BITMASK) > 0) as usize;
+            check = check >> 2;
+        }
+
+        if (hamming <= threshold) && (hamming != 0) {Some(hamming)} else {None}
+
+    }
+
     //This gives the id of the kmers in the HashMap vector that are under the hamming distance threshold
     pub(crate) fn all_kmers_within_hamming(&self, kmer: &Vec<Bp>, threshold: usize) -> Vec<usize> {
 
@@ -695,6 +711,30 @@ impl Sequence {
         self.kmer_dict[len-MIN_BASE].iter().enumerate()
             .filter(|(_, &b)| Self::u64_kmers_within_hamming(u64_kmer, b, threshold))
             .map(|(a, _)| a).collect::<Vec<usize>>()                    
+
+    }
+
+    pub(crate) fn all_different_kmers_within_hamming(&self, kmer: &Vec<Bp>, threshold: usize) -> (Vec<usize>, Vec<(usize, usize)>) {
+        
+
+        let u64_kmer: u64 = Self::kmer_to_u64(kmer);
+
+        let len: usize = kmer.len();
+
+        let mut hamming_counts: Vec<usize> = vec![0;threshold]; //ith position corresponds to count of hamming distances of i+1
+
+        let mut kmer_collect: Vec<_> = self.kmer_dict[len-MIN_BASE].iter().enumerate()
+                                           .filter_map(|(a, &b)| {
+                                               let capped_hamming = Self::u64_kmers_hamming_if_different_and_under_threshold(u64_kmer, b, threshold);
+                                               capped_hamming.map(|c| {
+                                                   hamming_counts[c-1] += 1;
+                                                   (a,c)
+                                               })
+                                           }).collect();//This gives the position (a) and the hamming distance that qualifies (c)
+
+        kmer_collect.sort_unstable_by(|a,b| a.1.cmp(&b.1));
+
+        (hamming_counts, kmer_collect)
 
     }
 
