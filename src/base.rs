@@ -178,7 +178,7 @@ const RATIO_LINEAR_SD_COMBO: Lazy<[[f64;2]; BASE_RATIO_SDS.len()*BASE_LINEAR_SDS
                             Lazy::new(|| core::array::from_fn(|a| [BASE_RATIO_SDS[a/BASE_LINEAR_SDS.len()], BASE_LINEAR_SDS[a % BASE_LINEAR_SDS.len()]]));
 
 
-const GOOD_V_BAD_CUT: [f64; 6] = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+const GOOD_V_BAD_CUT: [f64; 5] = [1.0,1.5, 2.0, 2.5, 3.0];
 
 const HEIGHT_SDS: [f64; 3] = [0.05_f64, 0.1, 0.5];
 
@@ -268,7 +268,9 @@ static BASE_PENALTY_PRIOR: Lazy<Categorical> = Lazy::new(|| {
     Categorical::new(&weights).unwrap()
 });
 
-static BASE_CHOOSE_ALT: Lazy<DiscreteUniform> = Lazy::new(|| DiscreteUniform::new(0, (NUM_BASE_VALUES-1) as i64 ).unwrap());
+//static BASE_CHOOSE_ALT: Lazy<DiscreteUniform> = Lazy::new(|| DiscreteUniform::new(0, (NUM_BASE_VALUES-1) as i64 ).unwrap());
+
+static BASE_CHOOSE_ALT: Lazy<Categorical> = Lazy::new(|| Categorical::new(&vec![1.0; NUM_BASE_VALUES]).unwrap());
 
 //These were determined through numerical experiments and rough fits
 const ADDITIVE_WEIGHT_CONST: f64 = -344000.0;
@@ -3825,7 +3827,61 @@ impl<'a> MotifSet<'a> {
         }
     }
     
+/*     pub fn rand_new<R: Rng + ?Sized>(rng: &mut R) -> Base {
 
+
+        let best = rng.gen_range(0..BASE_L);
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_CHOOSE_DIST.sample_energy(rng));
+
+        let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut att =  [0.0_f64; BASE_L];
+
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
+
+
+        Base { scores: att}
+    }
+
+    /// This generates a random Base by sampling energy penalties
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
+    /// favoring less strict penalities, and then picking a best Bp uniformly
+    pub fn rand_new_prior<R: Rng + ?Sized>(rng: &mut R) -> Base {
+
+
+        let best = rng.gen_range(0..BASE_L);
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| BASE_PENALTY_PRIOR.sample_energy(rng));
+
+        let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut att =  [0.0_f64; BASE_L];
+
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
+
+
+        Base { scores: att}
+    }
+
+
+    /// This generates a random Base by uniformly sampling energy penalties 
+    /// from integer multiples of BASE_RESOLUTION*SCORE_THRESH <= SCORE_THRESH,
+    /// then picking a best Bp uniformly
+    pub fn rand_new_alt<R: Rng + ?Sized>(rng: &mut R) -> Base {
+
+        let best = rng.gen_range(0..BASE_L);
+        let samps: [f64;BASE_L-1] = core::array::from_fn(|_| base_ceil(BASE_CHOOSE_ALT.sample_energy(rng)));
+
+        let nonbest: [usize; BASE_L-1] = (0..BASE_L).filter(|&a| a != best).collect::<Vec<_>>().try_into().unwrap();
+
+        let mut att =  [0.0_f64; BASE_L];
+
+        nonbest.into_iter().enumerate().for_each(|(i,a)| {att[a] = samps[i];});
+
+
+        Base { scores: att}
+    }
+
+*/
 
     /// This proposes to extend a `Motif` in `self` by the following process: 
     /// 1. Uniformly sample a `Motif` in `self`.
@@ -3856,15 +3912,23 @@ impl<'a> MotifSet<'a> {
 
             //println!("lock");
             let new_bp = valid_extends.choose(rng).expect("We already returned if there are no valid extensions");
-            
-            //println!("lock 1");
+
             let mut new_mot = self.nth_motif(extend_id).clone();
-            //println!("lock w");
-            let new_base = Base::from_bp(*new_bp, rng);
+            
+            let extension_method = rng.gen_range(0_usize..3);
+
+            let (new_base, base_dist) = match extension_method {
+                0 => (Base::from_bp(*new_bp, rng), &BASE_CHOOSE_DIST),
+                1 => (Base::from_bp_prior(*new_bp, rng), &BASE_PENALTY_PRIOR),
+                2 => (Base::from_bp_alt(*new_bp, rng), &BASE_CHOOSE_ALT),
+                _ => unreachable!(),
+            };
+
+
             //println!("lock 2");
-            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - (valid_extends.len() as f64).ln();
+            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - (valid_extends.len() as f64).ln();
             //println!("lock 3");
-            new_mot.pwm.push(new_base);
+            if rng.gen::<bool>() { new_mot.pwm.push(new_base)} else {new_mot.pwm.insert(0, new_base)};
             //println!("lock 4");
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             let ln_post = new_set.replace_motif(new_mot, extend_id);
@@ -3888,13 +3952,24 @@ impl<'a> MotifSet<'a> {
         } else {
             let mut new_mot = self.nth_motif(contract_id).clone();
             //println!("contract 0");
+            let contraction_method = rng.gen_range(0_usize..3);
+
+            let base_dist = match contraction_method {
+                0 => &BASE_CHOOSE_DIST,
+                1 => &BASE_PENALTY_PRIOR,
+                2 => &BASE_CHOOSE_ALT,
+                _ => unreachable!(),
+            };
+
             let new_mot_bps = new_mot.best_motif();
             //println!("contract 1");
-            let old_base = new_mot.pwm.pop()?;
+            let pop_back = rng.gen::<bool>();
+            let old_base = if pop_back {new_mot.pwm.pop()?} else {new_mot.pwm.remove(0)};
             //println!("contract 2");
             let ln_post = new_set.replace_motif(new_mot, contract_id);
+            let ln_matches = if pop_back {self.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&new_mot_bps).ln()} else {self.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&new_mot_bps).ln()};
             //println!("contract 3");
-            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-self.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&new_mot_bps).ln();
+            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-ln_matches;
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }

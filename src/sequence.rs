@@ -503,6 +503,41 @@ impl Sequence {
 
     }
 
+    // This is a helper function for motif contraction
+    // It counts the number of kmers that `self` has that differ only in their first bp from `bases`
+    pub(crate) fn number_kmers_neighboring_by_first_bp(&self, bases: &[Bp]) -> f64 {
+
+
+        let k = bases.len();
+
+        let mut check_u64 = Self::kmer_to_u64(bases) << BITS_PER_BP;
+
+        //There is always at leasst one kmer that neighbors `bases` in its last Bp: itself
+        let mut num: f64 = 1.0;
+
+        for _ in 0..BASE_L {
+
+            // This effectively increments the first bp in bases,
+            // going from A -> C -> G -> T. Recall that k-mers are stored back to front, with the
+            // units place being the first base pair in the k-mer
+            // We only need to do this BASE_L-1 times because doing it
+            // BASE_L times would loop us back to start.
+            // mask_offset basically is my way of correcting for potential carrying
+
+            if self.id_of_u64_kmer(k, check_u64).is_some() {
+                num += 1.0;
+            }
+
+            
+            check_u64 += 1;
+
+        }
+
+        num
+
+    }
+
+
     /// This returns the `num_bases` `[Bp]`s in the `block_id`th block, starting
     /// from index `start_id`. 
     /// # Panics
