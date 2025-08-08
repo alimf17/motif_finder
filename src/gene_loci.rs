@@ -2,6 +2,7 @@ use std::collections::{HashSet, HashMap, VecDeque};
 use std::error::Error;
 use std::io::{BufReader, BufRead};
 
+use fishers_exact::fishers_exact;
 use itertools::Itertools;
 
 use thiserror::Error;
@@ -10,6 +11,7 @@ use once_cell::sync::Lazy;
 
 use regex::Regex;
 
+use log::warn;
 
 static GENE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("gene=").unwrap());
 static ID_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("ID=").unwrap());
@@ -148,6 +150,7 @@ impl Locus {
         Some((self.start.max(start), self.end.min(end)))
 
     }
+
 
     pub fn name(&self) -> &str {
         &self.name
@@ -310,6 +313,49 @@ impl GenomeAnnotations {
         Ok(())
 
     }
+
+    pub fn collect_ontology_counts(&self) -> (HashMap<u64, usize>, usize) {
+
+        let mut ontology_counts: HashMap<u64, usize> = HashMap::new();
+        for locus in self.loci.iter() {
+            for term in locus.go_terms.iter() {
+                if let Some(go) = ontology_counts.get_mut(term) { *go += 1; } else {ontology_counts.insert(*term, 1);};
+            }
+        }
+
+        let total_count = ontology_counts.values().map(|&a| a).sum::<usize>();
+        (ontology_counts, total_count)
+
+    }
+
+    pub fn hypergeometric_p_test_on_go_terms(&self, go_term_vs_count: &[(u64, usize)]) -> Vec<(u64, f64)> {
+
+        let (genome_ontology_counts, total_counts) = self.collect_ontology_counts();
+
+        let test_total_count = go_term_vs_count.iter().map(|a| a.1).sum::<usize>();
+
+        let mut p_values: Vec<(u64, f64)> = Vec::with_capacity(go_term_vs_count.len());
+
+        for &(go_term, count) in go_term_vs_count {
+
+            let Some(&total_matching_go) = genome_ontology_counts.get(&go_term) else {warn!("GO:{} is not in the annotation! Skipping it, but be careful!", go_term); continue};
+
+            let total_nonmatching_go = total_counts-total_matching_go;
+
+            let test_total_no_match = test_total_count-count;
+
+            let undrawn_successes = total_matching_go-count;
+
+            let undrawn_failures = total_nonmatching_go-test_total_no_match;
+
+            p_values.push((go_term, fishers_exact(&[count as u32, test_total_no_match as u32, undrawn_successes as u32, undrawn_failures as u32]).unwrap().greater_pvalue))
+
+        }
+
+        p_values
+
+    }
+
 
     pub fn loci(&self) -> &Vec<Locus> {
         &self.loci

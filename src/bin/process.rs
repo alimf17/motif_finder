@@ -483,8 +483,12 @@ pub fn main() {
         if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
         if let Some(go_names) = go_terms.as_ref() {
 
-            let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
-            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{}\n", &format_terms.join("\n"));
+            let p_values = potential_annotations.as_ref().expect("only got here if we're Some").hypergeometric_p_test_on_go_terms(&go_names[i]);
+
+            let mut by_p_value: Vec<_> =go_names[i].iter().zip(p_values.into_iter()).map(|(a,b)| (a.0, a.1, b.1)).collect();
+            by_p_value.sort_unstable_by(|a,b| a.2.partial_cmp(&b.2).unwrap());
+            let format_terms: Vec<String> = by_p_value.iter().map(|a| format!("{}\tGO:{:07}\t{}\t{}", a.1, a.0, a.2, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
+            println!("Possible associated GO terms:\nHits:\tGO Term\tp-value\tExplanation\n{}\n", &format_terms.join("\n"));
         };
     }
 
@@ -613,8 +617,13 @@ pub fn main() {
         if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
         if let Some(go_names) = go_terms.as_ref() {
 
-            let format_terms: Vec<String> = go_names[i].iter().map(|a| format!("{}\tGO:{:07}\t{}", a.1, a.0, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
-            println!("Possible associated GO terms:\nHits:\tGO Term\tExplanation\t{}\n", &format_terms.join("\n"));
+                        let p_values = potential_annotations.as_ref().expect("only got here if we're Some").hypergeometric_p_test_on_go_terms(&go_names[i]);
+
+            let mut by_p_value: Vec<_> =go_names[i].iter().zip(p_values.into_iter()).map(|(a,b)| (a.0, a.1, b.1)).collect();
+            by_p_value.sort_unstable_by(|a,b| a.2.partial_cmp(&b.2).unwrap());
+            let format_terms: Vec<String> = by_p_value.iter().map(|a| format!("{}\tGO:{:07}\t{}\t{}", a.1, a.0, a.2, potential_annotations.as_ref().expect("only got here if we're Some").go_explanations().get(&a.0).map_or("GO term not found", |v| v))).collect();
+            println!("Possible associated GO terms:\nHits:\tGO Term\tp-value\tExplanation\n{}\n", &format_terms.join("\n"));
+
         };
     }
 

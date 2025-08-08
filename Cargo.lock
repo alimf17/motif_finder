@@ -834,6 +834,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fishers_exact"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64993467e77edcbfce160dae38337b4c538aa0e8027039c6eabba8fa335c7b1e"
+
+[[package]]
 name = "flamegraph"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1656,6 +1662,7 @@ dependencies = [
  "clap",
  "csv",
  "fastrand",
+ "fishers_exact",
  "flamegraph",
  "gzp",
  "indxvec",

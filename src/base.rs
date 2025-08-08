@@ -197,7 +197,7 @@ const NUM_MOVES: usize = {
     size
 };
 
-static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 80, 20, 20, 20, 40, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
+static PICK_MOVE: Lazy<WeightedAliasIndex<u32>> = Lazy::new(|| WeightedAliasIndex::<u32>::new(vec![80_u32, 10, 20, 20, 80, 40, 0, 0]).expect("The weights should always be valid, with length equal to the length of VARIANT_NUMS"));
 
 static SAMPLE_VARIANTS: Lazy<[Uniform<usize>; 8]> = Lazy::new(|| core::array::from_fn(|a| Uniform::new(0, VARIANT_NUMS[a])));
 
@@ -4937,12 +4937,12 @@ impl<'a> MotifSet<'a> {
     /// This function will exploit parallelization if available
     pub fn sort_self_by_lasso_and_yield_genes_and_go_terms(&mut self, lambda: f64, regulatory_distance: u64, annotations: Option<&GenomeAnnotations>) -> (Vec<f64>, Option<f64>, Option<Vec<Vec<String>>>, Option<Vec<Vec<(u64, usize)>>>) {
 
-        let mut gene_names: Option<Vec<Vec<String>>> = annotations.map(|_| vec![]) ;
-        let mut go_term_counts: Option<Vec<Vec<(u64, usize)>>> = annotations.map(|_| vec![]);
+        let mut gene_names: Option<Vec<Vec<String>>> = None; //annotations.map(|_| vec![]) ;
+        let mut go_term_counts: Option<Vec<Vec<(u64, usize)>>> = None; //annotations.map(|_| vec![]);
 
         //It is likely an invariant that we have at least two motifs in a motif set.
         //But I'm defending against an empty motif set in case
-        if self.set.len() < 2 {
+        /*if self.set.len() < 2 {
             let likelihood = self.calc_ln_post()-self.ln_prior();
             let lassoed_like = likelihood-lambda*self.set.get(0).map(|a| a.0.peak_height.abs()).unwrap_or(0.0);
             let wave = self.nth_motif(0).generate_waveform(self.data_ref);
@@ -4958,8 +4958,27 @@ impl<'a> MotifSet<'a> {
         }
 
         let mut lasso_likes: Vec<f64> = Vec::new();
+*/
+//lasso_self(&self, lambda: f64) -> (Self, Vec<f64>, Option<f64>)
+        let (lassoed_self, lasso_likes, potential_leftover) = self.lasso_self(lambda);
 
-        let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64, Option<Vec<String>>, Option<Vec<(u64, usize)>>)> = (0..self.set.len()).into_par_iter().map(|i| {
+        if let Some(annotations) = annotations {
+
+            for i in 0..self.set.len() {
+                let wave = self.nth_motif(i).generate_waveform(self.data_ref);
+                let loci = wave.return_regulated_loci(None, regulatory_distance, self.data_ref.zero_locs(),annotations);
+                let collect_names: Vec<String> = if let Ok(ref locus_vec) = loci { locus_vec.iter().map(|a| a.name_clone()).collect() } else {vec![]};
+                if let Some(ref mut names) = gene_names.as_mut() { names.push(collect_names);} else { gene_names = Some(vec![collect_names]);};
+                let go_terms = wave.return_go_terms(None, regulatory_distance, self.data_ref.zero_locs(),annotations).unwrap_or_else(|_| vec![]);
+                if let Some(ref mut gos) = go_term_counts { gos.push(go_terms)} else {go_term_counts = Some(vec![go_terms])}; 
+            }
+
+        };
+
+        *self=lassoed_self;
+        (lasso_likes, potential_leftover, gene_names, go_term_counts)
+
+        /*let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64, Option<Vec<String>>, Option<Vec<(u64, usize)>>)> = (0..self.set.len()).into_par_iter().map(|i| {
 
             let single_set = self.nth_motif_as_set(i);
 
@@ -5038,10 +5057,10 @@ impl<'a> MotifSet<'a> {
             };
 
             
-        }
-        
+        } */ 
+
         //If I get to the end without hitting a worse lasso like, return the whole thing with the last option None.
-        (lasso_likes, None, gene_names, go_term_counts)
+        //(lasso_likes, None, gene_names, go_term_counts)
     }
 
 
