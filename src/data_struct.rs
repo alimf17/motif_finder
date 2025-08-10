@@ -453,7 +453,7 @@ impl AllData {
             Err(e) => Err(e.clone()),
         };
 
-        let (pre_data, background,min_height, pre_noise) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, min_height, is_circular, peak_scale, retain_null.unwrap_or(false))?;
+        let (pre_data, background,min_height, pre_noise, thresh) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, min_height, is_circular, peak_scale, retain_null.unwrap_or(false))?;
  
         println!("processed data");
 
@@ -462,7 +462,7 @@ impl AllData {
         let pre_seq_len = pre_seq.len();
 
         
-        let test_sync = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing);
+        let test_sync = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing, thresh);
        
         if test_sync.is_err() { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::PoorSynchronize(test_sync.unwrap_err()))); }
 
@@ -650,7 +650,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>, f64), AllProcessingError> {
        
         if spacing == 0 {
             let err = DataProcessError::BadSpacer(BadSpacerError);
@@ -1211,7 +1211,7 @@ impl AllData {
         let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.into_iter().map(|a| a.into_iter().map(|(c,b)|(c, b)).collect::<Vec<(usize,f64)>>()).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        Ok((trimmed_data_blocks, background_dist, min_height, trimmed_ar_blocks))
+        Ok((trimmed_data_blocks, background_dist, min_height, trimmed_ar_blocks, peak_thresh))
 
 
 
@@ -1230,12 +1230,14 @@ impl AllData {
     //      But these are on the edge between being positive and negative data,
     //      so they're in a little bit of a grey area to classify, and saving 
     //      them isn't my highest priority anyway.
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>), WaveCreationError> {
+    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>), WaveCreationError> {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_null_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
         let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
         let mut null_starts_bps: Vec<usize> = Vec::with_capacity(pre_null_data.len());
+        let peak_thresh = peak_thresh.max(0.0);
+        let mut windows_are_positive: Vec<bool> = Vec::with_capacity(pre_data.len());
 
         let mut i = 0_usize;
 
@@ -1249,6 +1251,7 @@ impl AllData {
             let mut bp_ind = pre_data[i][0].0;
             let bp_prior = bp_ind;
             let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
+            let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
             //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
 
             //This needs to be float_batch.len()-1 because we need the bp that matches
@@ -1279,6 +1282,7 @@ impl AllData {
                 println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                 sequence_blocks.push(bases_batch);
                 starting_coords.push(bp_prior % seq_len);
+                windows_are_positive.push(window_is_positive);
                 start_data.append(&mut float_batch);
             } else {
                 //This gives the 1-indexed position of the null base in vim
@@ -1336,7 +1340,7 @@ impl AllData {
             i += 1;
         }
 
-        let seq = Sequence::new(sequence_blocks);
+        let seq = Sequence::new(sequence_blocks, &windows_are_positive);
         let null_seq = NullSequence::new(null_sequence_blocks);
         // TODO: either verify this can't fail at this stage or make this function return a Result
         let wave = match Waveform::new(start_data, &seq, spacing) {

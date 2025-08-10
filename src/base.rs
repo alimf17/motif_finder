@@ -4208,7 +4208,22 @@ impl<'a> MotifSet<'a> {
 
         let id = rng.gen_range(0..self.set.len());
 
-        let threshold = 7_usize;
+        //let threshold = 7_usize;
+
+        //We are very roughly inverting the binomial distribution CDF for p = 3/4 
+        //To get either roughly 200 k-mers for each k or all k-mers if we approximate 
+        //that there are likely fewer than 200 k-mers. We use the roughest approximation
+        //from Gil, Segura, and Temme's 2020 "Asymptotic inversion of the binomial and 
+        //negative binomial cumulative distribution functions" here, which is just
+        //"pretend the binomial is a normal distribution and move on". 
+        
+        let length_motif = self.nth_motif(id).len();
+
+        let ratio_check = 200_f64/(self.data_ref.data().seq().number_unique_kmers(length_motif) as f64);
+
+        let threshold = if ratio_check >= 1.0 {length_motif} else{
+            (0.75*(length_motif as f64)+(0.75*0.25*(length_motif as f64)).sqrt()*NORMAL_DIST.inverse_cdf(ratio_check)).round() as usize
+        };
 
         let (hamming_counts, kmer_ids) = self.data_ref.data().seq().all_different_kmers_within_hamming(&self.nth_motif(id).best_motif(), threshold);
 
