@@ -1337,12 +1337,12 @@ mod tests {
         let block_lens: Vec<usize> = (0..block_n).map(|_| bp_per_block).collect();
         let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
 
-        let _kmer_c = sequence.generate_kmers(20);
+        let _kmer_c = sequence.generate_kmers(MAX_BASE);
 
         let start = Instant::now();
 
 
-        let in_it = sequence.kmer_in_seq(&vec![Bp::C;20]);
+        let in_it = sequence.kmer_in_seq(&vec![Bp::C;MAX_BASE]);
 
         let duration = start.elapsed();
         println!("Done search {} found {} bp {:?}", bp, in_it, duration);

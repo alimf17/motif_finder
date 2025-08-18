@@ -145,7 +145,7 @@ pub const MIN_BASE: usize = 8;
 /// regenerate the AllData and AllDataUse you use if you have changed this.
 /// A major part of how we can quickly and safely generate waveforms is that
 /// there are guanrantees on sequence block sizes which rely on this
-pub const MAX_BASE: usize = 20; 
+pub const MAX_BASE: usize = 15; 
 
 
 /// MAX_HEIGHT is the maximum possible max peak height for a motif
@@ -221,7 +221,7 @@ const SHUFFLE_BASES: usize = 3;
 
 //const MAX_VECT_COORD: f64 = 943.-9.5367431640625e-7;
 
-const REDUCE_MOTIF_SCALE_MOVE: [f64; MAX_BASE+1-MIN_BASE] = [0.024800, 0.021573, 0.019085, 0.017109, 0.015503, 0.014171, 0.013049, 0.012091, 0.011264, 0.010543, 0.0099079, 0.0093451, 0.0088427];
+const REDUCE_MOTIF_SCALE_MOVE: [f64; MAX_BASE+1-MIN_BASE] = [0.024800, 0.021573, 0.019085, 0.017109, 0.015503, 0.014171, 0.013049, 0.012091];//, 0.011264, 0.010543, 0.0099079, 0.0093451, 0.0088427];
 
 /*
 
@@ -3926,7 +3926,8 @@ impl<'a> MotifSet<'a> {
 
 
             //println!("lock 2");
-            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - (valid_extends.len() as f64).ln();
+            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - ((valid_extends.len() as f64).ln()+LN_2+1.09861228867);
+            //ln(2) for two choices: front vs back. Ln(3) for three choices of base distribution;
             //println!("lock 3");
             if rng.gen::<bool>() { new_mot.pwm.push(new_base)} else {new_mot.pwm.insert(0, new_base)};
             //println!("lock 4");
@@ -3969,7 +3970,8 @@ impl<'a> MotifSet<'a> {
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             let ln_matches = if pop_back {self.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&new_mot_bps).ln()} else {self.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&new_mot_bps).ln()};
             //println!("contract 3");
-            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-ln_matches;
+            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-(ln_matches+LN_2+1.09861228867);
+            //ln(2) for two choices: front vs back. Ln(3) for three choices of base distribution;
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
         }
@@ -8113,9 +8115,9 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,20), data_seq.height_dist(), &mut rng); //sequence
+        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
 
-        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,20), data_seq.height_dist(), &mut rng); //sequence
+        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
 
         let start = Instant::now();
 
@@ -8230,7 +8232,7 @@ mod tester{
 
         println!("{:?}", motif.best_motif());
 
-        println!("{:?}", sequence.return_bases(0,0,20));
+        println!("{:?}", sequence.return_bases(0,0,MAX_BASE));
         //println!("{:?}", sequence.unique_kmers(motif.len()));
         println!("{}", Sequence::kmer_to_u64(&motif.best_motif()));
         let matrix = motif.rev_complement();
@@ -8245,7 +8247,7 @@ mod tester{
         assert!((motif.pwm_prior(&sequence)-(sequence.number_unique_kmers(motif.len()) as f64).ln()+((MAX_BASE+1-MIN_BASE) as f64).ln()
                  -((motif.len() as f64)*(BASE_RESOLUTION.ln() * ((BASE_L-1) as f64) ))).abs() < 1e-6);
 
-        let un_mot: Motif = Motif::from_motif(vec![Bp::C;20],data_seq.height_dist(),&mut rng);//Sequence
+        let un_mot: Motif = Motif::from_motif(vec![Bp::C;MAX_BASE],data_seq.height_dist(),&mut rng);//Sequence
 
         assert!(un_mot.pwm_prior(&sequence) < 0.0 && un_mot.pwm_prior(&sequence).is_infinite());
 
