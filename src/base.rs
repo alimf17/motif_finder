@@ -145,7 +145,7 @@ pub const MIN_BASE: usize = 8;
 /// regenerate the AllData and AllDataUse you use if you have changed this.
 /// A major part of how we can quickly and safely generate waveforms is that
 /// there are guanrantees on sequence block sizes which rely on this
-pub const MAX_BASE: usize = 15; 
+pub const MAX_BASE: usize = 20; 
 
 
 /// MAX_HEIGHT is the maximum possible max peak height for a motif
