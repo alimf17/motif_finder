@@ -8,6 +8,7 @@ use rand::Rng;
 use rand::prelude::SliceRandom;
 use rand::distributions::{Distribution, Uniform};
 use wyhash2::WyHash;
+use log::warn;
 
 use crate::base::{BASE_L, MIN_BASE, MAX_BASE, Bp}; //I don't want to get caught in a loop of use statements
 
@@ -39,7 +40,7 @@ pub struct Sequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,
     block_lens: Vec<usize>,
-    positive_windows: Vec<bool>,
+    positive_window_slices: Vec<(usize, usize, usize)>, //(index of window, start of window, end of window)
     max_len: usize,
     kmer_dict:  [Vec<u64>; MAX_BASE+1-MIN_BASE],
     kmer_id_dict: Vec<HashMap<u64, usize, WyHash>>,
@@ -58,13 +59,13 @@ impl Sequence {
 
     /// Initializes a new Sequence from a vector of sequence blocks
     /// # Panics
-    /// - If `positive_windows` has a length not equal to the length of blocks
+    /// - If `positive_window_parts` has a length not equal to the length of blocks
     /// - If any of the vectors in `blocks` have a length  ` <= [MAX_BASE]`
     /// - If any of the vectors in `blocks` have a length not divisible by `[BP_PER_U8]`
     /// - If any element of any of the vectors in `blocks` is `>= BASE_L`
-    pub fn new(blocks: Vec<Vec<usize>>, positive_windows: &[bool]) -> Sequence {
+    pub fn new(blocks: Vec<Vec<usize>>, positive_window_parts: &[Vec<usize>]) -> Sequence {
 
-        if positive_windows.len() != blocks.len() { panic!("poor alignment of window indicators!");}
+        if positive_window_parts.len() != blocks.len() { panic!("poor alignment of window indicators!");}
 
         let mut block_is: Vec<usize> = Vec::new();
 
@@ -80,6 +81,7 @@ impl Sequence {
 
         let mut max_len: usize = 0;
 
+        let block_lens: Vec<usize> = blocks.iter().map(|a| a.len()).collect();
         
         for block in blocks {
             
@@ -127,13 +129,13 @@ impl Sequence {
         let orig_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::new();
         let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
 
-        let positive_windows: Vec<bool> = positive_windows.iter().map(|&a| a).collect();
+        let positive_window_slices: Vec<(usize, usize, usize)> = Self::agglutinate_windows(&block_lens, &positive_window_parts); //positive_window_parts.iter().map(|&a| a).collect();
 
         let mut seq = Sequence{
                     seq_blocks: seq_bls,
                     block_u8_starts: block_is,
                     block_lens: block_ls,
-                    positive_windows: positive_windows,
+                    positive_window_slices: positive_window_slices,
                     max_len: max_len,
                     kmer_dict: orig_dict, 
                     kmer_id_dict: orig_id_dict,
@@ -148,13 +150,13 @@ impl Sequence {
     /// Initializes a new Sequence from a single vector with base pair lengths 
     /// provides by `block_lens` 
     /// # Panics
-    /// - If `positive_windows` has a length not equal to the length of blocks
+    /// - If `positive_window_parts` has a length not equal to the length of blocks
     /// - If any element of `block_lens` is not divisible by `[BP_PER_U8]` 
     /// - If any element of `block_lens` is not greater than `[MAX_BASE]`
     /// - If the sum of `block_lens` is not equal to `[BP_PER_U8] * seq_blocks.len()`
-    pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>, positive_windows: &[bool]) -> Sequence {
+    pub fn new_manual(seq_blocks: Vec<u8>, block_lens: Vec<usize>, positive_window_slices: &[(usize, usize, usize)]) -> Sequence {
 
-        if positive_windows.len() != block_lens.len() { panic!("poor alignment of window indicators!");}
+        //if positive_window_parts.len() != block_lens.len() { panic!("poor alignment of window indicators!");}
         
         let mut block_u8_starts: Vec<usize> = vec![0];
 
@@ -176,13 +178,12 @@ impl Sequence {
         let orig_dict: [Vec<u64>; MAX_BASE+1-MIN_BASE] = [F; MAX_BASE+1-MIN_BASE];
         let orig_nums = [0_usize; MAX_BASE+1-MIN_BASE];
         let orig_id_dict: Vec<HashMap<u64, usize, WyHash>> = Vec::new();
-        let positive_windows: Vec<bool> = positive_windows.iter().map(|&a| a).collect();
 
         let mut seq = Sequence{
                     seq_blocks: seq_blocks,
                     block_u8_starts: block_u8_starts,
                     block_lens: block_lens,
-                    positive_windows: positive_windows,
+                    positive_window_slices: positive_window_slices.to_vec(),
                     max_len: max_len,
                     kmer_dict: orig_dict, 
                     kmer_id_dict: orig_id_dict,
@@ -191,6 +192,43 @@ impl Sequence {
 
         seq.initialize_kmer_dicts();
         seq
+
+    }
+
+    fn agglutinate_windows(seq_lens: &[usize], positive_window_parts: &[Vec<usize>]) -> Vec<(usize, usize, usize)> {
+
+        if positive_window_parts.len() == 0 { return Vec::new();}
+        let mut windows: Vec<(usize, usize, usize)> = Vec::with_capacity(positive_window_parts.len()*positive_window_parts[0].len());
+
+        for k in 0..positive_window_parts.len() {
+
+            if positive_window_parts[k].len() == 0 {continue;}
+            if k >= seq_lens.len() { warn!("Supplied window parts longer than windows. Assuming only first {} parts are valid", seq_lens.len()); break;}
+
+            let mut window = positive_window_parts[k].clone();
+            window.sort_unstable();
+            window.dedup();
+
+            let mut current_start = window[0].checked_sub(MAX_BASE).unwrap_or(0);
+            let mut current_end = window[0];//.checked_add(MAX_BASE).unwrap_or(seq_lens[k]).min(seq_lens[k]);
+
+            for i in 1..window.len() {
+                let try_start = window[i].checked_sub(MAX_BASE).unwrap_or(0);
+                let try_end = window[i].min(seq_lens[k]-MAX_BASE);//.checked_add(MAX_BASE).unwrap_or(seq_lens[k]).min(seq_lens[k]);
+                if try_start <= current_end+MAX_BASE { current_end = try_end;} else {
+                    windows.push((k, current_start, current_end));
+                    current_start = try_start;
+                    current_end = try_end;
+                }
+            }
+
+            windows.push((k, current_start, current_end));
+
+        }
+
+        windows.shrink_to_fit();
+        println!("windows:\n {:#?}", windows);
+        windows
 
     }
 
@@ -205,7 +243,7 @@ impl Sequence {
 
         let mut remove_descend: Vec<usize> = remove.to_vec();
 
-        let mut new_positive_windows = self.positive_windows.clone();
+        let mut new_positive_window_slices = self.positive_window_slices.clone();
 
         // We always want to remove blocks in descending order
         // Otherwise, previously remove blocks screw with the remaining blocks
@@ -235,7 +273,7 @@ impl Sequence {
             _ = new_blocks.drain(new_starts[ind]..).collect::<Vec<_>>();
             _ = new_starts.pop();
             _ = new_lens.pop();
-            _ = new_positive_windows.pop();
+            new_positive_window_slices = new_positive_window_slices.into_iter().filter(|a| a.0 != ind).collect();
             i += 1;
         }
 
@@ -247,7 +285,7 @@ impl Sequence {
             _ = new_starts[(ind+1)..].iter_mut().map(|a| *a -= len_u8).collect::<Vec<_>>();
             _ = new_starts.remove(ind);
             _ = new_lens.remove(ind);
-            _ = new_positive_windows.remove(ind);
+            new_positive_window_slices = new_positive_window_slices.into_iter().filter(|a| a.0 != ind).map(|a| if a.0 > ind { (a.0-1, a.1, a.2)} else {a}).collect();
             i += 1;
         }
 
@@ -263,7 +301,7 @@ impl Sequence {
             seq_blocks: new_blocks,
             block_u8_starts: new_starts,
             block_lens: new_lens,
-            positive_windows: new_positive_windows,
+            positive_window_slices: new_positive_window_slices,
             max_len: max_len,
             kmer_dict: orig_dict,
             kmer_id_dict: orig_id_dict,
@@ -307,14 +345,24 @@ impl Sequence {
 
         let mut unel: Vec<u64> = Vec::new();
 
-        for i in 0..self.block_lens.len() {
-            if !self.positive_windows[i] { continue;}
+        /*for i in 0..self.block_lens.len() {
+            if !self.positive_window_parts[i] { continue;}
             if self.block_lens[i] >= len {
 
                 for j in 0..(self.block_lens[i]-len+1){
                     unel.push(Self::kmer_to_u64(&self.return_bases(i, j, len)));
                 }
 
+            }
+
+        }*/
+
+        for &(block_of, start, end) in self.positive_window_slices.iter() {
+
+            if self.block_lens[block_of] >= len {
+                for j in start..=end {
+                    unel.push(Self::kmer_to_u64(&self.return_bases(block_of, j, len)));
+                }
             }
 
         }
@@ -819,7 +867,7 @@ impl Serialize for Sequence {
         let mut state = serializer.serialize_struct("Sequence", 3)?;
         state.serialize_field("seq_blocks", &self.seq_blocks)?;
         state.serialize_field("block_lens", &self.block_lens)?;
-        state.serialize_field("positive_windows", &self.positive_windows)?;
+        state.serialize_field("positive_window_slices", &self.positive_window_slices)?;
         state.end()
     }
 }
@@ -845,8 +893,8 @@ impl<'de> Deserialize<'de> for Sequence {
             {
                 let seq_blocks: Vec<u8> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
                 let block_lens: Vec<usize> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let positive_windows: Vec<bool> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                Ok(Sequence::new_manual(seq_blocks, block_lens, &positive_windows))
+                let positive_window_slices: Vec<(usize, usize, usize)> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                Ok(Sequence::new_manual(seq_blocks, block_lens, &positive_window_slices))
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<Sequence, V::Error>
@@ -855,7 +903,7 @@ impl<'de> Deserialize<'de> for Sequence {
             {
                 let mut seq_blocks: Option<Vec<u8>> = None;
                 let mut block_lens: Option<Vec<usize>> = None;
-                let mut positive_windows: Option<Vec<bool>> = None;
+                let mut positive_window_slices: Option<Vec<(usize, usize, usize)>> = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::Seq_Blocks => {
@@ -871,22 +919,22 @@ impl<'de> Deserialize<'de> for Sequence {
                             block_lens = Some(map.next_value()?);
                         }
                         Field::Positive_Windows => {
-                            if positive_windows.is_some() {
-                                return Err(serde::de::Error::duplicate_field("positive_windows"));
+                            if positive_window_slices.is_some() {
+                                return Err(serde::de::Error::duplicate_field("positive_window_slices"));
                             }
-                            positive_windows = Some(map.next_value()?);
+                            positive_window_slices = Some(map.next_value()?);
                         }
                     }
                 }
                 let seq_blocks = seq_blocks.ok_or_else(|| serde::de::Error::missing_field("seq_blocks"))?;
                 let block_lens = block_lens.ok_or_else(|| serde::de::Error::missing_field("block_lens"))?;
-                let positive_windows = positive_windows.ok_or_else(|| serde::de::Error::missing_field("positive_windows"))?;
+                let positive_window_slices = positive_window_slices.ok_or_else(|| serde::de::Error::missing_field("positive_window_slices"))?;
                 let block_n = block_lens.len();
-                Ok(Sequence::new_manual(seq_blocks, block_lens, &positive_windows))
+                Ok(Sequence::new_manual(seq_blocks, block_lens, &positive_window_slices))
             }
         }
 
-        deserializer.deserialize_struct("Sequence", &["seq_blocks","block_u8_starts","block_lens","positive_windows", "max_len", "kmer_dict","kmer_id_dict", "kmer_nums"], SequenceVisitor)
+        deserializer.deserialize_struct("Sequence", &["seq_blocks","block_u8_starts","block_lens","positive_window_slices", "max_len", "kmer_dict","kmer_id_dict", "kmer_nums"], SequenceVisitor)
 
 
     }

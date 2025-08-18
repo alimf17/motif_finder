@@ -1237,8 +1237,9 @@ impl AllData {
         let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
         let mut null_starts_bps: Vec<usize> = Vec::with_capacity(pre_null_data.len());
         let peak_thresh = peak_thresh.max(0.0);
-        let mut windows_are_positive: Vec<bool> = Vec::with_capacity(pre_data.len());
+        //let mut windows_are_positive: Vec<bool> = Vec::with_capacity(pre_data.len());
 
+        let mut positive_window_parts: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut i = 0_usize;
 
         let seq_len = pre_sequence.len();
@@ -1251,9 +1252,10 @@ impl AllData {
             let mut bp_ind = pre_data[i][0].0;
             let bp_prior = bp_ind;
             let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
-            let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
+            //let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
             //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
 
+            let positive_window_part = float_batch.iter().enumerate().filter_map(|(i, &f)| if f >= peak_thresh { Some(i*spacing)} else {None}).collect::<Vec<usize>>();
             //This needs to be float_batch.len()-1 because we need the bp that matches
             //the last INDEX of float_batch, not its length. We handle this slightly 
             //differently if spacing is small, because that edge case needs special care
@@ -1282,7 +1284,7 @@ impl AllData {
                 println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                 sequence_blocks.push(bases_batch);
                 starting_coords.push(bp_prior % seq_len);
-                windows_are_positive.push(window_is_positive);
+                positive_window_parts.push(positive_window_part);
                 start_data.append(&mut float_batch);
             } else {
                 //This gives the 1-indexed position of the null base in vim
@@ -1340,7 +1342,7 @@ impl AllData {
             i += 1;
         }
 
-        let seq = Sequence::new(sequence_blocks, &windows_are_positive);
+        let seq = Sequence::new(sequence_blocks, &positive_window_parts);
         let null_seq = NullSequence::new(null_sequence_blocks);
         // TODO: either verify this can't fail at this stage or make this function return a Result
         let wave = match Waveform::new(start_data, &seq, spacing) {
