@@ -143,6 +143,13 @@ impl Sequence {
                     };
 
         seq.initialize_kmer_dicts();
+       
+        for i in 0..seq.kmer_dict.len() {
+            println!("{}", i+MIN_BASE);
+            let kmer_vec : Vec<_> = seq.unique_kmers_ref(i+MIN_BASE).iter().map(|a| Self::u64_to_kmer(*a, i+MIN_BASE) ).collect();
+            println!("{}", kmer_vec.len());
+
+        }
         seq
 
     }
@@ -210,7 +217,7 @@ impl Sequence {
             window.dedup();
 
             let mut current_start = window[0].checked_sub(MAX_BASE).unwrap_or(0);
-            let mut current_end = window[0];//.checked_add(MAX_BASE).unwrap_or(seq_lens[k]).min(seq_lens[k]);
+            let mut current_end = window[0].min(seq_lens[k]-MAX_BASE);//.checked_add(MAX_BASE).unwrap_or(seq_lens[k]).min(seq_lens[k]);
 
             for i in 1..window.len() {
                 let try_start = window[i].checked_sub(MAX_BASE).unwrap_or(0);
