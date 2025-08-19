@@ -3926,7 +3926,7 @@ impl<'a> MotifSet<'a> {
 
 
             //println!("lock 2");
-            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - ((valid_extends.len() as f64).ln()+LN_2+1.09861228867);
+            let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - ((valid_extends.len() as f64).ln());//+LN_2+1.09861228867);
             //ln(2) for two choices: front vs back. Ln(3) for three choices of base distribution;
             //println!("lock 3");
             if rng.gen::<bool>() { new_mot.pwm.push(new_base)} else {new_mot.pwm.insert(0, new_base)};
@@ -3970,7 +3970,7 @@ impl<'a> MotifSet<'a> {
             let ln_post = new_set.replace_motif(new_mot, contract_id);
             let ln_matches = if pop_back {self.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&new_mot_bps).ln()} else {self.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&new_mot_bps).ln()};
             //println!("contract 3");
-            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-(ln_matches+LN_2+1.09861228867);
+            let base_ln_density = old_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-(ln_matches);//+LN_2+1.09861228867);
             //ln(2) for two choices: front vs back. Ln(3) for three choices of base distribution;
             //println!("contract 4");
             Some((new_set, ln_post+base_ln_density)) //Birth moves subtract the probability of their generation
