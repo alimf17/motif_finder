@@ -888,15 +888,17 @@ impl AllData {
  
         let mut start_gaps: Vec<usize> = Vec::new();
 
-        for i in 0..(refined_locs_data.len()-1){
+        if !retain_null {
+            for i in 0..(refined_locs_data.len()-1){
 
-            let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
-            if jump >= 2*(fragment_length)+5 { //We need the times 2 because the ar correlations can be at least that big. We then add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
-            println!("jump {} {} {} {} {}", i, refined_locs_data[i+1].0, refined_locs_data[i].0, jump, fragment_length);
-                start_gaps.push(i+1);
-            } 
+                let jump: usize = refined_locs_data[i+1].0-refined_locs_data[i].0; //We can guarentee this is fine because we sorted the data already
+                if jump >= 2*(fragment_length)+5 { //We need the times 2 because the ar correlations can be at least that big. We then add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
+                    println!("jump {} {} {} {} {}", i, refined_locs_data[i+1].0, refined_locs_data[i].0, jump, fragment_length);
+                    start_gaps.push(i+1);
+                } 
+            }
+
         }
-
         println!("gaps {:?}", start_gaps);
         let mut max_valid_run: usize = sequence_len;
 
