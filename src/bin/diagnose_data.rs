@@ -2,6 +2,7 @@ use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, sync
 
 use clap::{Parser, ValueEnum};
 
+use motif_finder::base::*;
 use motif_finder::sequence::*;
 use motif_finder::data_struct::*;
 
@@ -18,6 +19,7 @@ struct Cli {
     /// Sets the input file from preprocessing to check
     #[arg(short, long)]
     input: String,
+
 }
 
 fn main() {
@@ -38,5 +40,6 @@ fn main() {
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
-    println!("{:?}", data_ref.data().seq().diagnose_hamming_optimum());
+    println!("{}", data_ref.data().seq().kmer_in_seq(&vec![Bp::G, Bp::T, Bp::A, Bp::C, Bp::C, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::C, Bp::G, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::A]));
+    //println!("{:?}", data_ref.data().seq().diagnose_hamming_optimum());
 }
