@@ -37,6 +37,7 @@ use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 
 use core::ops::Range;
 
+use sptr::*;
 
 const INTERVAL_CELL_LENGTH: f64 = 0.01;
 
@@ -70,8 +71,8 @@ struct Cli {
     
     /// These are the save files of the `MotifSet`s you're comparing, each 
     /// followed by the name you want them to have in the processing
-    #[arg(short, long, value_parser=parse_set_names_and_files)]
-    motif_set_files: Vec<(String, String)>,
+    #[arg(short, long, num_args = 2.., value_delimiter = ' ')]
+    motif_set_files: Vec<String>,
 
     /// This is an optional argument if you want to annotate your occupancy
     /// traces with gene loci and analyze go terms. This should point to a gff file
@@ -86,15 +87,19 @@ struct Cli {
 
 }
 
-
+// #[arg(num_args = 2.., value_delimiter = ' ', value_parser=parse_set_names_and_files)]
 
 pub fn main() {
 
     let Cli { comparison_file, motif_set_files, gff_file, additional_annotations_file} = Cli::parse();
 
+    let motif_set_files: Vec<(String, String)> = parse_set_names_and_files(motif_set_files).expect("file parsing went wrong");
+
     let mut scratch_space_for_buffer: Vec<u8> = Vec::new();
 
     let data_struct: AllData = attempt_bincode_serde_read_with_decomp(&comparison_file, Some(&mut scratch_space_for_buffer), None).expect("Your data file must be valid!");
+
+    let data_ref = AllDataUse::new(&data_struct, 0.0).unwrap();
 
     let motif_sets: Vec<(String, StrippedMotifSet)> = motif_set_files.into_iter().filter_map(|(name, file)| {
 
@@ -107,6 +112,37 @@ pub fn main() {
 
     }).collect();
 
+    println!("{:?}", motif_sets);
+
+    //let reactivated: Vec<_> = motif_sets.into_iter().map(|(a,b)| (a, b.reactivate_set(&data_ref))).collect();
+  
+    //println!("reactive {:?}", reactivated);
+
+    //let ref_0 = motif_sets[0].1.get_nth_motif(0) as *const Motif;
+    //let ref_1 = motif_sets[0].1.get_nth_motif(1) as *const Motif;
+
+    //println!("{} {} {} {}", ref_0.addr(), ref_1.addr(), ref_1.addr()-ref_0.addr(), std::mem::size_of::<Motif>()) 
+
+    let size_of_motif = std::mem::size_of::<Motif>();
+
+
+    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set(&b.1).into_iter().enumerate().map(|(i,d)|  d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.2.best_motif_string(), ((c.2 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+
+    println!("{:?}", assignments);
+
+    //Now, what I have in assignments is a three nested vector. The index of the
+    //first layer is the index of the motif set A, the index of the second layer 
+    //is the index of the motif set B it's being compared to, and the index j of 
+    //the third layer is the assignment of the jth motif of motif set A to its 
+    //match in motif set B. The elements I have are a float indicating the 
+    //distance, followed by the index k of the motif from MotifSet B.
+    //If the jth element is None, it means that the jth motif of motif set A did 
+    //not get assigned to anything in motif set B
+
+
+    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_rmse_data(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+
+    println!("{:?}", assignments);
 }
 
 
@@ -144,15 +180,15 @@ pub fn attempt_bincode_serde_read_with_decomp<T: DeserializeOwned>(file_name: &s
 
 }
 
-fn parse_set_names_and_files(s: &str) -> Result<Vec<(String, String)>, Box<dyn Error+Send+Sync>> {
+fn parse_set_names_and_files(split: Vec<String>) -> Result<Vec<(String, String)>, Box<dyn Error+Send+Sync>> {
 
-    let split: Vec<&str> = s.split(' ').collect();
+    //let split: Vec<&str> = s.split(' ').collect();
 
     let (pair_off, []) = split.as_chunks::<2>() else {return Err(Box::new(ParityError {}));};
 
     if pair_off.len() < 2 { return Err(Box::new(NoCompError {}));}
 
-    Ok(pair_off.into_iter().map(|a| (a[0].to_owned(), a[1].to_owned())).collect())
+    Ok(pair_off.into_iter().map(|a| (a[0].to_owned(), a[1].to_owned())).collect::<Vec<(String, String)>>())
 
 }
 

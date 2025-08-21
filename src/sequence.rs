@@ -1183,6 +1183,28 @@ impl NullSequence {
     pub fn kmer_count(&self, kmer: u64, len: usize) -> Option<usize> {
         self.kmer_counts[len-MIN_BASE].get(&kmer).map(|a| *a) 
     }
+
+    /* pub struct NullSequence {
+    seq_blocks: Vec<u8>,
+    block_u8_starts: Vec<usize>,
+    block_lens: Vec<usize>,
+    max_len: usize,
+    kmer_counts: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE],
+    kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE],
+}
+*/  
+
+    pub fn new_empty() -> Self {
+
+        Self {
+            seq_blocks: Vec::new(),
+            block_u8_starts: Vec::new(),
+            block_lens: Vec::new(),
+            max_len: 0,
+            kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
+            kmer_lists: core::array::from_fn(|a| Vec::new()),
+        }
+    }
 }
 
 impl Serialize for NullSequence {
@@ -1217,7 +1239,9 @@ impl<'de> Deserialize<'de> for NullSequence {
                 let seq_blocks: Vec<u8> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
                 let block_lens: Vec<usize> = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
 
-                Ok(NullSequence::new_manual(seq_blocks, block_lens))
+                if seq_blocks.len() == 0 && block_lens.len() == 0 { Ok(NullSequence::new_empty())} else{
+                    Ok(NullSequence::new_manual(seq_blocks, block_lens))
+                }
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<NullSequence, V::Error>
@@ -1244,7 +1268,9 @@ impl<'de> Deserialize<'de> for NullSequence {
                 }
                 let seq_blocks = seq_blocks.ok_or_else(|| serde::de::Error::missing_field("secs"))?;
                 let block_lens = block_lens.ok_or_else(|| serde::de::Error::missing_field("nanos"))?;
-                Ok(NullSequence::new_manual(seq_blocks, block_lens))
+                if seq_blocks.len() == 0 && block_lens.len() == 0 { Ok(NullSequence::new_empty())} else{
+                    Ok(NullSequence::new_manual(seq_blocks, block_lens))
+                }
             }
         }
 

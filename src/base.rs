@@ -5360,15 +5360,15 @@ impl StrippedMotifSet {
             let mut matches: Vec<Option<(f64, bool, &Motif)>> = vec![None; self.num_motifs()];
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), *rev_c_matrix.get((i,j)).unwrap(), reference_set.get_nth_motif(i)));
+                matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), *rev_c_matrix.get((i,j)).unwrap(), reference_set.get_nth_motif(i)));
             }
             matches
         } else {
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
-            let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; reference_set.num_motifs()];
+            let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; self.num_motifs()];
             for (i, j) in pre_matches.into_iter().enumerate() {
-                matches[j] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), reference_set.get_nth_motif(j)));
+                matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), reference_set.get_nth_motif(j)));
             }
             matches
         }
@@ -5402,7 +5402,7 @@ impl StrippedMotifSet {
             for (i, j) in pre_matches.into_iter().enumerate() {
                 println!("{i} {j}");
                 println!("{} {}", self.set.len(), reference_set.set.len());
-                matches[i] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
+                matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
             }
             matches
             //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
