@@ -137,7 +137,29 @@ pub fn main() {
     //match in motif set B. The elements I have are a float indicating the 
     //distance, followed by the index k of the motif from MotifSet B.
     //If the jth element is None, it means that the jth motif of motif set A did 
-    //not get assigned to anything in motif set B
+    //not get assigned to anything in motif set B. 
+
+    let rows: Vec<String> = motif_sets.iter().map(|set| (0..set.1.num_motifs()).map(|set_id| format!("{}:Motif_{}", set.0, set_id))).flatten().collect();
+    let mot_rows: Vec<String> = motif_sets.iter().map(|set| set.1.set_iter().map(|a| a.best_motif_string())).flatten().collect();
+
+    let header: Vec<String> = motif_sets.iter().map(|s| format!("{0: <30}", s.0)).collect();
+    println!("Motif getting matched\t(sequence)            \t{}", header.join("\t\t"));
+
+    for (which_set, set_assignment) in assignments.iter().enumerate() {
+
+        let num_motifs = motif_sets[which_set].1.num_motifs();
+        
+        let set_name = motif_sets[which_set].0.clone();
+        
+        for i in 0..num_motifs {
+            let best_motif = motif_sets[which_set].1.get_nth_motif(i).best_motif_string();
+            let match_list: Vec<String> = set_assignment.iter().map(|compared_set| {
+                if let Some(matcher) = &compared_set[i] { format!("{}: {} ({:.02})", matcher.3, matcher.2, matcher.0)} else { "None".to_owned()}
+            }).collect();
+            println!("{set_name} Motif {i}\t({best_motif})\t{}", match_list.join("\t\t")); //Insert the matching motifs here
+        }
+
+    }
 
 
     let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_rmse_data(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
