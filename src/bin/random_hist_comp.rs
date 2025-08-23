@@ -55,7 +55,7 @@ fn main() {
         let mot_0 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
         let mot_1 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
 
-        mot_0.dist_by_binding(&mot_1, data.data().seq())
+        mot_0.distance_function(&mot_1).0
 
     }).collect();
 
@@ -130,11 +130,13 @@ fn build_hist_bins_local(mut data: Vec<f64>, num_bins: usize) -> (Vec<f64>, Vec<
     let min = big_data[0];
     let max = *big_data.last().unwrap();
 
-    let step = (max/min).powf(1.0/(num_bins as f64));
+    println!("min {min} max {max}");
+
+    let step = (max-min)*(1.0/(num_bins as f64));
 
     let add_into = 1./length;
 
-    let xs = (0..num_bins).map(|i| (min*(i as f64).powf(step))).collect::<Vec<_>>();
+    let xs = (0..num_bins).map(|i| (min+(i as f64)*(step))).collect::<Vec<_>>();
 
 
     let mut bins: Vec<(f64, f64)> = xs.iter().clone().map(|&x| (x, 0.0)).collect();
@@ -153,6 +155,7 @@ fn build_hist_bins_local(mut data: Vec<f64>, num_bins: usize) -> (Vec<f64>, Vec<
         //bins[j].1 *= mul_into;
     }
 
+    println!("xs {:?} bins {:?} densities {:?}", xs, bins, bins.iter().map(|a| a.1).collect::<Vec<_>>());
     (xs, bins)
 
 }

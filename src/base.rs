@@ -1769,6 +1769,10 @@ impl Motif {
         self.pwm.iter().rev().map(|a| a.rev()).collect()
     }
 
+    pub fn rev_complement_best_motif(&self) -> String {
+        self.pwm.iter().rev().map(|a| format!("{}", a.best_base().complement())).collect::<Vec<_>>().concat()
+    }
+
     pub fn peak_height(&self) -> f64 {
         self.peak_height
     }
@@ -5386,36 +5390,36 @@ impl StrippedMotifSet {
         let self_waves: Vec<Waveform> = self.set_iter().map(|a| {let mut b = a.clone(); b.peak_height = 5.0; b.generate_waveform(&data_seq)}).collect();
         let alts_waves: Vec<Waveform> = reference_set.set_iter().map(|a| {let mut b = a.clone(); b.peak_height = 5.0; b.generate_waveform(&data_seq)}).collect();
 
-        println!("lens {} {}", self_waves.len(), alts_waves.len());
+        //println!("lens {} {}", self_waves.len(), alts_waves.len());
 
         let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].rmse_with_wave(&alts_waves[i]));
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
-        println!("Made matrix");
+        //println!("Made matrix");
 
         if self.num_motifs() >= reference_set.num_motifs() {
-            println!("first");
+            //println!("first");
             let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                println!("{i} {j}");
-                println!("{} {}", self.set.len(), reference_set.set.len());
+              //  println!("{i} {j}");
+               // println!("{} {}", self.set.len(), reference_set.set.len());
                 matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
             }
             matches
             //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
         } else {
-            println!("second");
+           // println!("second");
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
             let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
-            println!("{:?}", pre_matches);
-            println!("{:?}", check_matrix);
+            //println!("{:?}", pre_matches);
+            //println!("{:?}", check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                println!("{i} {j}");
-                println!("{} {}", self.set.len(), reference_set.set.len());
+                //println!("{i} {j}");
+                //println!("{} {}", self.set.len(), reference_set.set.len());
                 
                 matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(), reference_set.get_nth_motif(j)));
             }
@@ -5442,30 +5446,30 @@ impl StrippedMotifSet {
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
-        println!("check matrix {:?}", check_matrix);
-        println!("Made matrix");
+        //println!("check matrix {:?}", check_matrix);
+        //println!("Made matrix");
 
         if self.num_motifs() >= reference_set.num_motifs() {
-            println!("first");
+            //println!("first");
             let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                println!("{i} {j}");
-                println!("{} {}", self.set.len(), reference_set.set.len());
+               // println!("{i} {j}");
+               // println!("{} {}", self.set.len(), reference_set.set.len());
                 matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), reference_set.get_nth_motif(i)));
             }
             matches
             //matches.into_iter().enumerate().map(|(i,x)| Some((check_matrix.get((i,x)).unwrap().into_inner(),reference_set.get_nth_motif(x)))).collect()
         } else {
-            println!("second");
+          //  println!("second");
             let transpose = check_matrix.transposed();
             let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
             let mut matches: Vec<Option<(f64, &Motif)>> = vec![None; self.num_motifs()];
-            println!("{:?}", pre_matches);
-            println!("{:?}", check_matrix);
+            //println!("{:?}", pre_matches);
+            //println!("{:?}", check_matrix);
             for (i, j) in pre_matches.into_iter().enumerate() {
-                println!("{i} {j}");
-                println!("{} {}", self.set.len(), reference_set.set.len());
+              //  println!("{i} {j}");
+              //  println!("{} {}", self.set.len(), reference_set.set.len());
                 
                 matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(), reference_set.get_nth_motif(j)));
             }
@@ -6055,6 +6059,29 @@ impl SetTraceDef {
     
     pub fn extract_lowest_bic_set(&self, data_ref: &AllDataUse, tail_start: usize) -> &StrippedMotifSet {
         self.trace[(self.len()-tail_start)..self.len()].iter().min_by(|a,b| a.bic(data_ref).partial_cmp(&b.bic(data_ref)).expect("No NaNs allowed in prior")).expect("trace should have at least one motif set")
+    }
+
+    fn posterior_probability_setup(&self, minimum_density_to_include: f64) -> Vec<&StrippedMotifSet> {
+
+        //const BIGGEST_TRACKABLE_POST_DIFF: f64 = -708.4; //ln(minimum postive f64), rounded DOWN. Some of these could get rounded to zero, but I care more to capture everything I can than to cut everything I can
+
+        if self.trace.len() == 0 { return vec![];}
+
+        let max_posterior_density = self.trace.iter().max_by(|x,y| x.ln_post.partial_cmp(&y.ln_post).unwrap()).expect("returned if we were empty").ln_post;
+
+        self.trace.iter().filter_map(|a| {
+
+            if a.ln_post < minimum_density_to_include {None} else {
+                Some(a)
+            }
+        }).collect()
+    }
+
+    pub fn evaluate_posterior_probability(&self, minimum_density_to_include: f64, evaluator: fn(&StrippedMotifSet) -> f64) -> f64 {
+
+        let sets_that_matter_and_posts = self.posterior_probability_setup(minimum_density_to_include);
+
+        sets_that_matter_and_posts.iter().map(|a| evaluator(a)).sum::<f64>()/(sets_that_matter_and_posts.len() as f64)
     }
 
     /// Returns a vector of `[self.trace_min_dist()]` for each `[Motif]` in `reference_mots` 

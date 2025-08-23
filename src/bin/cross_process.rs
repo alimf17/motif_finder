@@ -74,6 +74,16 @@ struct Cli {
     #[arg(short, long, num_args = 2.., value_delimiter = ' ')]
     motif_set_files: Vec<String>,
 
+    /// This is the file where the Aitchison distance matrix should be output
+    /// Note that the values are tab delimited
+    #[arg(short, long)]
+    distance_matrix: String,
+
+    /// This is the file where the binding distance matrix should be output
+    /// Note that this is table delimited
+    #[arg(short, long)]
+    binding_matrix: String,
+
     /// This is an optional argument if you want to annotate your occupancy
     /// traces with gene loci and analyze go terms. This should point to a gff file
     #[arg(short, long)]
@@ -91,7 +101,7 @@ struct Cli {
 
 pub fn main() {
 
-    let Cli { comparison_file, motif_set_files, gff_file, additional_annotations_file} = Cli::parse();
+    let Cli { comparison_file, motif_set_files, distance_matrix, binding_matrix, gff_file, additional_annotations_file} = Cli::parse();
 
     let motif_set_files: Vec<(String, String)> = parse_set_names_and_files(motif_set_files).expect("file parsing went wrong");
 
@@ -126,9 +136,11 @@ pub fn main() {
     let size_of_motif = std::mem::size_of::<Motif>();
 
 
-    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set(&b.1).into_iter().enumerate().map(|(i,d)|  d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.2.best_motif_string(), ((c.2 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set(&b.1).into_iter().enumerate().map(|(i,d)|  d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), if c.1 {c.2.rev_complement_best_motif() } else {c.2.best_motif_string()}, ((c.2 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
 
     println!("{:?}", assignments);
+
+    let mut sorted_matches: Vec<(String, usize, String,  String, usize, String, f64)> = Vec::with_capacity(assignments.len());
 
     //Now, what I have in assignments is a three nested vector. The index of the
     //first layer is the index of the motif set A, the index of the second layer 
@@ -143,7 +155,48 @@ pub fn main() {
     let mot_rows: Vec<String> = motif_sets.iter().map(|set| set.1.set_iter().map(|a| a.best_motif_string())).flatten().collect();
 
     let header: Vec<String> = motif_sets.iter().map(|s| format!("{0: <30}", s.0)).collect();
-    println!("Motif getting matched\t(sequence)            \t{}", header.join("\t\t"));
+
+    let mut assignment_file = std::fs::File::create(&distance_matrix).unwrap();
+    let _ = assignment_file.write(format!("Motif getting matched\t(sequence)            \t{}\n", header.join("\t\t")).as_bytes());
+
+    for (which_set, set_assignment) in assignments.iter().enumerate() {
+
+        let num_motifs = motif_sets[which_set].1.num_motifs();
+        
+        let set_name = motif_sets[which_set].0.clone();
+        
+        for i in 0..num_motifs {
+            let best_motif = motif_sets[which_set].1.get_nth_motif(i).best_motif_string();
+            let match_list: Vec<String> = set_assignment.iter().enumerate().map(|(j, compared_set)| {
+                if let Some(matcher) = &compared_set[i] {
+                    if which_set < j && matcher.0 != 0.0{
+                    let mut alter_name = matcher.2.clone();
+                    alter_name = alter_name.split_whitespace().collect::<Vec<_>>().join(" ");
+                    sorted_matches.push((set_name.clone(), i, best_motif.clone(), header[j].clone(), matcher.3, alter_name, matcher.0));
+                    }
+                    format!("{}: {} ({:.02})", matcher.3, matcher.2, matcher.0)
+                } else { "None".to_owned()}
+            }).collect();
+            let _ = assignment_file.write(format!("{set_name} Motif {i}\t({best_motif})\t{}\n", match_list.join("\t\t")).as_bytes()); //Insert the matching motifs here
+           
+        }
+
+    }
+
+    sorted_matches.sort_unstable_by(|a,b| a.6.partial_cmp(&b.6).unwrap());
+
+    
+    let filtered_matches = sorted_matches.iter().filter_map(|a| if a.6 < 6.25 {Some(format!("{:?}", a))} else {None}).collect::<Vec<_>>().join("\n");
+
+    println!("{}", filtered_matches);
+/*
+
+    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_binding(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+
+    println!("{:?}", assignments);
+    
+    let mut assignment_file = std::fs::File::create(&binding_matrix).unwrap();
+    let _ = assignment_file.write(format!("Motif getting matched\t(sequence)            \t{}\n", header.join("\t\t")).as_bytes());
 
     for (which_set, set_assignment) in assignments.iter().enumerate() {
 
@@ -156,15 +209,13 @@ pub fn main() {
             let match_list: Vec<String> = set_assignment.iter().map(|compared_set| {
                 if let Some(matcher) = &compared_set[i] { format!("{}: {} ({:.02})", matcher.3, matcher.2, matcher.0)} else { "None".to_owned()}
             }).collect();
-            println!("{set_name} Motif {i}\t({best_motif})\t{}", match_list.join("\t\t")); //Insert the matching motifs here
+            let _ = assignment_file.write(format!("{set_name} Motif {i}\t({best_motif})\t{}\n", match_list.join("\t\t")).as_bytes()); //Insert the matching motifs here
         }
 
-    }
+    }*/
 
 
-    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_rmse_data(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
 
-    println!("{:?}", assignments);
 }
 
 
