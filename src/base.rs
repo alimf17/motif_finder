@@ -3131,14 +3131,40 @@ impl<'a> MotifSet<'a> {
  
     pub fn set_from_bincode<R: Rng+?Sized>(data_ref: &'a AllDataUse<'a>, bincode_file: &str, _rng: &mut R) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
-        let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( fs::File::open(bincode_file)?);
+        let mut bincode_file_handle = fs::File::open(bincode_file)?;
 
         let mut buffer: Vec<u8> = Vec::new();
 
         bincode_file_handle.read_to_end(&mut buffer)?;
 
-        let (prior_state, _bytes_read): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, config::standard())?;
-
+        let (prior_state, _bytes_read): (StrippedMotifSet, usize) = match bincode::serde::decode_from_slice(&buffer, config::standard()) {
+            Ok(a) => a,
+            Err(_) => {
+          
+                let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( fs::File::open(bincode_file)?);
+                buffer.clear();
+                bincode_file_handle.read_to_end(&mut buffer)?;
+                bincode::serde::decode_from_slice(&buffer, config::standard())?
+            },
+        };
+/*
+        let (prior_state, _bytes_read): (StrippedMotifSet, usize) = bincode::serde::decode_from_slice(&buffer, config::standard()).unwrap_or_else(|_| {
+            //let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( fs::File::open(bincode_file).expect("Would have already broken if we didn't get here"));
+            
+            let mut bincode_file_handle: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( fs::File::open(bincode_file)?);
+            buffer.clear();
+            bincode_file_handle.read_to_end(&mut buffer)?;
+            bincode::serde::decode_from_slice(&buffer, config::standard())?
+            /*match bincode_file_handle.read_to_end(&mut buffer) {
+                Ok(_) => {}
+                Err(e) => return Err(Box::new(e)),
+            };
+            match bincode::serde::decode_from_slice(&buffer, config::standard()) {
+                Ok(p) => p,
+                Err(e) => return Err(Box::new(e)),
+            }*/
+        });
+*/
         Ok(prior_state.reactivate_set(data_ref))
 
     }
@@ -6101,7 +6127,7 @@ impl SetTraceDef {
         }).collect()
     }
 
-    pub fn evaluate_posterior_probability(&self, minimum_density_to_include: f64, evaluator: fn(&StrippedMotifSet) -> f64) -> f64 {
+    pub fn evaluate_posterior_probability(&self, minimum_density_to_include: f64, evaluator: &dyn Fn(&StrippedMotifSet) -> f64) -> f64 {
 
         let sets_that_matter_and_posts = self.posterior_probability_setup(minimum_density_to_include);
 
