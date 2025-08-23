@@ -3683,7 +3683,15 @@ impl<'a> MotifSet<'a> {
 
         let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
 
-        let new_mot = Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
+        let proposal_method = rng.gen_range(0_usize..3);
+
+        let (new_mot, base_dist) = match proposal_method {
+                0 => (Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng), &BASE_CHOOSE_DIST),
+                1 => (Motif::from_motif_prior(motif_choice, self.data_ref.height_dist(), rng), &BASE_PENALTY_PRIOR),
+                2 => (Motif::from_motif_alt(motif_choice, self.data_ref.height_dist(), rng), &BASE_CHOOSE_ALT),
+                _ => unreachable!(),
+        };
+        //let new_mot = Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
@@ -3693,9 +3701,9 @@ impl<'a> MotifSet<'a> {
 
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {base_dist.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -3720,8 +3728,18 @@ impl<'a> MotifSet<'a> {
 
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
+            let contraction_method = rng.gen_range(0_usize..3);
+
+            let base_dist = match contraction_method {
+                0 => &BASE_CHOOSE_DIST,
+                1 => &BASE_PENALTY_PRIOR,
+                2 => &BASE_CHOOSE_ALT,
+                _ => unreachable!(),
+            };
+
+
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_DIST.energy_ln_pmf(a)
+                base_dist.energy_ln_pmf(a)
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
 
@@ -3761,28 +3779,30 @@ impl<'a> MotifSet<'a> {
 
         let mut new_set = self.derive_set();
 
-        let minmer_choice = self.data_ref.rand_minmer_by_propensity(rng);
-
         let k = rng.gen_range(MIN_BASE..=MAX_BASE);
 
-        let (pot_kmer_choice, num) = self.data_ref.data().seq().rand_kmer_start_minmer_and_number(minmer_choice, k, rng);
+        let motif_choice = self.data_ref.data().seq().random_valid_motif(k, rng);
+        
+        let proposal_method = rng.gen_range(0_usize..3);
 
-        let Some(kmer_choice) = pot_kmer_choice else {return None;};
+        let (new_mot, base_dist) = match proposal_method {
+                0 => (Motif::from_motif(motif_choice, self.data_ref.height_dist(), rng), &BASE_CHOOSE_DIST),
+                1 => (Motif::from_motif_prior(motif_choice, self.data_ref.height_dist(), rng), &BASE_PENALTY_PRIOR),
+                2 => (Motif::from_motif_alt(motif_choice, self.data_ref.height_dist(), rng), &BASE_CHOOSE_ALT),
+                _ => unreachable!(),
+        };
 
-        let motif_choice = self.data_ref.data().seq().idth_unique_kmer_vec(k, kmer_choice);
-
-        let new_mot = Motif::from_motif_alt(motif_choice, self.data_ref.height_dist(), rng); //There may not always be a place with decent propensities
 
 
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
         //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
-        let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+        let pick_motif_prob = (-(self.data_ref.data().seq().number_unique_kmers(k) as f64)).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
-        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {base_dist.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -3807,23 +3827,27 @@ impl<'a> MotifSet<'a> {
 
             //let pick_prob = (self.nth_motif(rem_id).len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
+            let contraction_method = rng.gen_range(0_usize..3);
+
+            let base_dist = match contraction_method {
+                0 => &BASE_CHOOSE_DIST,
+                1 => &BASE_PENALTY_PRIOR,
+                2 => &BASE_CHOOSE_ALT,
+                _ => unreachable!(),
+            };
+
+
             let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {
-                BASE_CHOOSE_ALT.energy_ln_pmf(a)
+                base_dist.energy_ln_pmf(a)
             } 
             else {0.0}).sum::<f64>()).sum::<f64>();
        
 
-            const MINMER_MASK: u64 = (1_u64 << ((MIN_BASE * 2) as u64)) - 1;
-
-            let minmer_choice = Sequence::kmer_to_u64(&new_mot.best_motif()) & MINMER_MASK;
-
-            let num = self.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
-
             //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
-            let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+            let pick_motif_prob = (-(self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64)).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
 
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+            let ln_gen_prob = self.data_ref.height_dist().ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
