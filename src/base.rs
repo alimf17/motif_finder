@@ -6561,7 +6561,6 @@ impl<'a> TemperSetTraces<'a> {
         }
 
         let data_seq = self.parallel_traces[0].0.data_ref;
-        let list_of_nulls = (0..data_seq.null_seq().num_sequence_blocks()).collect::<Vec<_>>();
 
 
         
@@ -6608,8 +6607,8 @@ impl<'a> TemperSetTraces<'a> {
         println!("Even swaps: {:?}", even_swaps);
 
         println!("Ln posteriors of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.ln_posterior()).collect::<Vec<f64>>());
-        println!("distances of each trace after swaps: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.signal_rmse()).collect::<Vec<f64>>());
-        println!("distances of each trace after swaps accounting noise: {:?}", self.parallel_traces.iter_mut().map(|x| x.0.active_set.magnitude_signal_with_noise()).collect::<Vec<f64>>());
+        //println!("distances of each trace after swaps: {:?}", self.parallel_traces.par_iter_mut().map(|x| x.0.active_set.signal_rmse()).collect::<Vec<f64>>());
+        //println!("distances of each trace after swaps accounting noise: {:?}", self.parallel_traces.par_iter_mut().map(|x| x.0.active_set.magnitude_signal_with_noise()).collect::<Vec<f64>>());
 
         println!("tf numbs of each treach after swaps: {:?}", self.parallel_traces.iter().map(|x| x.0.active_set.set.len()).collect::<Vec<usize>>());
 
