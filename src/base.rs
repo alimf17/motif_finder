@@ -2136,7 +2136,7 @@ impl Motif {
 
     }
 
-    fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
+    /*fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
 
@@ -2286,8 +2286,66 @@ impl Motif {
         final_binds
 
 
+    } */
+
+    fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
+
+        if seq.seq_blocks().len() == 0 { return Vec::new();}
+
+        let cutoff = -min_height-distribution_cutoff+0.01;
+
+        let mut checks: Vec<f64> = Vec::with_capacity(CAPACITY_FOR_NULL);
+
+        for &kmer_u64 in seq.kmer_list_borrow(self.len()).iter() {
+
+            let mut kmer_track = kmer_u64;
+            let mut reverse_kmer_track = crate::sequence::reverse_complement_u64_kmer(kmer_u64, self.len());
+
+            let mut forward_score: f64 = 0.0;
+            let mut reverse_score: f64 = 0.0;
+
+            for i in 0..self.len() {
+
+            //SAFETY: the result of this bit manipulation must always be at most 3
+            
+                if forward_score >= cutoff {
+                    let for_bp = unsafe{ Bp::usize_to_bp((kmer_track & 3) as usize)};
+                    forward_score += unsafe{ self.pwm.get_unchecked(i)[for_bp]};
+                    kmer_track = kmer_track >> 2;
+                }
+                if reverse_score >= cutoff {
+                    let rev_bp = unsafe{ Bp::usize_to_bp((reverse_kmer_track & 3) as usize)};
+                    reverse_score += unsafe{self.pwm.get_unchecked(i)[rev_bp]};
+                    reverse_kmer_track >> 2;
+                }
+            }
+            
+            if forward_score >= cutoff || reverse_score >= cutoff {
+                let pre_count = seq.kmer_count(kmer_u64, self.len()).expect("we selected kmer_u64 because it exists");
+                let rev_comp = crate::sequence::reverse_complement_u64_kmer(kmer_u64, self.len());
+                //If the reverse complement is the same as the motif, then we double counted the
+                //motif, and pre_count is strictly even AND we only want to count half of it. If
+                //the reverse complement is not the same, then the count could be even or odd. If
+                //it's odd, we want to add a count for the odd number, but only to one. Thankfully,
+                //the integers have a strict order
+                let iter = if kmer_u64 == rev_comp {pre_count} else{pre_count/2 + (pre_count & 1) & ((kmer_u64 >= rev_comp) as usize)};
+                #[cfg(test)]
+                println!("test null {} {} {} {} {:?}", kmer_u64, rev_comp, iter, pre_count, seq.kmer_count(rev_comp, self.len()));
+                for _ in 0..pre_count {checks.push(forward_score.max(reverse_score)+self.peak_height()+distribution_cutoff)};
+                //for _ in 0..iter {checks.push(forward_score.max(reverse_score)+self.peak_height()+distribution_cutoff)};
+            }
+       
+            if checks.len() >= CAPACITY_FOR_NULL {
+                //_ = checks.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+                //println!("failing");
+                return vec![f64::INFINITY, f64::INFINITY];
+            }
+        }
+
+        checks.sort_unstable_by(|g,h| h.partial_cmp(&g).unwrap());
+
+        checks
     }
-    
     fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
@@ -3418,7 +3476,8 @@ impl<'a> MotifSet<'a> {
         } else {
             //Accept according to the metropolis criterion
             let thresh: f64 = rng.gen();
-            thresh < diff_ln_like.exp()
+            let a = thresh < diff_ln_like.exp();
+            a
         }
     }
 
@@ -3520,6 +3579,9 @@ impl<'a> MotifSet<'a> {
     }
 
     pub fn ln_likelihood(&self) -> f64 {
+        //println!("made it to like");
+        //println!("nulls {:?}", self.null_peak_scores());
+        //println!("noise {:?}", self.signal.produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).extraneous_resids());
         //println!("nulls {:?} ad_calc {}", self.null_peak_scores(), Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer())));
         Noise::ad_like((self.signal).produce_noise_with_extraneous(self.data_ref, &self.null_peak_scores()).ad_calc(self.data_ref.data().spacer()))
     }
@@ -5621,6 +5683,7 @@ impl<'a> SetTrace<'a> {
 
         let mut which_variant = SAMPLE_VARIANTS[which_move].sample(rng); 
 
+        //println!("get to advance {} {}", self.thermo_beta, which_variant);
         //Can't use non const values in match statements. Using a bajillion if-elses 
         
         let potential_set_and_accept = match which_move {
@@ -5679,7 +5742,8 @@ impl<'a> SetTrace<'a> {
             _ => unreachable!(),
 
         };
- 
+
+        //println!("execute move");
 
         //attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
         //                            distances_per_attempted_move
@@ -5693,7 +5757,9 @@ impl<'a> SetTrace<'a> {
                 (setting, Some((tracked, accept)))
             }
         };
-        
+       
+        //println!("measure move");
+
         if let Some(tracker) = track {
             let total_id = VARIANT_CUMULATIVE[which_move]+which_variant;
             //println!("total id {total_id}");
@@ -5701,6 +5767,7 @@ impl<'a> SetTrace<'a> {
         };
 
 
+        //println!("doc motion");
         if !burning_in {
             self.sparse_count = (self.sparse_count+1) % self.sparse;
 
@@ -5717,6 +5784,7 @@ impl<'a> SetTrace<'a> {
             }
         }
 
+        //println!("sparse");
 
         //NOTE: we do NOT include this in the actual acceptance steps on purpose.
         //      The motif finder must randomly choose which null sequence it's going to pay attention to for sampling
@@ -6552,14 +6620,15 @@ impl<'a> TemperSetTraces<'a> {
     /// all adjacent pairs starting with the index `0` trace
     pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, no_motif_change: bool, rng_maker: fn() -> R) {
 
-        for _ in 0..iters_before_swaps {
        
+        //for _ in 0..iters_before_swaps {
             self.parallel_traces.par_iter_mut().for_each(|(set, track, _)| {
                 let mut rng = rng_maker();
-                set.advance(track.as_mut(), no_motif_change, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
+                for _ in 0..iters_before_swaps {
+                    set.advance(track.as_mut(), no_motif_change, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
+                }
             });
-        }
-
+        //}
         let data_seq = self.parallel_traces[0].0.data_ref;
 
 
@@ -7208,7 +7277,7 @@ mod tester{
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block)).collect::<Vec<_>>()));
         
 
         let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
@@ -7500,7 +7569,7 @@ mod tester{
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block)).collect::<Vec<_>>()));
         
 
         let _pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
@@ -8140,7 +8209,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>(); 
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, (bp_per_block-MAX_BASE))).collect::<Vec<_>>()) );
         
 
         //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
@@ -8191,9 +8260,9 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let mut motif: Motif = Motif::from_motif(sequence.return_bases(0,0,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
+        let mut motif: Motif = Motif::from_motif_alt(sequence.return_bases(0,0,MIN_BASE+6), data_seq.height_dist(), &mut rng); //sequence
 
-        let motif2: Motif = Motif::from_motif(sequence.return_bases(0,2,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
+        let motif2: Motif = Motif::from_motif_alt(sequence.return_bases(0,2,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
 
         let start = Instant::now();
 
@@ -8444,12 +8513,13 @@ mod tester{
 
             //println!("initial bases {:?}", null_seq.return_bases(i, 0, 45));
 
+            println!("null {}", null_block_lens[i]);
             for j in 0..(null_block_lens[i]-motif.len()) {
 
                 let mot = null_seq.return_bases(i, j, motif.len());
                 let (prop, rev) = unsafe{ motif.prop_binding(&mot)};
 
-                if prop > (-MIN_HEIGHT) { 
+                if prop > (-data_seq.min_height()+0.01) { 
                 
                     println!("sig");
                     significant_binds.push(prop+motif.peak_height); 
@@ -8463,6 +8533,7 @@ mod tester{
                     let mot_u64 = Sequence::kmer_to_u64(&mot);
                     println!("{i} {j} {rev} {:?} {} {:?}", mot, mot_u64, (MIN_BASE..=motif.len()).map(|l| null_seq.kmer_count(mot_u64 & (4_u64.pow(l as u32)-1), l)).collect::<Vec<_>>());
                     assert!(null_seq.kmer_count(mot_u64, motif.len()).is_some());
+                    println!("{:?}", null_seq.kmer_count(mot_u64, motif.len()));
 
                     binds_checker.push((i, j, null_block_lens[i],mot_string, rev, prop+motif.peak_height));
                     //println!("sig calc {i} {j} prop {prop} seq {:?}", mot);
@@ -8498,7 +8569,7 @@ mod tester{
         let _wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
         let wave_start_bases: Vec<usize> = vec![0, 9324];
-        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens);
+        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens.clone(), &((0..wave_lens.len()).map(|i| (i, 0, wave_lens[i])).collect::<Vec<_>>()));
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
         let wave_background = Background::new(0.25, 2.64, 1.0).unwrap();
 
@@ -8529,7 +8600,7 @@ mod tester{
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
-        let small: Sequence = Sequence::new_manual(small_block, small_lens);
+        let small: Sequence = Sequence::new_manual(small_block, small_lens.clone(),  &((0..small_lens.len()).map(|i| (i, 0, small_lens[i])).collect::<Vec<_>>()));
         let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6,-0.1], &small, 5).unwrap();
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -8704,7 +8775,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone());
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
 
 
         //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();

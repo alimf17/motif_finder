@@ -1077,6 +1077,8 @@ impl NullSequence {
         };
 
         seq.initialize_kmer_count();
+        #[cfg(test)]
+        println!("count lens {:?} list_lens {:?}", seq.kmer_counts.iter().map(|a| a.len()).collect::<Vec<_>>(), seq.kmer_lists.iter().map(|a| a.len()).collect::<Vec<_>>());
         seq
 
     }
@@ -1184,6 +1186,10 @@ impl NullSequence {
         self.kmer_counts[len-MIN_BASE].get(&kmer).map(|a| *a) 
     }
 
+    pub(crate) fn kmer_list_borrow(&self, len: usize) -> &Vec<u64> {
+
+        &self.kmer_lists[len-MIN_BASE]
+    }
     /* pub struct NullSequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,
@@ -1349,7 +1355,7 @@ mod tests {
 
         let blocked = vec![vec![3,0,3,0,3,3,3,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0], vec![2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], vec![3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,3,3,0,0,0,1,2]];
 
-        let press = Sequence::new(blocked);
+        let press = Sequence::new(blocked.clone(), &(blocked.iter().map(|a| (0..a.len()).filter_map(|i| if i % 5 == 0 {Some(i)} else {None}).collect::<Vec<_>>()).collect::<Vec<_>>()));
 
         let bases = BP_ARRAY;
 
@@ -1373,7 +1379,7 @@ mod tests {
 
         let alt_block = vec![vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],vec![2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
 
-        let press2 = Sequence::new(alt_block);
+        let press2 = Sequence::new(alt_block.clone(), &(alt_block.iter().map(|a| (0..a.len()).filter_map(|i| if i % 5 == 0 {Some(i)} else {None}).collect::<Vec<_>>()).collect::<Vec<_>>()));
 
         let atemers = press2.generate_kmers(8);
 
@@ -1416,7 +1422,7 @@ mod tests {
         //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (0..block_n).map(|_| bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens);
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
 
         let _kmer_c = sequence.generate_kmers(MAX_BASE);
 

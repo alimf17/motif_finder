@@ -708,8 +708,9 @@ impl<'a> Waveform<'a> {
         //Is our potential binding strong enough to even attempt to try extraneous binding?
         let caring_threshold = f64::EPSILON;//4.0*background.noise_spread_par();
 
+        if scaled_heights_array.iter().any(|a| a.is_infinite()) { return vec![f64::INFINITY; 1];}
         let extraneous_bindings: Vec<_> = scaled_heights_array.iter().filter(|&a| *a > caring_threshold).collect();
-
+        
         //Do we have any extraneous binding that we need to account for?
         if extraneous_bindings.len() == 0 { return Vec::new();}
 
@@ -774,6 +775,8 @@ impl<'a> Waveform<'a> {
     pub(crate) fn produce_noise_with_extraneous<'b>(&self, data_ref: &'b AllDataUse, extraneous_bind_array: &[f64]) -> Noise<'b> {
 
         let mut noise = self.produce_noise(data_ref);
+
+        let mut extra = extraneous_bind_array.to_vec();
 
 
         noise.replace_extraneous(extraneous_bind_array.to_vec());
@@ -1718,9 +1721,10 @@ impl<'a> Noise<'a> {
     //It works on the CDF of the |residuals|
     pub(crate) fn ad_calc(&self, spacer: usize) -> f64 {
 
+        //println!("extra {} cap {}", self.extraneous_resids.len(), CAPACITY_FOR_NULL*MAX_TF_NUM);
         //If our null binding is potentially exceeding our ability to track it, this motif set
         //should be ruled impossible. 
-        if self.extraneous_resids.len() >= CAPACITY_FOR_NULL*MAX_TF_NUM {
+        if  self.extraneous_resids.len() >= CAPACITY_FOR_NULL*MAX_TF_NUM {
             return f64::INFINITY;
         }
         //let time = Instant::now();
@@ -1729,7 +1733,7 @@ impl<'a> Noise<'a> {
         //I don't need to take the absolute value here because I always generate the positive
         //values
         let mut extras = Waveform::generate_extraneous_binding(&self.background, spacer, &self.extraneous_resids);
-
+        if extras.get(0).map_or(false, |x| x.is_infinite()) { return f64::INFINITY;}
         //let mut extras: Vec<f64> = self.extraneous_resids();
         forward.append(&mut extras);
         drop(extras);
@@ -1878,7 +1882,8 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
         fn real_wave_check(){
             let k = Kernel::new(5.0, 2.0, KernelWidth::Wide, KernelVariety::Gaussian);
             //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
-            let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], vec![84, 68, 72]);
+            let block_lens = vec![84_usize, 68, 72];
+            let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], block_lens.clone(), &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
             let mut signal = Waveform::create_zero(&seq, 5);
 
             let zeros: Vec<usize> = vec![0, 465, 892]; //Blocks terminate at bases 136, 737, and 1180

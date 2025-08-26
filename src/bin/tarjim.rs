@@ -70,6 +70,10 @@ struct Cli {
     /// It will be ignored if you supply a valid initial condition
     #[arg(short, long)]
     starting_tf: Option<usize>,
+
+    ///This sets a custom number of threads to use
+    #[arg(short, long)]
+    logical_cpus: Option<usize>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -103,7 +107,11 @@ fn main() {
     //   as implied by the Fasta and data files will be checked against the name in the SetTraceDef.  
     //   If they're not identical, the program will panic on the spot -run , optional 
 
-    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, condition_type: initial_type, file_initial: initial_file, starting_tf}= Cli::parse();
+    let Cli { name: run_name, input: data_file, output: output_dir, advances: num_advances, beta: mut min_thermo_beta, trace_num: num_intermediate_traces, condition_type: initial_type, file_initial: initial_file, starting_tf, logical_cpus: custom_cores}= Cli::parse();
+
+    if let Some(cores) = custom_cores {
+        rayon::ThreadPoolBuilder::new().num_threads(cores.min(num_intermediate_traces+2)).build_global().unwrap();
+    }
 
     min_thermo_beta = min_thermo_beta.abs();
 
@@ -233,6 +241,7 @@ fn main() {
         
         initialization_chains.iter_and_swap(steps_per_exchange_attempt, false, rand::thread_rng);
 
+        println!("finished iter");
         if step % save_step == 0 {
 
             let mut try_save_trace: usize = 0;
