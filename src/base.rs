@@ -1913,6 +1913,24 @@ impl Motif {
         forward_score
 
     }
+    
+    fn calc_8mer_prefix_binding(&self, kmer: u64) -> f64 {
+
+        let mut kmer_track = kmer;
+
+        let mut forward_score: f64 = 0.0;
+
+        for i in 0..8 {
+
+            //SAFETY: the result of this bit manipulation must always be at most 3
+            let for_bp = unsafe{ Bp::usize_to_bp((kmer_track & 3) as usize)};
+            kmer_track = kmer_track >> 2;
+            forward_score += self.pwm[i][for_bp];
+        }
+
+        forward_score
+
+    }
 
     fn return_bind_score(&self, seq: &Sequence) -> Vec<f64> {
 
@@ -2154,7 +2172,7 @@ impl Motif {
 
         
         let mut forward_checks: Vec<(u64, f64)> = Vec::with_capacity(CAPACITY_FOR_NULL);
-
+/*
         for sixmer in 0_u64..=0b11_11_11_11_11_11 {
 
             let forward_score = self.calc_6mer_prefix_binding(sixmer);
@@ -2181,11 +2199,41 @@ impl Motif {
                 let b1 = unsafe{ Bp::usize_to_bp((twomer & 0b_00_11) as usize)};
                 let b2 = unsafe{ Bp::usize_to_bp(((twomer & 0b_11_00) >> 2) as usize)};
                 //SAFETY: MIN_BASE is set to 8, so elements 6 and 7 must exist
+                //NOTE: THIS IS AN EXTREMELY IMPORTANT SAFETY INVARIANT
+                //UNDER ABSOLUTELY NO CIRCUMSTANCES SHOULD YOU DECREASE MIN_BASE
+                //EVER, AT ALL PERIOD. DO NOT DO IT. 
                 let new_score = unsafe {score + self.pwm.get_unchecked(6)[b1]+self.pwm.get_unchecked(7)[b2]};
                 if new_score >= cutoff { Some((eightmer, new_score))} else {None}
             })
         }).flatten().collect();
-        
+  */
+        let mut forward_checks: Vec<(u64, f64)> = (0_u64..=0b11_11_11_11_11_11_11_11).filter_map(|eightmer| {
+            if seq.kmer_count(eightmer, 8).is_none() {None} else {
+                let score = self.calc_8mer_prefix_binding(eightmer);
+                if score>= cutoff {Some((eightmer, score))} else {None}
+            }
+        }).collect();
+/*
+         let mut forward_checks: Vec<(u64, f64)> = (0_u64..=0b11_11_11_11_11_11_11_11).filter_map(|eightmer| {
+           let score = self.calc_8mer_prefix_binding(eightmer);
+           if score < cutoff || seq.kmer_count(eightmer, 8).is_none() {None} else {
+                Some((eightmer, score))
+           } 
+        }).collect();
+       */ 
+
+        forward_checks.sort_unstable_by(|g,h| h.1.partial_cmp(&g.1).unwrap());
+
+
+        if forward_checks.len() > CAPACITY_FOR_NULL {
+        check_cutoff = forward_checks[CHECK_CUTOFF_INDEX].1 + ((len-6) as f64)*SCORE_THRESH;
+        let forward_partition = forward_checks.partition_point(|x| x.1 >= check_cutoff);
+        if forward_partition < forward_checks.len() {
+            _ = forward_checks.drain(forward_partition..).collect::<Vec<_>>();
+        }
+        }
+
+
         let mut accounted_length: usize = 8;
 
         while accounted_length < len {

@@ -112,6 +112,7 @@ fn main() {
     if let Some(cores) = custom_cores {
         rayon::ThreadPoolBuilder::new().num_threads(cores.min(num_intermediate_traces+2)).build_global().unwrap();
     }
+    println!("threads after {}", rayon::current_num_threads());
 
     min_thermo_beta = min_thermo_beta.abs();
 
@@ -136,7 +137,7 @@ fn main() {
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
-    let steps_per_exchange_attempt: usize = 100;
+    let steps_per_exchange_attempt: usize = 200;
     
     let save_step = 10usize;
     
@@ -242,7 +243,7 @@ fn main() {
         initialization_chains.iter_and_swap(steps_per_exchange_attempt, false, rand::thread_rng);
 
         println!("finished iter");
-        if step % save_step == 0 {
+        if step % save_step == 0 || step == pushes-1 {
 
             let mut try_save_trace: usize = 0;
             let save_trial: usize = 5;
