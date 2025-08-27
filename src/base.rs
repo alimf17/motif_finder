@@ -2136,7 +2136,7 @@ impl Motif {
 
     }
 
-    /*fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
+    fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
 
@@ -2277,8 +2277,9 @@ impl Motif {
             
 
         //This can technically happen if we add more than one element at the end
-        if final_binds.len() > CAPACITY_FOR_NULL { 
-            _ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+        if final_binds.len() >= CAPACITY_FOR_NULL { 
+            //_ = final_binds.drain(CAPACITY_FOR_NULL..).collect::<Vec<_>>();
+            return vec![f64::INFINITY, f64::INFINITY];
         }
 
 
@@ -2286,9 +2287,8 @@ impl Motif {
         final_binds
 
 
-    } */
-
-    fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
+    } 
+    /*fn return_any_null_binds_by_hamming(&self, seq: &NullSequence, min_height:f64, distribution_cutoff: f64) -> Vec<f64> {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
 
@@ -2345,7 +2345,7 @@ impl Motif {
         checks.sort_unstable_by(|g,h| h.partial_cmp(&g).unwrap());
 
         checks
-    }
+    }*/
     fn return_any_null_binds_by_hamming_no_limit(&self, seq: &NullSequence, min_height: f64, distribution_cutoff: f64) -> Vec<f64> {
 
         if seq.seq_blocks().len() == 0 { return Vec::new();}
@@ -5743,7 +5743,7 @@ impl<'a> SetTrace<'a> {
 
         };
 
-        //println!("execute move");
+       // println!("execute move");
 
         //attempts_per_move: &mut [usize], successes_per_move: &mut [usize], immediate_failures_per_move: &mut [usize],
         //                            distances_per_attempted_move
@@ -6626,6 +6626,7 @@ impl<'a> TemperSetTraces<'a> {
                 let mut rng = rng_maker();
                 for _ in 0..iters_before_swaps {
                     set.advance(track.as_mut(), no_motif_change, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
+
                 }
             });
         //}
@@ -8260,7 +8261,7 @@ mod tester{
 
         //println!("{:?}", wave.raw_wave());
 
-        let mut motif: Motif = Motif::from_motif_alt(sequence.return_bases(0,0,MIN_BASE+6), data_seq.height_dist(), &mut rng); //sequence
+        let mut motif: Motif = Motif::from_motif_alt(sequence.return_bases(0,0,MIN_BASE+7), data_seq.height_dist(), &mut rng); //sequence
 
         let motif2: Motif = Motif::from_motif_alt(sequence.return_bases(0,2,MAX_BASE), data_seq.height_dist(), &mut rng); //sequence
 
