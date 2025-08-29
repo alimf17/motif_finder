@@ -3102,7 +3102,6 @@ impl<'a> MotifSet<'a> {
 
         }
 
-        if set.len() == 0 { return Err(Box::new(MemeParseError::GivesEmptySet));}
 
         let mut signal = data_ref.data().derive_zero();
 
@@ -3110,7 +3109,10 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0))).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0)))
+                                                                    .filter_map(|a| if a.1[0].is_finite() {Some(a)} else {None}).collect();
+        
+        if set_with_nulls.len() == 0 { return Err(Box::new(MemeParseError::GivesEmptySet));}
 
         let mut full_set = MotifSet {
             set: set_with_nulls,
@@ -3119,8 +3121,9 @@ impl<'a> MotifSet<'a> {
             data_ref: data_ref, 
         };
 
-        let _ = full_set.ln_posterior();
+        let test = full_set.ln_posterior();
 
+        if test.is_infinite() { return Err(Box::new(MemeParseError::GivesEmptySet));}
         Ok(full_set)
 
     }
@@ -3833,13 +3836,13 @@ impl<'a> MotifSet<'a> {
         //let pick_prob = (new_mot.len() as f64)*(-(BASE_L as f64).ln()-((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
         //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
-        let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+        let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln());
 
 
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {base_dist.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -3887,10 +3890,10 @@ impl<'a> MotifSet<'a> {
             let num = self.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
 
             //Probability of picking the best motif we did: P(pick minmer)*P(pick length k)*P(pick the kmer| starting minmer AND k)
-            let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+            let pick_motif_prob = self.data_ref.propensity_minmer(minmer_choice).ln()-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln());
 
 
-            let ln_gen_prob = HEIGHT_PROPOSAL_DIST.ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+            let ln_gen_prob = self.data_ref.height_dist().ln_pdf(self.nth_motif(rem_id).peak_height)+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -3938,7 +3941,7 @@ impl<'a> MotifSet<'a> {
         //Probability of picking the particular base vector we did GIVEN the best motif we already picked
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&b| if b < 0.0 {base_dist.energy_ln_pmf(b)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+        let ln_gen_prob = self.data_ref.height_dist().ln_pdf(new_mot.peak_height)+pick_prob+pick_motif_prob;
         //let h_prior = new_mot.height_prior();
 
         let ln_post = new_set.add_motif(new_mot);
@@ -3983,7 +3986,7 @@ impl<'a> MotifSet<'a> {
             let pick_motif_prob = (-(self.data_ref.data().seq().number_unique_kmers(self.nth_motif(rem_id).len()) as f64)).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln();
 
 
-            let ln_gen_prob = self.data_ref.height_dist().ln_pdf(self.nth_motif(rem_id).peak_height-self.data_ref.min_height())+pick_prob+pick_motif_prob;
+            let ln_gen_prob = self.data_ref.height_dist().ln_pdf(self.nth_motif(rem_id).peak_height)+pick_prob+pick_motif_prob;
 
             let ln_post = new_set.remove_motif(rem_id);
             //println!("propose death: like: {} height: {}, pick_prob: {}, len sel: {}",ln_post, self.nth_motif(rem_id).height_prior(), pick_prob.ln(), ((MAX_BASE+1-MIN_BASE) as f64).ln());
@@ -7902,7 +7905,7 @@ mod tester{
 
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+        let actual_prior = self.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_prob+pick_motif_prob;
 
         println!("actuals {pick_motif_prob} {pick_prob} {actual_prior}");
         println!("{should_prior} {actual_prior} asd");
@@ -7953,7 +7956,7 @@ mod tester{
 
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let actual_prior = HEIGHT_PROPOSAL_DIST.ln_pdf(birth_mot.nth_motif(l).peak_height()-MIN_HEIGHT)+pick_prob+pick_motif_prob;
+        let actual_prior = self.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_prob+pick_motif_prob;
 
 
 
