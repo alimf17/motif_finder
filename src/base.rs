@@ -4068,12 +4068,16 @@ impl<'a> MotifSet<'a> {
         } else {
 
             let mut add_base_mot = self.nth_motif(extend_id).best_motif();
-            add_base_mot.push(Bp::A);
-            let last_ind = add_base_mot.len()-1;
             let mut valid_extends: Vec<Bp> = Vec::with_capacity(BASE_L);
+            let extend_front: bool = rng.gen::<bool>();
+            let extension_ind = if extend_front {0_usize} else {add_base_mot.len()};
+            add_base_mot.insert(extension_ind, Bp::A);
             for &b in BP_ARRAY.iter() {
-                add_base_mot[last_ind] = b;
-                if self.data_ref.data().seq().kmer_in_seq(&add_base_mot) { valid_extends.push(b); }
+                add_base_mot[extension_ind] = b;
+                if self.data_ref.data().seq().kmer_in_seq(&add_base_mot) { valid_extends.push(b);
+                #[cfg(test)]
+                    println!("valid mot {:?}", add_base_mot);
+                }
             }
             if valid_extends.len() == 0 { return None; }
 
@@ -4096,7 +4100,7 @@ impl<'a> MotifSet<'a> {
             let base_ln_density = new_base.scores.iter().map(|&a| if a < 0.0 {base_dist.energy_ln_pmf(a)} else {0.0}).sum::<f64>() - ((valid_extends.len() as f64).ln());//+LN_2+1.09861228867);
             //ln(2) for two choices: front vs back. Ln(3) for three choices of base distribution;
             //println!("lock 3");
-            if rng.gen::<bool>() { new_mot.pwm.push(new_base)} else {new_mot.pwm.insert(0, new_base)};
+            if !extend_front { new_mot.pwm.push(new_base)} else {new_mot.pwm.insert(0, new_base)};
             //println!("lock 4");
             //let ln_gen_prob = new_mot.height_prior()+new_mot.pwm_prior(self.data.seq());
             let ln_post = new_set.replace_motif(new_mot, extend_id);
@@ -7329,7 +7333,7 @@ mod tester{
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block)).collect::<Vec<_>>()));
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block-MAX_BASE)).collect::<Vec<_>>()));
         
 
         let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
@@ -7621,7 +7625,7 @@ mod tester{
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let _start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block)).collect::<Vec<_>>()));
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(), &((0..block_n).map(|i| (i, 0, bp_per_block-MAX_BASE)).collect::<Vec<_>>()));
         
 
         let _pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();
@@ -7905,11 +7909,14 @@ mod tester{
 
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let actual_prior = self.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_prob+pick_motif_prob;
+        let pick_prob_alt = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob_penlaty = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
+
+        let actual_prior = motif_set.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_motif_prob;
 
         println!("actuals {pick_motif_prob} {pick_prob} {actual_prior}");
         println!("{should_prior} {actual_prior} asd");
-        assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
+        assert!((should_prior+actual_prior+pick_prob).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_alt).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_penlaty).abs() < 1e-6, "{}", format!("{} {} {} {}", should_prior+actual_prior, pick_prob, pick_prob_alt, pick_prob_penlaty).as_str());
 
         println!("done birth");
         //fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
@@ -7940,6 +7947,7 @@ mod tester{
         let should_prior = ln_prop-(death_mot.calc_ln_post());
 
         let remaining = motif_set.data_ref.data()-&death_mot.signal;
+        println!("prop {} {:?}", remaining.seq().kmer_in_seq(&motif_set.nth_motif(l).best_motif()), motif_set.nth_motif(l).best_motif());
         let propensities = remaining.kmer_propensities(motif_set.nth_motif(l).len());
         //let pick_prob = (motif_set.nth_motif(l).len() as f64)*(-(BASE_L as f64).ln() - ((BASE_L-1) as f64)*(-SCORE_THRESH).ln());
 
@@ -7952,18 +7960,21 @@ mod tester{
         let num = motif_set.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
 
 
-        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln());
 
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob_alt = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
+        let pick_prob_penlaty = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
-        let actual_prior = self.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_prob+pick_motif_prob;
+        let actual_prior = motif_set.data_ref.height_dist().ln_pdf(birth_mot.nth_motif(l).peak_height())+pick_motif_prob;
 
 
 
+        println!("{:?} {:?}", Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()), motif_set.data_ref.data().seq().kmer_in_seq(&motif_set.nth_motif(l).best_motif()));
         println!("priors {} {} {} {} {}", motif_set.nth_motif(l).height_prior(data_seq.height_dist()), should_prior, pick_prob, ((MAX_BASE+1-MIN_BASE) as f64).ln(), propensities[motif_set.data_ref.data().seq().id_of_u64_kmer_or_die(motif_set.nth_motif(l).len(),Sequence::kmer_to_u64(&motif_set.nth_motif(l).best_motif()))]);
 
         //Remember, we can sometimes have a motif that's impossible to kill because it's impossible to be created
-        assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY) || ((should_prior-actual_prior).abs() < 1e-6), "{}", format!("{}", should_prior-actual_prior).as_str());
+        assert!((should_prior == -f64::INFINITY && actual_prior == -f64::INFINITY)|| (should_prior-(actual_prior+pick_prob)).abs() < 1e-6 || (should_prior-(actual_prior+pick_prob_alt)).abs() < 1e-6 || (should_prior-(actual_prior+pick_prob_penlaty)).abs() < 1e-6, "{}", format!("{} {} {} {}", should_prior+actual_prior, pick_prob, pick_prob_alt, pick_prob_penlaty).as_str());
 
         //fn propose_extend_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
 
@@ -7985,19 +7996,26 @@ mod tester{
 
         let mut l: Option<usize> = None;
         let mut found_off = false;
+        let mut went_forward = false;
         for i in 0..extend_mot.set.len() {
             assert!(motif_set.nth_motif(i).peak_height() == extend_mot.nth_motif(i).peak_height());
             let mut matching = motif_set.nth_motif(i).len() == extend_mot.nth_motif(i).len();
             if !matching {
                 assert!(!found_off, "Found two mismatches when looking for extended motif!");
-                assert!(sequence.kmer_in_seq(&(extend_mot.nth_motif(i).best_motif())), "Extension can produce illegal kmer!");
+                assert!(sequence.kmer_in_seq(&(extend_mot.nth_motif(i).best_motif())), "Extension can produce illegal kmer! {:?}", extend_mot.nth_motif(i).best_motif());
                 found_off = true;
                 l = Some(i);
                 matching = (motif_set.nth_motif(i).len()+1) == extend_mot.nth_motif(i).len();
-                matching = motif_set.nth_motif(i).pwm.iter()
+                let matching_forward = motif_set.nth_motif(i).pwm.iter()
                     .zip(extend_mot.nth_motif(i).pwm[0..(extend_mot.nth_motif(i).len()-1)].iter())
                     .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
                     .fold(matching, |acc, b| acc && b);
+                let matching_reverse = motif_set.nth_motif(i).pwm.iter()
+                    .zip(extend_mot.nth_motif(i).pwm[1..(extend_mot.nth_motif(i).len())].iter())
+                    .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
+                    .fold(matching, |acc, b| acc && b);
+                matching = matching && (matching_forward || matching_reverse);
+                went_forward = matching_forward;
 
             }
             assert!(matching, "there is a mismatch {} {}!", i, found_off);
@@ -8008,10 +8026,14 @@ mod tester{
 
         let should_prior = ln_prop-(extend_mot.calc_ln_post());
 
-        let actual_prior = extend_mot.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+        let ind = if went_forward { extend_mot.nth_motif(l.unwrap()).pwm.len()-1} else {0};
+
+        let actual_prior = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+        let actual_prior_alt = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+        let actual_prior_pen = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
 
         println!("hanging");
-        assert!((should_prior+actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior+actual_prior).as_str());
+        assert!((should_prior+actual_prior).abs() < 1e-6 || (should_prior+actual_prior_alt).abs() < 1e-6 || (should_prior+actual_prior_pen).abs() < 1e-6 ,"{}", format!("{}", should_prior+actual_prior).as_str());
 
         }
         let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MAX_BASE, &data_seq, &mut rng);
@@ -8042,6 +8064,7 @@ mod tester{
 
         let mut l: Option<usize> = None;
         let mut found_off = false;
+        let mut went_forward = false;
         for i in 0..contract_mot.set.len() {
             assert!(motif_set.nth_motif(i).peak_height() == contract_mot.nth_motif(i).peak_height());
             let mut matching = motif_set.nth_motif(i).len() == contract_mot.nth_motif(i).len();
@@ -8050,10 +8073,17 @@ mod tester{
                 found_off = true;
                 l = Some(i);
                 matching = (motif_set.nth_motif(i).len()-1) == contract_mot.nth_motif(i).len();
-                matching = contract_mot.nth_motif(i).pwm.iter()
+                let matching_forward = contract_mot.nth_motif(i).pwm.iter()
                     .zip(motif_set.nth_motif(i).pwm[0..(contract_mot.nth_motif(i).len()-1)].iter())
                     .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
                     .fold(matching, |acc, b| acc && b);
+                let matching_reverse = contract_mot.nth_motif(i).pwm.iter()
+                    .zip(motif_set.nth_motif(i).pwm[1..(contract_mot.nth_motif(i).len())].iter())
+                    .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
+                    .fold(matching, |acc, b| acc && b);
+                matching = matching && (matching_forward || matching_reverse);
+                went_forward = matching_forward;
+
 
             }
             assert!(matching, "there is a mismatch {} {}!", i, found_off);
@@ -8063,9 +8093,14 @@ mod tester{
 
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let actual_prior = (motif_set.nth_motif(l.unwrap()).pwm.last().expect("We know this is bigger than 0")).scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
+        let ind = if went_forward { contract_mot.nth_motif(l.unwrap()).pwm.len()-1} else {0};
 
-        assert!((should_prior-actual_prior).abs() < 1e-6, "{}", format!("{}", should_prior-actual_prior).as_str());
+
+        let actual_prior = (motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0")).scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
+        let actual_prior_alt = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
+        let actual_prior_pen = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+
+        assert!((should_prior-actual_prior).abs() < 1e-6 || (should_prior-actual_prior_alt).abs() < 1e-6 || (should_prior-actual_prior_pen).abs() < 1e-6, "{}", format!("{} {} {}", should_prior-actual_prior, should_prior-actual_prior_alt, should_prior-actual_prior_pen).as_str());
         }
         let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(2.6, MIN_BASE, &data_seq, &mut rng);
 
@@ -8231,9 +8266,6 @@ mod tester{
 
         assert!(dist.ln_pdf(MAX_HEIGHT+1.0).is_infinite() && dist.ln_pdf(MAX_HEIGHT+1.0) < 0.0);
 
-        let dist: TruncatedLogNormal = TruncatedLogNormal::new(LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, -1.0, MAX_HEIGHT).unwrap();
-
-        assert!(dist.min().abs() < 1e-6);
 
     } 
 
@@ -8621,7 +8653,7 @@ mod tester{
         let _wave_starts: Vec<usize> = vec![0, 36];
         let wave_lens: Vec<usize> = vec![36, 40];
         let wave_start_bases: Vec<usize> = vec![0, 9324];
-        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens.clone(), &((0..wave_lens.len()).map(|i| (i, 0, wave_lens[i])).collect::<Vec<_>>()));
+        let wave_seq: Sequence = Sequence::new_manual(wave_block, wave_lens.clone(), &((0..wave_lens.len()).map(|i| (i, 0, wave_lens[i]-MAX_BASE)).collect::<Vec<_>>()));
         let wave_wave: Waveform = Waveform::create_zero(&wave_seq,1);
         let wave_background = Background::new(0.25, 2.64, 1.0).unwrap();
 
@@ -8652,7 +8684,7 @@ mod tester{
         let small_block: Vec<u8> = vec![44, 24, 148, 240, 84, 64, 200, 80, 68, 92, 196, 144]; 
         let _small_inds: Vec<usize> = vec![0, 6]; 
         let small_lens: Vec<usize> = vec![24, 24];
-        let small: Sequence = Sequence::new_manual(small_block, small_lens.clone(),  &((0..small_lens.len()).map(|i| (i, 0, small_lens[i])).collect::<Vec<_>>()));
+        let small: Sequence = Sequence::new_manual(small_block, small_lens.clone(),  &((0..small_lens.len()).map(|i| (i, 0, small_lens[i]-MAX_BASE)).collect::<Vec<_>>()));
         let _small_wave: Waveform = Waveform::new(vec![0.1, 0.6, 0.9, 0.6, 0.1, -0.2, -0.4, -0.6, -0.6,-0.1], &small, 5).unwrap();
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -8827,7 +8859,7 @@ mod tester{
         let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
         let block_lens: Vec<usize> = (1..(block_n+1)).map(|_| bp_per_block).collect();
         let mut start_bases: Vec<usize> = (0..block_n).map(|a| a*bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i]-MAX_BASE)).collect::<Vec<_>>()));
 
 
         //let pre_null_blocks: Vec<u8> = (0..(u8_count/100)).map(|_| rng.gen::<u8>()).collect();

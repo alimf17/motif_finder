@@ -42,4 +42,5 @@ fn main() {
 
     println!("{}", data_ref.data().seq().kmer_in_seq(&vec![Bp::G, Bp::T, Bp::A, Bp::C, Bp::C, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::C, Bp::G, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::A]));
     //println!("{:?}", data_ref.data().seq().diagnose_hamming_optimum());
+    println!("{}", data_ref.credibility())
 }

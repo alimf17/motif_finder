@@ -617,8 +617,12 @@ impl Sequence {
         let start_dec = self.block_u8_starts[block_id]+(start_id/BP_PER_U8);
         let end_dec = self.block_u8_starts[block_id]+((start_id+num_bases-1)/BP_PER_U8)+1;
 
+        #[cfg(test)]
         assert!(end_dec-start_dec <= self.block_lens[block_id]/BP_PER_U8, "Number of bases requested overflows the block");
 
+        //#[cfg(test)]
+        //println!("{start_dec} {end_dec} {} seq bloc ste", self.seq_blocks.len());
+        
         let all_coded = &self.seq_blocks[start_dec..end_dec];
 
         let all_bases: Vec<_> = all_coded.iter().map(|a| Self::code_to_bases(*a)).flatten().collect();
@@ -1422,7 +1426,7 @@ mod tests {
         //let blocks: Vec<u8> = preblocks.iter().cloned().cycle().take(u8_count).collect::<Vec<_>>();
         let _block_u8_starts: Vec<usize> = (0..block_n).map(|a| a*u8_per_block).collect();
         let block_lens: Vec<usize> = (0..block_n).map(|_| bp_per_block).collect();
-        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
+        let sequence: Sequence = Sequence::new_manual(blocks, block_lens.clone(),  &((0..block_lens.len()).map(|i| (i, 0, block_lens[i]-MAX_BASE)).collect::<Vec<_>>()));
 
         let _kmer_c = sequence.generate_kmers(MAX_BASE);
 

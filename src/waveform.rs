@@ -643,6 +643,8 @@ impl<'a> Waveform<'a> {
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
                     let u64_mot = Sequence::kmer_to_u64(&(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
+                    #[cfg(test)]
+                    println!("{:?} mot", &(unsafe { uncoded_seq.get_unchecked(j..(j+k)) }).to_vec());
                     let between = center % self.spacer;
                     //The second statement in the OR seems bizarre, until you remember that we stop
                     //including DATA before we stop including BASES. This is our check to make sure
@@ -666,7 +668,9 @@ impl<'a> Waveform<'a> {
                     //proposed with a minimum height and so when death is proposed, it should
                     //always be the case that there's SOMEWHERE with the height minimum
                     if to_add.abs() > (0.0) {
-                        propensities[self.seq.id_of_u64_kmer_or_die(k, u64_mot)] += to_add.powi(2);
+                        if let Some(id) = self.seq.id_of_u64_kmer(k, u64_mot) {
+                            propensities[id] += to_add.powi(2);
+                        };
                     }
                 }
 
@@ -1840,6 +1844,7 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
 
         use super::*;
         use crate::sequence::{Sequence, NullSequence};
+        use crate::base::MAX_BASE;
         use rand::Rng;
         use std::time::Instant;
 
@@ -1883,7 +1888,7 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
             let k = Kernel::new(5.0, 2.0, KernelWidth::Wide, KernelVariety::Gaussian);
             //let seq = Sequence::new_manual(vec![85;56], vec![84, 68, 72]);
             let block_lens = vec![84_usize, 68, 72];
-            let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], block_lens.clone(), &((0..block_lens.len()).map(|i| (i, 0, block_lens[i])).collect::<Vec<_>>()));
+            let seq = Sequence::new_manual(vec![192, 49, 250, 10, 164, 119, 66, 254, 19, 229, 212, 6, 240, 221, 195, 112, 207, 180, 135, 45, 157, 89, 196, 117, 168, 154, 246, 210, 245, 16, 97, 125, 46, 239, 150, 205, 74, 241, 122, 64, 43, 109, 17, 153, 250, 224, 17, 178, 179, 123, 197, 168, 85, 181, 237, 32], block_lens.clone(), &((0..block_lens.len()).map(|i| (i, 0, block_lens[i]-MAX_BASE)).collect::<Vec<_>>()));
             let mut signal = Waveform::create_zero(&seq, 5);
 
             let zeros: Vec<usize> = vec![0, 465, 892]; //Blocks terminate at bases 136, 737, and 1180
