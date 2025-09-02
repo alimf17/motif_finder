@@ -463,23 +463,20 @@ pub fn main() {
 
     println!("Densities: {:?}\n Resids: {:?}", mids, ress);
 
-    let (likes, first_failure,gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
+    let (likes, first_failure, dists, gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
 
     println!("Cumulative analysis of highest posterior density motif set");
 
-    let cumulative_lns = activated.ln_posts_by_strength();
 
-    let cumulative_noises = activated.distances_by_strength();
-
-    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn likelihood");
     for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
-        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), dists[i], likes[i]);
     }
-    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn Posterior");
+    println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn likelihood");
     for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
-        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), cumulative_noises[i], cumulative_lns[i]);
+        println!("{i}\t{}\t{}\t{}\t{}", mot_ref.best_motif_string(), mot_ref.peak_height(), dists[i], likes[i]);
         if let Some(genes) = gene_names.as_ref() {println!("Possibly regulated genes:\n\t{:#?}", genes[i]);};
         if let Some(go_names) = go_terms.as_ref() {
 
@@ -515,7 +512,7 @@ pub fn main() {
     //      3) For each StrippedMotifSet in the chain, there's a highesst_post_motif_set.len() number of pairings: 
     //                                                 which, if they exist, are the motif and distance of that pairing
     let pairings: Vec<Vec<Vec<Option<(f64,bool,&Motif)>>>> = set_trace_collections.iter().map(|set_trace| {
-        set_trace.ref_to_trace().into_par_iter().map(|set| set.pair_to_other_set(&highesst_post_motif_set)).collect::<Vec<_>>()
+        set_trace.ref_to_trace().into_par_iter().map(|set| highesst_post_motif_set.pair_to_other_set(set)).collect::<Vec<_>>()
     }).collect();
 
     let num_clusts = highesst_post_motif_set.num_motifs();
@@ -566,7 +563,7 @@ pub fn main() {
 
     println!("RMSE highest posterior density {}", highesst_post_motif_set.reactivate_set(&data_ref).magnitude_signal_with_noise());
 
-
+/*
 
     println!("Beginning analysis of highest likelihood motif set");
 
@@ -721,7 +718,7 @@ pub fn main() {
 
     let cluster_per_chain: usize = min_len.min(2000);
 
-
+*/
 
     println!("Finish best motif sets");
 /*

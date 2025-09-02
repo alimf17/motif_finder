@@ -3450,7 +3450,7 @@ impl<'a> MotifSet<'a> {
 
         let mut motif_set = self.clone();
 
-        motif_set.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
+        //motif_set.set.sort_unstable_by(|(a,_),(b,_)| b.peak_height().partial_cmp(&a.peak_height()).unwrap() );
 
         let signal = self.recalced_signal();
 
@@ -4991,11 +4991,14 @@ impl<'a> MotifSet<'a> {
     /// greatest impact on the likelihood at each step, and we always return
     /// a motif set with at least one motif. 
     /// 
-    /// The vector of floats we return is the vector of lasso'd likelihoods 
+    /// The first vector of floats we return is the vector of lasso'd likelihoods 
     /// after each step, and it will always have a length equal to the number 
     /// of motifs in `[MotifSet]` we return. The `[Option]<[f64]>` we return is either 
     /// `Some<the_first_failing_lasso_likelihood>` if there are more motifs
     /// to potentially add, or `None` if we added all motifs in the set.
+    /// 
+    /// The second vector of floats is the vector of RMSE after each step, 
+    /// and it will always have a length equal to the number of motifs in `[MotifSet]` we return.
     ///
     /// For example, suppose you had a `[MotifSet]` with four motifs, numbered
     /// 0 to 3. In the first step of the lasso, motif 2 has the greatest likelihood
@@ -5005,47 +5008,53 @@ impl<'a> MotifSet<'a> {
     /// `[MotifSet]` with motif 2, then motif 0. 
     ///
     /// This function will exploit parallelization if available
-    pub fn lasso_self(&self, lambda: f64) -> (Self, Vec<f64>, Option<f64>) {
+    pub fn lasso_self(&self, lambda: f64) -> (Self, Vec<f64>, Vec<f64>, Option<f64>) {
 
-        //It is likely an invariant that we have at least two motifs in a motif set.
+        //It is likely an invariant that we have at least one motifs in a motif set.
         //But I'm defending against an empty motif set in case
         if self.set.len() < 2 {
             let likelihood = self.calc_ln_post()-self.ln_prior();
             let lassoed_like = likelihood-lambda*self.set.get(0).map(|a| a.0.peak_height.abs()).unwrap_or(0.0);
-            return (self.clone(), vec![lassoed_like], None);
+            let lassoed_dist = self.magnitude_signal_with_noise();
+            return (self.clone(), vec![lassoed_like], vec![lassoed_dist], None);
         }
 
         let mut lasso_likes: Vec<f64> = Vec::new();
+        let mut lasso_dists: Vec<f64> = Vec::new();
 
-        let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64)> = (0..self.set.len()).into_par_iter().map(|i| {
+        let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64, f64)> = (0..self.set.len()).into_par_iter().map(|i| {
 
             let single_set = self.nth_motif_as_set(i);
 
             let likelihood = single_set.calc_ln_post()-single_set.ln_prior();
             let lassoed_like = likelihood-lambda*single_set.set[0].0.peak_height.abs();
-            (single_set, lassoed_like)
+            let lassoed_dist = single_set.magnitude_signal_with_noise();
+            (single_set, lassoed_like, lassoed_dist)
         }).collect();
 
         //TODO: I have the vector of single sets with lassod likes. Find the best one, 
         //      remove it, and use it start my returns
         let mut target_index: usize = 0;
         let mut target_lasso: f64 = single_sets_and_lasso_likes[0].1;
-      
+        let mut target_dist = single_sets_and_lasso_likes[0].2;
+
         // We already know we have at least two motifs, since we returned
         // already if we had less than that in self
         for index in 1..single_sets_and_lasso_likes.len() {
             if single_sets_and_lasso_likes[index].1 >= target_lasso {
                 target_index = index;
                 target_lasso = single_sets_and_lasso_likes[index].1;
+                target_dist = single_sets_and_lasso_likes[index].2;
             }
         }
 
         println!("single sets {:?}", single_sets_and_lasso_likes);
-        let (mut motif_set, _ ) = single_sets_and_lasso_likes.swap_remove(target_index);
+        let (mut motif_set, _,_ ) = single_sets_and_lasso_likes.swap_remove(target_index);
         println!("single sets after remove {target_index} {:?}", single_sets_and_lasso_likes);
         
         //target_lasso is a float, so it is still alive after this
         lasso_likes.push(target_lasso);
+        lasso_dists.push(target_dist);
 
         //TODO: ITERATE over the remaining motifs by:
         //      -Finding new best lassoed likelihood
@@ -5060,7 +5069,8 @@ impl<'a> MotifSet<'a> {
                 let check_set = motif_set.combine_motif_sets(&set_and_lass.0);
                 let likelihood = check_set.calc_ln_post()-check_set.ln_prior();
                 let lassoed_like = likelihood-lambda*set_and_lass.0.set[0].0.peak_height.abs();
-                (check_set, lassoed_like)
+                let lassoed_dist = set_and_lass.0.magnitude_signal_with_noise();
+                (check_set, lassoed_like, lassoed_dist)
             }).collect();
 
             let mut target_index: Option<usize> = None;
@@ -5071,17 +5081,19 @@ impl<'a> MotifSet<'a> {
                 if combined_sets_and_likes[index].1 >= target_lasso {
                     target_index = Some(index);
                     target_lasso = combined_sets_and_likes[index].1;
+                    target_dist = single_sets_and_lasso_likes[index].2;
                 }
             }
 
             match target_index {
-                None => return (motif_set, lasso_likes, Some(potential_lasso)),
+                None => return (motif_set, lasso_likes,lasso_dists, Some(potential_lasso)),
                 Some(index) => {
                     println!("single sets {:?}", single_sets_and_lasso_likes);
-                    (motif_set, _) = combined_sets_and_likes[index].clone();
+                    (motif_set, _, _) = combined_sets_and_likes[index].clone();
                     _ = single_sets_and_lasso_likes.swap_remove(index);
                     println!("single sets after remove {index} {:?}", single_sets_and_lasso_likes);
                     lasso_likes.push(target_lasso);
+                    lasso_dists.push(target_dist);
                 },
             }
 
@@ -5089,7 +5101,7 @@ impl<'a> MotifSet<'a> {
         }
         
         //If I get to the end without hitting a worse lasso like, return the whole thing with the last option None.
-        (motif_set, lasso_likes, None)
+        (motif_set, lasso_likes, lasso_dists, None)
 
     }
     
@@ -5100,11 +5112,14 @@ impl<'a> MotifSet<'a> {
     /// greatest impact on the likelihood at each step, and `self` in
     /// the end will always have at least one Motif
     /// 
-    /// The vector of floats we return is the vector of lasso'd likelihoods 
+    /// The first vector of floats we return is the vector of lasso'd likelihoods 
     /// after each step, and it will always have a length equal to the number 
     /// of motifs in `[MotifSet]` we return. The `[Option]<[f64]>` we return is either 
     /// `Some<the_first_failing_lasso_likelihood>` if there are more motifs
     /// to potentially add, or `None` if we added all motifs in the set. 
+    ///
+    /// The second vector of floats is the vector of RMSE after each step, 
+    /// and it will always have a length equal to the number of motifs in `[MotifSet]` we return.
     ///
     /// The Option<Vec<Vec<String>>> is `None` if annotations is `None`. Otherwise,
     /// it is a vector of `self.motif_num()` of vectors of `String`s, where the `i`th
@@ -5123,7 +5138,7 @@ impl<'a> MotifSet<'a> {
     /// `[MotifSet]` with motif 2, then motif 0. 
     ///
     /// This function will exploit parallelization if available
-    pub fn sort_self_by_lasso_and_yield_genes_and_go_terms(&mut self, lambda: f64, regulatory_distance: u64, annotations: Option<&GenomeAnnotations>) -> (Vec<f64>, Option<f64>, Option<Vec<Vec<String>>>, Option<Vec<Vec<(u64, usize)>>>) {
+    pub fn sort_self_by_lasso_and_yield_genes_and_go_terms(&mut self, lambda: f64, regulatory_distance: u64, annotations: Option<&GenomeAnnotations>) -> (Vec<f64>, Option<f64>, Vec<f64>, Option<Vec<Vec<String>>>, Option<Vec<Vec<(u64, usize)>>>) {
 
         let mut gene_names: Option<Vec<Vec<String>>> = None; //annotations.map(|_| vec![]) ;
         let mut go_term_counts: Option<Vec<Vec<(u64, usize)>>> = None; //annotations.map(|_| vec![]);
@@ -5148,12 +5163,12 @@ impl<'a> MotifSet<'a> {
         let mut lasso_likes: Vec<f64> = Vec::new();
 */
 //lasso_self(&self, lambda: f64) -> (Self, Vec<f64>, Option<f64>)
-        let (lassoed_self, lasso_likes, potential_leftover) = self.lasso_self(lambda);
+        let (lassoed_self, lasso_likes, lasso_dists, potential_leftover) = self.lasso_self(lambda);
 
         if let Some(annotations) = annotations {
 
-            for i in 0..self.set.len() {
-                let wave = self.nth_motif(i).generate_waveform(self.data_ref);
+            for i in 0..lassoed_self.set.len() {
+                let wave = lassoed_self.nth_motif(i).generate_waveform(self.data_ref);
                 let loci = wave.return_regulated_loci(None, regulatory_distance, self.data_ref.zero_locs(),annotations);
                 let collect_names: Vec<String> = if let Ok(ref locus_vec) = loci { locus_vec.iter().map(|a| a.name_clone()).collect() } else {vec![]};
                 if let Some(ref mut names) = gene_names.as_mut() { names.push(collect_names);} else { gene_names = Some(vec![collect_names]);};
@@ -5164,7 +5179,7 @@ impl<'a> MotifSet<'a> {
         };
 
         *self=lassoed_self;
-        (lasso_likes, potential_leftover, gene_names, go_term_counts)
+        (lasso_likes, potential_leftover, lasso_dists, gene_names, go_term_counts)
 
         /*let mut single_sets_and_lasso_likes: Vec<(MotifSet, f64, Option<Vec<String>>, Option<Vec<(u64, usize)>>)> = (0..self.set.len()).into_par_iter().map(|i| {
 
@@ -5399,7 +5414,7 @@ impl StrippedMotifSet {
 
         let mut a = self.clone();
 
-        a.sort_by_height();
+        //a.sort_by_height();
 
         for (i, mot) in a.set_iter().enumerate() {
             
