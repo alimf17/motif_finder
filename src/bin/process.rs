@@ -194,9 +194,11 @@ pub fn main() {
         if (min_chain+1) < max_chain {for bead in (min_chain+1)..max_chain {
 
 
-            let chain_file = base_str.clone()+format!("_{}_trace", min_chain).as_str()+".bin.gz";
+            let chain_file = base_str.clone()+format!("_{}_trace", bead).as_str()+".bin.gz";
 
-            let len_file = base_str.clone()+format!("_{min_chain}_bits.txt").as_str();
+            println!("{chain_file} chain file"); 
+
+            let len_file = base_str.clone()+format!("_{bead}_bits.txt").as_str();
 
             let mut string_buff: String = String::new();
             fs::File::open(&len_file).unwrap().read_to_string(&mut string_buff);
@@ -208,9 +210,12 @@ pub fn main() {
 
             let mut read_file: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(chain_file).unwrap());
 
-            for byte_len in &buffer_lens[1..] {
+            //for byte_len in &buffer_lens[1..] {
+            for byte_len in buffer_lens.iter() {
+            
                 buffer.clear();
                 let mut handle = read_file.by_ref().take(*byte_len as u64);
+                handle.read_to_end(&mut buffer).unwrap();
                 let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!"); 
                 
                 set_trace_collections[chain].append(interim);
@@ -494,7 +499,8 @@ pub fn main() {
 
 
     if let Some(fasta) = fasta_file.clone() {
-   
+  
+        let highesst_post_motif_set = activated.into();
         let trial_a = highesst_post_motif_set.generate_fimo(None,&fasta,  &out_dir, &save_file);
 
         if trial_a.is_err() {
