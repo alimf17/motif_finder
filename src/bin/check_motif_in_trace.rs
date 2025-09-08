@@ -199,6 +199,7 @@ pub fn main() {
             for byte_len in &buffer_lens[1..] {
                 buffer.clear();
                 let mut handle = read_file.by_ref().take(*byte_len as u64);
+                handle.read_to_end(&mut buffer).unwrap();
                 let (interim, _bytes): (SetTraceDef, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("All read in files must be correct bincode!"); 
                 
                 set_trace_collections[chain].append(interim);
@@ -216,18 +217,18 @@ pub fn main() {
 
     let min_allowable_ln_post = max_ln_post_per_trace.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("traces exist")-1000.0_f64;
 
-    let alpha: f64 = 0.01;
+    let alpha: f64 = 0.05;
         
     //We assume that two motifs are related enough to be a "hit"
-    //if they are in a distance that has a 0.01 chance to occur 
+    //if they are in a distance that has a 0.05 chance to occur 
     //under the null hypothesis. Our version of the aitchison metric
     //for the E. coli genome, U.00092.2 (with slight modifications of about single bps),
     //empirically fit a roughly normal distribution with mean ~8.25 and sd ~ 1.0
     //when we simulated pairs of valid motifs under the prior distribution
     //and checked their distances
-    let distance_to_hit = 5.923652_f64;
+    let distance_to_hit =5.435515_f64; // 5.923652_f64;
 
-    let expected_hits: fn(&StrippedMotifSet) -> f64 = |x| { 1.0-0.99_f64.powi(x.num_motifs() as i32)};
+    let expected_hits: fn(&StrippedMotifSet) -> f64 = |x| { 1.0-(1.0-alpha).powi(x.num_motifs() as i32)};
 
     for mot in parsed_set.set_iter() {
 

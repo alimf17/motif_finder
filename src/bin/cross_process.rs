@@ -115,6 +115,8 @@ pub fn main() {
 
         let parsed_set: Result<StrippedMotifSet, _> = attempt_bincode_serde_read_with_decomp(&file, Some(&mut scratch_space_for_buffer), None);
 
+        println!("{:?}", parsed_set);
+
         match parsed_set {
             Ok(set) => Some((name, set)),
             Err(_) => None,
@@ -136,7 +138,7 @@ pub fn main() {
     let size_of_motif = std::mem::size_of::<Motif>();
 
 
-    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set(&b.1).into_iter().enumerate().map(|(i,d)|  d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), if c.1 {c.2.rev_complement_best_motif() } else {c.2.best_motif_string()}, ((c.2 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_potential_binding(&b.1, data_ref.min_height()).into_iter().enumerate().map(|(i,d)|  d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), if c.1 {c.2.rev_complement_best_motif() } else {c.2.best_motif_string()}, ((c.2 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
 
     println!("{:?}", assignments);
 
@@ -189,12 +191,16 @@ pub fn main() {
     let filtered_matches = sorted_matches.iter().filter_map(|a| if a.6 < 6.25 {Some(format!("{:?}", a))} else {None}).collect::<Vec<_>>().join("\n");
 
     println!("{}", filtered_matches);
-/*
 
-    let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_binding(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    println!("min height {}", data_ref.min_height());
 
-    println!("{:?}", assignments);
+    //let assignments = motif_sets.iter().map(|a| motif_sets.iter().map(|b| a.1.pair_to_other_set_binding(&b.1, &data_ref).into_iter().enumerate().map(|(i,d)| d.map(|c| (c.0, a.1.get_nth_motif(i).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(b.1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+ 
+    //let assignments= (0..motif_sets.len()).map(|i| (i+1..motif_sets.len()).map(|j| motif_sets[i].1.pair_to_other_set_binding(&motif_sets[j].1, &data_ref).into_iter().enumerate().map(|(k,d)| d.map(|c| (c.0, motif_sets[i].1.get_nth_motif(k).best_motif_string(), c.1.best_motif_string(), ((c.1 as *const Motif).addr()-(motif_sets[j].1.get_nth_motif(0) as *const Motif).addr())/size_of_motif))).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    //println!("{:?}", assignments);
     
+    println!("{:?}", motif_sets[0].1.pair_to_other_set_rmse_data(&motif_sets[2].1, &data_ref));
+
     let mut assignment_file = std::fs::File::create(&binding_matrix).unwrap();
     let _ = assignment_file.write(format!("Motif getting matched\t(sequence)            \t{}\n", header.join("\t\t")).as_bytes());
 
@@ -210,12 +216,11 @@ pub fn main() {
                 if let Some(matcher) = &compared_set[i] { format!("{}: {} ({:.02})", matcher.3, matcher.2, matcher.0)} else { "None".to_owned()}
             }).collect();
             let _ = assignment_file.write(format!("{set_name} Motif {i}\t({best_motif})\t{}\n", match_list.join("\t\t")).as_bytes()); //Insert the matching motifs here
+            println!("finish write");
         }
 
-    }*/
-
-
-
+    }
+    
 }
 
 

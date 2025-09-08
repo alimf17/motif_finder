@@ -52,19 +52,27 @@ fn main() {
 
         let mut rng = rand::thread_rng();
 
-        let mot_0 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
-        let mot_1 = Motif::rand_mot(data.data().seq(), data.height_dist(), &mut rng);
+        let len0 = rng.gen_range(MIN_BASE..(MAX_BASE+1));
+        let len1 = rng.gen_range(MIN_BASE..(MAX_BASE+1));
 
-        mot_0.distance_function(&mot_1).0
+        let best_bases_0: Vec<Bp> = (0..len0).map(|_| *BP_ARRAY.choose(&mut rng).unwrap()).collect();
+        let best_bases_1: Vec<Bp> = (0..len1).map(|_| *BP_ARRAY.choose(&mut rng).unwrap()).collect();
+
+//        println!("{:?} {:?}", best_bases_0, best_bases_1);
+
+        let mot_0 = Motif::from_motif_alt(best_bases_0, data.height_dist(), &mut rng);
+        let mot_1 = Motif::from_motif_alt(best_bases_1, data.height_dist(), &mut rng);
+
+        mot_0.dist_by_potential_binding(&mot_1, data.min_height()).0
 
     }).collect();
 
-    let plotting = BitMapBackend::new("RandomDist.png", (8000, 4000)).into_drawing_area();
+    let plotting = BitMapBackend::new("RandomDist.png", (10000, 4000)).into_drawing_area();
 
 
     plotting.fill(&WHITE).expect("This should just work");
 
-    let _ = quick_hist_local(&dists , &plotting, "Random Sample Of Score Distances".to_string(), 100);
+    let _ = quick_hist_local(&dists , &plotting, "Random Sample Of Score Distances".to_string(), 150);
 
 
 }

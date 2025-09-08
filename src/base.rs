@@ -807,19 +807,69 @@ impl Base {
     /// If base is Some(&Base), it returns the squared Aitchison distance 
     /// between it and self. 
     pub fn dist_sq(&self, base: Option<&Base>) -> f64 {
-        
+       
+        //SAFETY: to_pwm only errors if the background distribution has a negative value
+        //        It is always safe to unwrap it if given a None, because that makes it use
+        //        the default background, which is always fine.  
+        let probs = unsafe { self.to_pwm(None).unwrap_unchecked()};
         match base {
 
-            None => 4.0*self.scores.iter().map(|a| a.powi(2)).sum::<f64>()-self.scores.iter().map(|a| a).sum::<f64>().powi(2),
+            None => 4.0*probs.iter().map(|a| a.powi(2)).sum::<f64>()-probs.iter().map(|a| a).sum::<f64>().powi(2),
             Some(other) => {
+                //SAFETY: same thing as when we defined probs
+                let other_probs = unsafe { other.to_pwm(None).unwrap_unchecked()};
                 //Remember, this is the DISTANCE. Which is the inner product OF THE DIFFERENCE. Not the inner product of the two 
-                4.0*self.scores.iter().zip(other.scores.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(self.scores.iter().zip(other.scores.iter()).map(|(a,b)| (a-b)).sum::<f64>()).powi(2)
+                4.0*probs.iter().zip(other_probs.iter()).map(|(a,b)| ((a-b).powi(2))).sum::<f64>()-(probs.iter().zip(other_probs.iter()).map(|(a,b)| (a-b)).sum::<f64>()).powi(2)
             },
         }
 
 
     }
 
+    /// This function has two behaviors.
+    /// If base is None, this returns the square Eucliean distance of the exponentiated 
+    /// binding scores of `self` from a vector of all 1.0
+    /// If base is Some(&Base), it returns the squared Eucliean distance of the exponentiated 
+    /// binding scores between it and self.
+    pub fn dist_bind_sq(&self, base: Option<&Base>) -> f64 {
+
+        let binds: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a].exp2());
+        match base {
+
+            None => binds.into_iter().map(|a| (1.0-a).powi(2)).sum::<f64>(),
+            Some(other) => {
+                let other_binds: [f64; BASE_L] = core::array::from_fn(|a| other.scores[a].exp2()); 
+                binds.into_iter().zip(other_binds.into_iter()).map(|(a,b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>() 
+            },
+        }
+
+
+    }
+
+    pub fn dist_matter_weight(&self, self_len: usize, min_height: f64, base: Option<&Base>, other_len: usize) -> f64 {
+
+
+        let expected_penalty_num = ((self_len-1) as f64)*((BASE_L-1) as f64)/(BASE_L as f64);
+
+        let p_self_pos_matter: [f64; BASE_L] = core::array::from_fn(|a| {
+            let eval = (BASE_L as f64)*(min_height-self.scores[a])-(1.0+0.5*(BASE_L-1) as f64)*expected_penalty_num;
+            NORMAL_DIST.sf(eval)
+        });
+
+
+        let comparison = base.map(|a| a.scores).unwrap_or([0.0; BASE_L]);
+
+        let comparison_penalty_num = ((other_len-1) as f64)*((BASE_L-1) as f64)/(BASE_L as f64);
+
+        let comparison_matter: [f64; BASE_L] = core::array::from_fn(|a| {
+            let eval = (BASE_L as f64)*(min_height-comparison[a])-(1.0+0.5*(BASE_L-1) as f64)*comparison_penalty_num;
+            NORMAL_DIST.sf(eval)
+        });
+
+        (0..BASE_L).map(|a| (self.scores[a].exp2()-comparison[a].exp2()).powi(2)*p_self_pos_matter[a]*comparison_matter[a]+(1.0-self.scores[a].exp2()).powi(2)*p_self_pos_matter[a]*(1.0-comparison_matter[a])+(1.0-comparison[a].exp2()).powi(2)*(1.0-p_self_pos_matter[a])*comparison_matter[a]).sum::<f64>()
+
+
+    }
 
     /// This function converts the scores to probabilities of binding. 
     /// However, this does so directly, without any pseudocount. 
@@ -2625,7 +2675,7 @@ impl Motif {
 
 
     /// This generates distance between two motifs, based on their `Base`s. 
-    /// In particular, it tries every possible overlapping offset of the motifs,
+    /// In particular, it centers both motifs, then tries both the forward versions
     /// along with reverse complementing, and calculates the sum of the squared
     /// Aitchison distances between them. If a Base does not have a corresponding 
     /// partner, it add its squared Aitchison metric to the total. Then, the minimum
@@ -2709,6 +2759,74 @@ impl Motif {
         //This isn't a CODE problem, it's an f64 precision one
         if distance > 0.0 { distance.sqrt() } else {0.0}
     }
+
+    pub fn dist_by_potential_binding(&self, other_mot: &Motif, min_height: f64) -> (f64, bool) {
+
+        let rev = other_mot.rev_complement();
+
+        //println!("other_mot {:?}\n PWM {:?}", other_mot, &other_mot.pwm);
+        let best_forward = (self.little_distance_pot(&other_mot.pwm, min_height), false);
+        let best_reverse = (self.little_distance_pot(&rev, min_height), true);
+
+        let best = if best_reverse.0 < best_forward.0 { best_reverse } else {best_forward};
+
+        best
+
+
+
+    }
+
+    fn little_distance_pot(&self, other_mot: &Vec<Base>, min_height: f64) -> f64 {
+
+        let _total_len = (self.len()).max(other_mot.len());
+
+
+        let (pwm_short, pwm_long) = if self.len() <= other_mot.len() {(&self.pwm, other_mot)} else {(other_mot, &self.pwm)};
+
+        let short_len = pwm_short.len();
+        let long_len = pwm_long.len();
+
+
+        //let off_center = ((long_len-1)/2) - ((short_len-1)/2);
+
+
+        //println!("S {:?} O {:?}", self, other_mot);
+
+        let mut final_distance: f64 = f64::INFINITY;
+
+        for off_center in 0..=(long_len-short_len) {
+            let mut distance: f64 = 0.0;
+            if off_center > 0 {
+                for i in 0..off_center {
+                    //TODO: change this to get_unchecked if there's a performance benefit
+                    distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len);
+                }
+            }
+
+            if (short_len+off_center) < long_len {
+                for i in (short_len+off_center)..long_len {
+                    distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len); 
+                }
+            }
+
+            for ind in 0..short_len {
+
+                let b1 = &pwm_short[ind];
+                let b2 = &pwm_long[off_center+ind];
+
+
+                distance += b2.dist_matter_weight(long_len, min_height,Some(b1), short_len);
+
+            }
+            final_distance = final_distance.min(distance);
+        }
+
+
+        //This isn't a CODE problem, it's an f64 precision one
+        if final_distance > 0.0 { final_distance.sqrt() } else {0.0}
+    }
+
+
 
     /// This calculates motif distances by the RMSD of their binding scores, 
     /// without considering differences from heights
@@ -5559,6 +5677,40 @@ impl StrippedMotifSet {
             matches
         }
     }
+    /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
+    /// and `reference_set`, using the minimum squared Aitchison metric * 4
+    /// as the distance metric. This outputs a vector with length `self.num_motifs()`.
+    /// An element of the vector is `None` only if `self.num_motifs() > reference_set.num_motifs()`
+    /// and thus that element does not have a match. Otherwise, the elements are
+    /// are tuples of the distance followed by a bool which is true if minimizing 
+    /// the Aitchison metric required reverse complementing, followed by a reference
+    /// to the Motif in `reference_set`
+    pub fn pair_to_other_set_potential_binding<'a>(&self, reference_set: &'a StrippedMotifSet, min_height: f64) -> Vec<Option<(f64, bool, &'a Motif)>>/*Some type here */ {
+    
+        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self.get_nth_motif(j).dist_by_potential_binding(&reference_set.get_nth_motif(i), min_height).0);
+        let rev_comp_by_index = |(i, j): (usize, usize)| self.get_nth_motif(j).dist_by_potential_binding(reference_set.get_nth_motif(i), min_height).1;
+
+        //We want the self to act like the columns, because the positions of the reference set should be pulled
+        let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
+        let rev_c_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), rev_comp_by_index);
+
+        if self.num_motifs() >= reference_set.num_motifs() {
+            let mut matches: Vec<Option<(f64, bool, &Motif)>> = vec![None; self.num_motifs()];
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&check_matrix);
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                matches[j] = Some((check_matrix.get((i, j)).unwrap().into_inner(), *rev_c_matrix.get((i,j)).unwrap(), reference_set.get_nth_motif(i)));
+            }
+            matches
+        } else {
+            let transpose = check_matrix.transposed();
+            let (_, pre_matches) = kuhn_munkres::kuhn_munkres_min(&transpose);
+            let mut matches: Vec<Option<(f64, bool,&Motif)>> = vec![None; self.num_motifs()];
+            for (i, j) in pre_matches.into_iter().enumerate() {
+                matches[i] = Some((check_matrix.get((j, i)).unwrap().into_inner(),*rev_c_matrix.get((j,i)).unwrap(), reference_set.get_nth_motif(j)));
+            }
+            matches
+        }
+    }
 
     /// This uses the Hungarian algorithm to pair `[Motif]`s from `self`
     /// and `reference_set`, using the Euclidean distance of the occpuancy
@@ -5618,17 +5770,19 @@ impl StrippedMotifSet {
     /// are tuples of the RMSE followed by a reference to the Motif in `reference_set`
     pub fn pair_to_other_set_binding<'a>(&'a self, reference_set: &'a StrippedMotifSet, data_seq: &AllDataUse) -> Vec<Option<(f64, &'a Motif)>>/*Some type here */ {
    
-        let self_waves: Vec<Vec<f64>> = self.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
-        let alts_waves: Vec<Vec<f64>> = reference_set.set_iter().map(|a| a.return_bind_score(data_seq.data().seq())).collect();
+        let self_waves: Vec<Vec<f64>> = self.set_iter().map(|a| {println!("{a}"); a.return_bind_score(data_seq.data().seq())}).collect();
+        let alts_waves: Vec<Vec<f64>> = reference_set.set_iter().map(|a| {println!("alt {a}"); a.return_bind_score(data_seq.data().seq())}).collect();
 
 
+        println!("self_waves {:?}", self_waves);
+        println!("alt_waves {:?}", alts_waves);
 
-        let distance_by_index = |(i, j): (usize, usize)| OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>().log2());
+        let distance_by_index = |(i, j): (usize, usize)| {println!("{i} {j}"); OrderedFloat(self_waves[j].iter().zip(alts_waves[i].iter()).map(|(&a, &b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>().sqrt())};
 
         //We want the self to act like the columns, because the positions of the reference set should be pulled
         let check_matrix = matrix::Matrix::from_fn(reference_set.num_motifs(), self.num_motifs(), distance_by_index);
 
-        //println!("check matrix {:?}", check_matrix);
+        println!("check matrix {:?}", check_matrix);
         //println!("Made matrix");
 
         if self.num_motifs() >= reference_set.num_motifs() {
