@@ -500,7 +500,7 @@ pub fn main() {
 
     if let Some(fasta) = fasta_file.clone() {
   
-        let highesst_post_motif_set = activated.into();
+        let highesst_post_motif_set: StrippedMotifSet = (&activated).into();
         let trial_a = highesst_post_motif_set.generate_fimo(None,&fasta,  &out_dir, &save_file);
 
         if trial_a.is_err() {

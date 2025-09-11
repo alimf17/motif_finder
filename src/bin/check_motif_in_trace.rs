@@ -228,7 +228,7 @@ pub fn main() {
     //and checked their distances
     let distance_to_hit =5.435515_f64; // 5.923652_f64;
 
-    let expected_hits: fn(&StrippedMotifSet) -> f64 = |x| { 1.0-(1.0-alpha).powi(x.num_motifs() as i32)};
+    let expected_hits = |x: &StrippedMotifSet| { 1.0-(1.0-alpha).powi(x.num_motifs() as i32)};
 
     for mot in parsed_set.set_iter() {
 

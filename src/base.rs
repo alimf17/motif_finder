@@ -5199,7 +5199,7 @@ impl<'a> MotifSet<'a> {
                 if combined_sets_and_likes[index].1 >= target_lasso {
                     target_index = Some(index);
                     target_lasso = combined_sets_and_likes[index].1;
-                    target_dist = single_sets_and_lasso_likes[index].2;
+                    target_dist = combined_sets_and_likes[index].2;
                 }
             }
 
