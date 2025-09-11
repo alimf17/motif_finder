@@ -32,6 +32,7 @@ use plotters::prelude::*;
 use plotters::coord::types::{RangedCoordf64, RangedCoordu64};
 
 use plotters::prelude::full_palette::ORANGE;
+use plotters::element::PointCollection;
 
 use plotters::coord::Shift;
 
@@ -910,7 +911,7 @@ impl<'a> Waveform<'a> {
 
         const LOCUS_HEIGHT: u32 = 100;
 
-        let height_loci: u32 = ontology_count*LOCUS_HEIGHT;
+        let height_loci: u32 = ontology_count*LOCUS_HEIGHT*2;
 
         let height: u32 = 1500+height_loci;
 
@@ -932,7 +933,6 @@ impl<'a> Waveform<'a> {
 
             big_plot.fill(&WHITE).unwrap();
 
-            let (loci, plot) = big_plot.split_vertically(height_loci);
 
             /*let mut remain_loci = loci;
             
@@ -943,22 +943,27 @@ impl<'a> Waveform<'a> {
             }).collect();
 
 */
+            //let (loci, plot) = big_plot.split_vertically(height_loci);
 
-            let (left, right) = plot.split_horizontally((95).percent_width());
+            //let (left, right) = plot.split_horizontally((95).percent_width());
+
+            let (left, right) = big_plot.split_horizontally((94).percent_width());
+            
+            let (loci, plot) = left.split_vertically(height_loci);
 
             let (right_space, _) = right.split_vertically((95).percent_height());
 
-            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+            let mut bar = ChartBuilder::on(&right_space).margin(15).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 40)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
             bar.configure_mesh()
-                .y_label_style(("serif", 40))
+                .y_label_style(("sans-serif", 40))
                 .disable_mesh().draw().unwrap();
 
             let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
 
             bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
 
-            let (upper, lower) = left.split_vertically((86).percent_height());
+            let (upper, lower) = plot.split_vertically((86).percent_height());
 
             let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, &upper);
 /*
@@ -975,7 +980,7 @@ impl<'a> Waveform<'a> {
 
                     draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
                         Rectangle::new([(start, 0.0), (end, 1.0)], CYAN.filled()) +
-                        Text::new(format!("{:?}", name), (14, 0), ("serif", 10).into_font())
+                        Text::new(format!("{:?}", name), (14, 0), ("sans-serif", 10).into_font())
                     })).unwrap();
 
                     //TODO: make rectangles draw gene loci
@@ -999,7 +1004,7 @@ impl<'a> Waveform<'a> {
                 .set_label_area_size(LabelAreaPosition::Bottom, 50)
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-            map.configure_mesh().x_label_style(("serif", 0)).y_label_style(("serif", 0)).x_desc("Deviance").axis_desc_style(("serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
 
             map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
@@ -1025,23 +1030,28 @@ impl<'a> Waveform<'a> {
 
             big_plot.fill(&WHITE).unwrap();
             
-            let (loci, plot) = big_plot.split_vertically(height_loci);
+            //let (loci, plot) = big_plot.split_vertically(height_loci);
 
-            let (left, right) = plot.split_horizontally((95).percent_width());
+            //let (left, right) = plot.split_horizontally((95).percent_width());
+
+
+            let (left, right) = big_plot.split_horizontally((95).percent_width());
+            
+            let (loci, plot) = left.split_vertically(height_loci);
 
             let (right_space, _) = right.split_vertically((95).percent_height());
 
-            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
+            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
             bar.configure_mesh()
-                .y_label_style(("serif", 40))
+                .y_label_style(("sans-serif", 40))
                 .disable_mesh().draw().unwrap();
 
             let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
 
             bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
 
-            let (upper, lower) = left.split_vertically((86).percent_height());
+            let (upper, lower) = plot.split_vertically((86).percent_height());
 
             /*let mut chart = ChartBuilder::on(&upper)
                 .set_label_area_size(LabelAreaPosition::Left, 100)
@@ -1050,8 +1060,8 @@ impl<'a> Waveform<'a> {
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
             chart.configure_mesh()
-                .x_label_style(("serif", 70))
-                .y_label_style(("serif", 70))
+                .x_label_style(("sans-serif", 70))
+                .y_label_style(("sans-serif", 70))
                 .x_label_formatter(&|v| format!("{:.0}", v))
                 .x_desc("Genome Location (Bp)")
                 .y_desc("Signal Intensity")
@@ -1082,7 +1092,7 @@ impl<'a> Waveform<'a> {
                 .set_label_area_size(LabelAreaPosition::Bottom, 50)
                 .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
 
-            map.configure_mesh().x_label_style(("serif", 0)).y_label_style(("serif", 0)).x_desc("Deviance").axis_desc_style(("serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
+            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
 
 
             map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
@@ -1106,8 +1116,8 @@ impl<'a> Waveform<'a> {
         build_chart.set_label_area_size(LabelAreaPosition::Left, 100)
             .set_label_area_size(LabelAreaPosition::Bottom, 100)
             .x_label_area_size(100)
-            .y_label_area_size(100)
-            .caption("Signal Comparison", ("Times New Roman", 80));
+            .y_label_area_size(100);
+            //.caption("Signal Comparison", ("sans-serif", 80));
 
 
         if i >= self.seq.num_blocks() {
@@ -1136,8 +1146,8 @@ impl<'a> Waveform<'a> {
         let mut chart = build_chart.build_cartesian_2d((dat_block.0[0] as f64)..(*dat_block.0.last().unwrap() as f64), min..max).unwrap();
 
         chart.configure_mesh()
-            .x_label_style(("serif", 40))
-            .y_label_style(("serif", 40))
+            .x_label_style(("sans-serif", 40))
+            .y_label_style(("sans-serif", 40))
             .x_label_formatter(&|v| format!("{:.0}", v))
             .x_desc("Genome Location (Bp)")
             .y_desc("Signal Intensity")
@@ -1212,8 +1222,8 @@ impl<'a> Waveform<'a> {
               .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
 
               chart.configure_mesh()
-              .x_label_style(("serif", 70))
-              .y_label_style(("serif", 70))
+              .x_label_style(("sans-serif", 70))
+              .y_label_style(("sans-serif", 70))
               .x_label_formatter(&|v| format!("{:.0}", v))
               .x_desc("Genome Location (Bp)")
               .y_desc("Signal Intensity")
@@ -1241,13 +1251,25 @@ impl<'a> Waveform<'a> {
     /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
     /// Mainly because I don't want the hassle of a Result type. 
     pub fn create_block_annotations<'b, DB: DrawingBackend>(&self, start_loc: usize, end_loc: usize, annotations: &GenomeAnnotations, ontology_collection: &[&str], ontology_bins: Option<&HashMap<String, Vec<&Locus>>>, locus_color: &'b RGBColor, total_locus_space: &'b DrawingArea<DB, Shift>) -> Vec<ChartContext<'b, DB, Cartesian2d<RangedCoordu64, RangedCoordf64>>> {
-    
-        let locus_spaces = total_locus_space.split_evenly((ontology_collection.len(),1));
+  
+
+        let (_, working_space) = total_locus_space.split_horizontally(100);
+
+
+        let (wide_locus_text, locus_full_space) = working_space.split_vertically((50).percent_height());
+
+        let locus_spaces = locus_full_space.split_evenly((ontology_collection.len(),1));
+
+        let wide_text_spaces = wide_locus_text.split_evenly((ontology_collection.len(),1));
 
         let loci_to_draw =  annotations.collect_ranges(start_loc as u64, end_loc as u64, &None, Some(ontology_collection), ontology_bins);
 
 
-        locus_spaces.iter().enumerate().map(|(k, locus_space)| {
+        let text_tuple = ("sans-serif", 80);
+        
+        let lag_for_arrow = 50u64;
+
+        let locus_drawing_vec: Vec<_> = locus_spaces.iter().enumerate().map(|(k, locus_space)| {
 
             let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
 
@@ -1255,12 +1277,31 @@ impl<'a> Waveform<'a> {
 
             draw_loc.configure_mesh().disable_mesh().draw().unwrap();
 
-            draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
-                Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()) 
+            //let mut rect_widths: Vec<u64> = loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| { let rect = Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()); println!("{name} len {} coords {:?} {:?} {:?}",name.len(), rect.get_points(), draw_loc.backend_coord(rect.get_points().0), draw_loc.backend_coord(rect.get_points().1)); (draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64}).collect();
+            let rect_widths: Vec<u64> = loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| { let rect = Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()); (draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64}).collect();
+                //Vec::with_capacity(loci_to_draw[k].len());
+
+            let text_widths: Vec<u64> = loci_to_draw[k].iter().enumerate().map(|(m, (name, start, end, pos_orient))| locus_space.estimate_text_size(name, &text_tuple.into_text_style(locus_space)).map_or(0, |a| a.0) as u64).collect();
+
+            draw_loc.draw_series(loci_to_draw[k].iter().enumerate().filter_map(|(m, (name, start, end, pos_orient))| {
+                if text_widths[m] <= rect_widths[m] {
+                let rect = if *pos_orient {
+                    Polygon::new([(*start, 0.0),(*start, 1.0),(*end-lag_for_arrow, 1.0), (*end, 0.5), (*end-lag_for_arrow, 0.0)], CYAN.filled())
+                } else {
+                    Polygon::new([(*end, 0.0), (*end, 1.0),(*start+lag_for_arrow, 1.0), (*start, 0.5), (*start+lag_for_arrow, 0.0)], CYAN.filled())
+                };
+                //println!("{name} len {} coords {:?} {:?} {:?}",name.len(), rect.get_points(), draw_loc.backend_coord(rect.get_points().0), draw_loc.backend_coord(rect.get_points().1));
+                //rect_widths.push((draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64);
+                Some(rect)
+                } else {None}
             })).unwrap();
             
-            draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
-                    Text::new(format!("{}", name), (*start, 0.5), ("serif", 40).into_font())
+            draw_loc.draw_series(loci_to_draw[k].iter().enumerate().filter_map(|(m, (name, start, end, pos_orient))| {
+                    //let txt = Text::new(format!("{}", name), (*start, 0.5), ("sans-serif", 80).into_font());
+                    //println!("{name} {:?}", locus_space.estimate_text_size(name, &("sans-serif", 80).into_text_style(locus_space)));
+                if text_widths[m] <= rect_widths[m] {
+                    Some(Text::new(format!("{}", name), ((*start+*end)/2-text_widths[m]/2, 0.7), text_tuple.clone().into_font()))
+                } else {None}
             })).unwrap();
 
             draw_loc
@@ -1269,8 +1310,42 @@ impl<'a> Waveform<'a> {
                     //      make an annotation for which way the gene locus goes 
 
 
-        }).collect()
+        }).collect();
 
+        let dir_width: u64 = 30;
+        let arrow_width: u64 = 10;
+        let height: f64 = 0.8;
+        let arrow_height: f64 = 0.1;
+/*
+        let _: Vec<_> = wide_text_spaces.iter().enumerate().map(|(k, wide_space)| {
+
+            let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
+            let mut draw_loc = ChartBuilder::on(wide_space).build_cartesian_2d((start_loc as u64)..(end_loc as u64), 0.0..1.0).unwrap();
+            draw_loc.configure_mesh().disable_mesh().draw().unwrap();
+            let mut rect_widths: Vec<u64> = loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| { let rect = Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()); println!("{name} len {} coords {:?} {:?} {:?}",name.len(), rect.get_points(), draw_loc.backend_coord(rect.get_points().0), draw_loc.backend_coord(rect.get_points().1)); (draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64}).collect();
+            let text_widths: Vec<u64> = loci_to_draw[k].iter().enumerate().map(|(m, (name, start, end, pos_orient))| wide_space.estimate_text_size(name, &text_tuple.into_text_style(wide_space)).map_or(0, |a| a.0) as u64).collect();
+            
+            draw_loc.draw_series(loci_to_draw[k].iter().enumerate().filter_map(|(m, (name, start, end, pos_orient))| {
+                //let txt = Text::new(format!("{}", name), (*start, 0.5), ("sans-serif", 80).into_font());
+                //println!("{name} {:?}", locus_space.estimate_text_size(name, &("sans-serif", 80).into_text_style(locus_space)));
+                if text_widths[m] <= rect_widths[m] {
+                    let nodes = if *pos_orient { 
+                        vec![(*start, 0.0), (*start, height), (*start+dir_width, height), (*start+(dir_width-arrow_width), height+arrow_height), (*start+(dir_width-arrow_width), height-arrow_height), (*start+dir_width, height)] 
+                    } else { 
+                        vec![(*end, 0.0), (*end, height), (*end-dir_width, height), (*end-(dir_width-arrow_width), height+arrow_height), (*end-(dir_width-arrow_width), height-arrow_height), (*end-dir_width, height)]
+                    };
+                    Some(PathElement::new(nodes, BLACK.filled().stroke_width(2)))
+                } else {None}
+            })).unwrap();
+
+
+
+        }).collect();
+*/
+
+
+
+        locus_drawing_vec
 
     }
     pub(crate) fn with_removed_blocks(&self, remove: &[usize]) -> Option<WaveformDef> {
@@ -1812,6 +1887,7 @@ impl<'a> Noise<'a> {
 
 
 }
+
 
 pub(crate) const MULT_CONST_FOR_H: f64 = -1.835246330265487;
 pub(crate) const ADD_CONST_FOR_H: f64 = 0.18593237745127472;

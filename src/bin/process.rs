@@ -87,6 +87,11 @@ struct Cli {
     #[arg(short, long)]
     max_runs: usize,
 
+    /// This is the file that contains your data for the runs
+    /// If it's not supplied, the runs will be analayzed based on what the motif trace save
+    /// You probably shouldn't be applying this to the runs unless you know you need to
+    #[arg(short, long)]
+    use_analysis_file: Option<String>,
 
     /// Number of sequential runs per chain to discard as burn in. 
     /// If this is not provided, it's set as 0. If this is larger
@@ -110,12 +115,13 @@ struct Cli {
     #[arg(short, long)]
     additional_annotations_file: Option<String>,
 
+    
 }
 
 
 pub fn main() {
 
-    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, discard_num, fasta_file, gff_file, additional_annotations_file} = Cli::parse(); 
+    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, use_analysis_file, discard_num, fasta_file, gff_file, additional_annotations_file} = Cli::parse(); 
 
     let min_chain = discard_num.unwrap_or(0);
 
@@ -235,7 +241,7 @@ pub fn main() {
         annotations.as_mut().map(|a| a.add_go_terms_from_tsv_proteome(Some("CDS"), &additional_annotations));
     };*/
 
-    let all_data_file = set_trace_collections[0].data_name().to_owned();
+    let all_data_file = use_analysis_file.unwrap_or_else(|| set_trace_collections[0].data_name().to_owned());
    
     println!("{all_data_file}");
 

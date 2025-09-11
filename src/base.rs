@@ -3600,13 +3600,13 @@ impl<'a> MotifSet<'a> {
 
                 let signal_name = format!("Motif_{}",i);
                 let sub_signal = motif_set.nth_motif(i).generate_waveform(self.data_ref);
-                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &GREEN, true,annotations, ontologies);
+                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &BLUE, true,annotations, ontologies);
 
                 cumulative_signal += &sub_signal;
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
-                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &plotters::prelude::full_palette::PURPLE, true, annotations, ontologies);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &BLUE, true, annotations, ontologies);
                 
                 }
 
