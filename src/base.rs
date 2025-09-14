@@ -2856,7 +2856,32 @@ impl Motif {
 
         Ok(meme_string)
     }
+    /*
 
+    fn for_meme_cut(&self, background_dist: Option<[f64; BASE_L]>) -> Result<String, InvalidBase> {
+
+        const MEME_DIGITS: usize = 6;
+
+        let mut meme_string = format!("letter-probability matrix: alength= {} w= {}\n", BPS.len(), self.len());
+
+        let information: Vec<f64> = self.pwm.iter().map(|a| a.as_probabilities().into_iter().map(|b| b*b.log2()).sum::<f64>()).collect();
+
+        todo!()
+        //TODO: Somehow get a consistent measure of information here that works to window my
+        //results?
+
+        /*for base in self.pwm.iter() {
+            let probs = base.to_pwm(background_dist)?;
+            for prob in probs.iter() {
+                meme_string = format!("{} {:.MEME_DIGITS$} ", meme_string, prob);
+            }
+            meme_string = format!("{}\n", meme_string);
+        }*/
+        meme_string = format!("{}\n", meme_string);
+
+        Ok(meme_string)
+    }
+*/
 
 }
 
@@ -5187,7 +5212,7 @@ impl<'a> MotifSet<'a> {
                 let check_set = motif_set.combine_motif_sets(&set_and_lass.0);
                 let likelihood = check_set.calc_ln_post()-check_set.ln_prior();
                 let lassoed_like = likelihood-lambda*set_and_lass.0.set[0].0.peak_height.abs();
-                let lassoed_dist = set_and_lass.0.magnitude_signal_with_noise();
+                let lassoed_dist = check_set.magnitude_signal_with_noise();
                 (check_set, lassoed_like, lassoed_dist)
             }).collect();
 
@@ -5548,6 +5573,39 @@ impl StrippedMotifSet {
 
         Ok(savestate_file)
     }
+/*
+    pub fn output_to_meme_cut(&self, background_dist: Option<[f64; BASE_L]>, output_dir: &str, run_name: &str) -> std::io::Result<String> {
+
+        let savestate_file: String = output_dir.to_owned()+"/"+run_name+"_savestate_trim.meme";
+
+        println!("{savestate_file}");
+        let mut outfile_handle = fs::File::create(&savestate_file)?;
+
+        outfile_handle.write(b"MEME Version 4\n\n")?;
+
+        let alphabet = "ALPHABET= ".to_owned()+&BPS.iter().collect::<String>()+"\n";
+
+        outfile_handle.write(&alphabet.into_bytes())?;
+
+        let mut a = self.clone();
+
+        //a.sort_by_height();
+
+        for (i, mot) in a.set_iter().enumerate() {
+
+            let header_str = format!("MOTIF motif_{i} {}\n", mot.peak_height());
+            outfile_handle.write(&header_str.into_bytes())?;
+
+            let body_str = match mot.for_meme_cut(background_dist) {
+                Ok(m) => m,
+                Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, Box::new(e))),
+            };
+            outfile_handle.write(&body_str.into_bytes())?;
+        }
+
+        Ok(savestate_file)
+    }
+*/
 
     /// Generates many fimo runs, one for each `[StrippedMotifSet]` in 
     /// `self.over_additions()`, saving the result of the `i`th element of this

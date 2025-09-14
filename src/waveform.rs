@@ -883,9 +883,9 @@ impl<'a> Waveform<'a> {
 
         let total_dir = format!("{}/{}", signal_directory,signal_name);
 
-        if only_sig {
-            _ = std::fs::remove_dir_all(&total_dir);
-        }
+        //if only_sig {
+          //  _ = std::fs::remove_dir_all(&total_dir);
+        //}
 
         if let Err(creation) = std::fs::create_dir_all(&total_dir) {
             warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
@@ -973,8 +973,7 @@ impl<'a> Waveform<'a> {
 
                     let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
 
-
-                    let mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
+                    eet mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
 
                     draw_loc.configure_mesh().disable_mesh().draw().unwrap();
 
@@ -1013,7 +1012,6 @@ impl<'a> Waveform<'a> {
             let by_loc_dir = format!("{}/from_{:011}_to_{:011}", signal_directory,zero_locs[i], zero_locs[i]+block_lens[i]);
            
 
-            _ = std::fs::remove_dir_all(&by_loc_dir);
 
             if let Err(creation) = std::fs::create_dir_all(&by_loc_dir) {
                 warn!("Could not make or find directory \"{}\"! \n{}", by_loc_dir, creation);
@@ -1022,6 +1020,7 @@ impl<'a> Waveform<'a> {
 
 
 
+            
             let by_loc_file = format!("{}/{}.png", by_loc_dir, signal_name);
 
             let big_plot = BitMapBackend::new(&by_loc_file, (3300, height)).into_drawing_area();
