@@ -73,7 +73,9 @@ fn main() {
 
     println!("mot set bin {motif_set_bin}");
 
-    let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(File::open(motif_set_bin).unwrap());
+    //let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(File::open(motif_set_bin).unwrap());
+
+    let mut try_bincode = File::open(motif_set_bin).unwrap();
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
@@ -82,13 +84,13 @@ fn main() {
 
     let mut mot_set_bin = prep_mot_set_bin.reactivate_set(&data);
 
-    mot_set_bin.sort_by_height();
+    (mot_set_bin, _, _, _) = mot_set_bin.lasso_self(0.0);
 
     let wave_file = format!("{}_waves", args[4].clone());
 
 
 
-    mot_set_meme.save_set_trace_comparisons(&mot_set_bin, &wave_file, "compare_wave", &args[5], &args[6]);
+    mot_set_bin.save_set_trace_comparisons(&mot_set_meme, &wave_file, "compare_wave", &args[5], &args[6]);
     
     if args.len() > 7 {
 

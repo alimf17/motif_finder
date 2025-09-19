@@ -32,9 +32,11 @@ use plotters::prelude::*;
 use plotters::coord::types::{RangedCoordf64, RangedCoordu64};
 
 use plotters::prelude::full_palette::ORANGE;
-use plotters::element::PointCollection;
+use plotters::element::{PointCollection, Drawable};
 
 use plotters::coord::Shift;
+
+use plotters_backend::{BackendCoord, DrawingErrorKind};
 
 use rayon::prelude::*;
 
@@ -65,6 +67,9 @@ const K: f64 = 16.0;
 //This is a constant that tells us when to stop computing the high tail because it literally doesn't matter, since it would be 2^(-53) times its value at most added to the function
 //It is equal to a round number greater than 2^(53/K). Since I chose K = 16, the cutoff is 20.0
 const HIGH_CUT: f64 = 20.0;
+
+pub const LABEL_AREA_SIZE: i32 = 200;
+pub const LABEL_FONT_SIZE: i32 = 60;
 
 /// This is an enum denoting how wide the Kernel should be
 /// It's a unit type in my code: I go with fragment length
@@ -947,12 +952,15 @@ impl<'a> Waveform<'a> {
 
             //let (left, right) = plot.split_horizontally((95).percent_width());
 
-            let (left, right) = big_plot.split_horizontally((94).percent_width());
+            let (pre_left, right) = big_plot.split_horizontally((94).percent_width());
             
+            let (_, left) = pre_left.split_horizontally((5).percent_width());
+
             let (loci, plot) = left.split_vertically(height_loci);
 
-            let (right_space, _) = right.split_vertically((95).percent_height());
+            let (right_pre, _) = right.split_vertically((95).percent_height());
 
+            let (_, right_space) = right.split_horizontally((10).percent_width());
             let mut bar = ChartBuilder::on(&right_space).margin(15).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 40)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
 
             bar.configure_mesh()
@@ -963,9 +971,11 @@ impl<'a> Waveform<'a> {
 
             bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
 
-            let (upper, lower) = plot.split_vertically((86).percent_height());
+            let (upper, pre_lower) = plot.split_vertically((86).percent_height());
 
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, &upper);
+            let (_, lower) = pre_lower.split_vertically((20).percent_height());
+
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
 /*
             if let Some(ref ontology_collection) = ontology_vec {
                 let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(ontology_collection), ontology_bins.as_ref());
@@ -1075,7 +1085,7 @@ impl<'a> Waveform<'a> {
             chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
             */
             
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, &upper);
+            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
 
             if let Some(ref ontology_collection) = ontology_vec{
                 let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
@@ -1109,13 +1119,13 @@ impl<'a> Waveform<'a> {
     //TODO: 
     /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
     /// Mainly because I don't want the hassle of a Result type. 
-    pub fn create_waveform_block_i<'b, DB: DrawingBackend>(&self, data_ref: &AllDataUse, i: usize, zero_loc: usize, trace_color: &'b RGBColor, range: Option<[f64;2]>, draw: &'b DrawingArea<DB, Shift>) -> (ChartContext<'b, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>, Vec<usize>) {
+    pub fn create_waveform_block_i<'b, DB: DrawingBackend>(&self, data_ref: &AllDataUse, i: usize, zero_loc: usize, trace_color: &'b RGBColor, range: Option<[f64;2]>, include_legend: bool, draw: &'b DrawingArea<DB, Shift>) -> (ChartContext<'b, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>, Vec<usize>) {
         let mut build_chart =  ChartBuilder::on(&draw);
 
-        build_chart.set_label_area_size(LabelAreaPosition::Left, 100)
-            .set_label_area_size(LabelAreaPosition::Bottom, 100)
-            .x_label_area_size(100)
-            .y_label_area_size(100);
+        build_chart.set_label_area_size(LabelAreaPosition::Left, LABEL_AREA_SIZE)
+            .set_label_area_size(LabelAreaPosition::Bottom, LABEL_AREA_SIZE)
+            .x_label_area_size(LABEL_AREA_SIZE)
+            .y_label_area_size(LABEL_AREA_SIZE);
             //.caption("Signal Comparison", ("sans-serif", 80));
 
 
@@ -1145,11 +1155,12 @@ impl<'a> Waveform<'a> {
         let mut chart = build_chart.build_cartesian_2d((dat_block.0[0] as f64)..(*dat_block.0.last().unwrap() as f64), min..max).unwrap();
 
         chart.configure_mesh()
-            .x_label_style(("sans-serif", 40))
-            .y_label_style(("sans-serif", 40))
+            .x_label_style(("sans-serif", LABEL_FONT_SIZE))
+            .y_label_style(("sans-serif", LABEL_FONT_SIZE))
             .x_label_formatter(&|v| format!("{:.0}", v))
             .x_desc("Genome Location (Bp)")
-            .y_desc("Signal Intensity")
+            .y_desc("log2(IP/control)")
+            .axis_style(ShapeStyle { color: BLACK.into(), filled: false, stroke_width: 3})
             .disable_mesh().draw().unwrap();
 
         const HORIZ_OFFSET: i32 = -5;
@@ -1157,10 +1168,11 @@ impl<'a> Waveform<'a> {
 
         chart.draw_series(dat_block.1.iter().zip(dat_block.0.iter()).map(|(&k, &i)| Circle::new((i as f64, k),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
-        chart.draw_series(LineSeries::new(sig_block.1.iter().zip(sig_block.0.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color.clone()).filled()));
+        chart.draw_series(LineSeries::new(sig_block.1.iter().zip(sig_block.0.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Predicted Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color.clone()).filled()));
 
-        chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
-
+        if include_legend{
+            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(20).border_style(&WHITE).label_font(("Calibri", 60)).draw().unwrap();
+        }
 
         (chart, dat_block.0)
     }
@@ -1213,7 +1225,7 @@ impl<'a> Waveform<'a> {
 
             plot.fill(&WHITE).unwrap();
 
-            let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, Some([min_alter, max_alter]), &plot);
+            let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, Some([min_alter, max_alter]), false, &plot);
             /*let mut chart = ChartBuilder::on(&plot)
               .set_label_area_size(LabelAreaPosition::Left, 200)
               .set_label_area_size(LabelAreaPosition::Bottom, 200)
@@ -1240,6 +1252,8 @@ impl<'a> Waveform<'a> {
 
             chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
 
+        
+            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(20).border_style(&WHITE).label_font(("Calibri", 60)).draw().unwrap();
             //chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
 
         }
@@ -1252,7 +1266,7 @@ impl<'a> Waveform<'a> {
     pub fn create_block_annotations<'b, DB: DrawingBackend>(&self, start_loc: usize, end_loc: usize, annotations: &GenomeAnnotations, ontology_collection: &[&str], ontology_bins: Option<&HashMap<String, Vec<&Locus>>>, locus_color: &'b RGBColor, total_locus_space: &'b DrawingArea<DB, Shift>) -> Vec<ChartContext<'b, DB, Cartesian2d<RangedCoordu64, RangedCoordf64>>> {
   
 
-        let (_, working_space) = total_locus_space.split_horizontally(100);
+        let (_, working_space) = total_locus_space.split_horizontally(LABEL_AREA_SIZE);
 
 
         let (wide_locus_text, locus_full_space) = working_space.split_vertically((50).percent_height());
@@ -1264,7 +1278,7 @@ impl<'a> Waveform<'a> {
         let loci_to_draw =  annotations.collect_ranges(start_loc as u64, end_loc as u64, &None, Some(ontology_collection), ontology_bins);
 
 
-        let text_tuple = ("sans-serif", 80);
+        let text_tuple = ("sans-serif", LABEL_FONT_SIZE);
         
         let lag_for_arrow = 50u64;
 
@@ -1280,7 +1294,7 @@ impl<'a> Waveform<'a> {
             let rect_widths: Vec<u64> = loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| { let rect = Rectangle::new([(*start, 0.0), (*end, 1.0)], CYAN.filled()); (draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64}).collect();
                 //Vec::with_capacity(loci_to_draw[k].len());
 
-            let text_widths: Vec<u64> = loci_to_draw[k].iter().enumerate().map(|(m, (name, start, end, pos_orient))| locus_space.estimate_text_size(name, &text_tuple.into_text_style(locus_space)).map_or(0, |a| a.0) as u64).collect();
+            let text_widths: Vec<u64> = loci_to_draw[k].iter().enumerate().map(|(m, (name, start, end, pos_orient))| locus_space.estimate_text_size(name, &text_tuple.into_text_style(locus_space)).map_or(0, |a| a.0+(lag_for_arrow as u32)) as u64).collect();
 
             draw_loc.draw_series(loci_to_draw[k].iter().enumerate().filter_map(|(m, (name, start, end, pos_orient))| {
                 if text_widths[m] <= rect_widths[m] {
@@ -1288,6 +1302,19 @@ impl<'a> Waveform<'a> {
                     Polygon::new([(*start, 0.0),(*start, 1.0),(*end-lag_for_arrow, 1.0), (*end, 0.5), (*end-lag_for_arrow, 0.0)], CYAN.filled())
                 } else {
                     Polygon::new([(*end, 0.0), (*end, 1.0),(*start+lag_for_arrow, 1.0), (*start, 0.5), (*start+lag_for_arrow, 0.0)], CYAN.filled())
+                };
+                //println!("{name} len {} coords {:?} {:?} {:?}",name.len(), rect.get_points(), draw_loc.backend_coord(rect.get_points().0), draw_loc.backend_coord(rect.get_points().1));
+                //rect_widths.push((draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64);
+                Some(rect)
+                } else {None}
+            })).unwrap();
+            
+            draw_loc.draw_series(loci_to_draw[k].iter().enumerate().filter_map(|(m, (name, start, end, pos_orient))| {
+                if text_widths[m] <= rect_widths[m] {
+                let rect = if *pos_orient {
+                    HollowPolygon::new([(*start, 0.0),(*start, 1.0),(*end-lag_for_arrow, 1.0), (*end, 0.5), (*end-lag_for_arrow, 0.0), (*start, 0.0)], ShapeStyle { color: BLACK.into(), filled: true, stroke_width: 5})
+                } else {
+                    HollowPolygon::new([(*end, 0.0), (*end, 1.0),(*start+lag_for_arrow, 1.0), (*start, 0.5), (*start+lag_for_arrow, 0.0), (*end, 0.0)], ShapeStyle { color: BLACK.into(), filled: true, stroke_width: 5})
                 };
                 //println!("{name} len {} coords {:?} {:?} {:?}",name.len(), rect.get_points(), draw_loc.backend_coord(rect.get_points().0), draw_loc.backend_coord(rect.get_points().1));
                 //rect_widths.push((draw_loc.backend_coord(rect.get_points().1).0-draw_loc.backend_coord(rect.get_points().0).0) as u64);
@@ -1891,6 +1918,43 @@ impl<'a> Noise<'a> {
 pub(crate) const MULT_CONST_FOR_H: f64 = -1.835246330265487;
 pub(crate) const ADD_CONST_FOR_H: f64 = 0.18593237745127472;
 
+pub(crate) struct HollowPolygon<Coord> {
+    points: Vec<Coord>,
+    style: ShapeStyle,
+}
+impl<Coord> HollowPolygon<Coord> {
+    /// Create a new polygon
+    /// - `points`: The iterator of the points
+    /// - `style`: The shape style
+    /// - returns the created element
+    pub fn new<P: Into<Vec<Coord>>, S: Into<ShapeStyle>>(points: P, style: S) -> Self {
+       
+        Self {
+            points: points.into(),
+            style: style.into(),
+        }
+    }
+}
+
+impl<'a, Coord> PointCollection<'a, Coord> for &'a HollowPolygon<Coord> {
+    type Point = &'a Coord;
+    type IntoIter = &'a [Coord];
+    fn point_iter(self) -> &'a [Coord] {
+        &self.points
+    }
+}
+
+impl<Coord, DB: DrawingBackend> Drawable<DB> for HollowPolygon<Coord> {
+    fn draw<I: Iterator<Item = BackendCoord>>(
+        &self,
+        points: I,
+        backend: &mut DB,
+        _: (u32, u32),
+    ) -> Result<(), DrawingErrorKind<DB::ErrorType>> {
+        
+        backend.draw_path(points, &self.style)
+    }
+}
 
 impl Mul<&Vec<f64>> for &Noise<'_> {
 
@@ -1916,8 +1980,8 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
         }
 
         sum
-    }
-    }
+    }//}
+}
 
 
 

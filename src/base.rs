@@ -3252,8 +3252,8 @@ impl<'a> MotifSet<'a> {
             signal += &(mot.generate_waveform(data_ref));
         }
 
-        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0)))
-                                                                    .filter_map(|a| if a.1[0].is_finite() {Some(a)} else {None}).collect();
+        let set_with_nulls: Vec<(Motif, Vec<f64>)> = set.into_iter().map(|a| (a.clone(), if make_poss == HandleImpossibleMotif::LeaveUnchanged { a.return_any_null_binds_by_hamming_no_limit(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0)} else {a.return_any_null_binds_by_hamming(data_ref.null_seq(),data_ref.min_height(), data_ref.offset()*2.0)}))
+                                                                    .filter_map(|a| if make_poss == HandleImpossibleMotif::LeaveUnchanged || a.1[0].is_finite() {Some(a)} else {None}).collect();
         
         if set_with_nulls.len() == 0 { return Err(Box::new(MemeParseError::GivesEmptySet));}
 
@@ -3266,7 +3266,7 @@ impl<'a> MotifSet<'a> {
 
         let test = full_set.ln_posterior();
 
-        if test.is_infinite() { return Err(Box::new(MemeParseError::GivesEmptySet));}
+        if make_poss != HandleImpossibleMotif::LeaveUnchanged && test.is_infinite() { return Err(Box::new(MemeParseError::GivesEmptySet));}
         Ok(full_set)
 
     }
@@ -5445,7 +5445,7 @@ impl Debug for MotifSet<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HandleImpossibleMotif {
     MakePossible,
     OmitFromSet,
