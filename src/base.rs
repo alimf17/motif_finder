@@ -831,7 +831,7 @@ impl Base {
     /// binding scores of `self` from a vector of all 1.0
     /// If base is Some(&Base), it returns the squared Eucliean distance of the exponentiated 
     /// binding scores between it and self.
-    pub fn dist_bind_sq(&self, base: Option<&Base>) -> f64 {
+    /*pub fn dist_bind_sq(&self, base: Option<&Base>) -> f64 {
 
         let binds: [f64; BASE_L] = core::array::from_fn(|a| self.scores[a].exp2());
         match base {
@@ -842,6 +842,34 @@ impl Base {
                 binds.into_iter().zip(other_binds.into_iter()).map(|(a,b)| (a.exp2()-b.exp2()).powi(2)).sum::<f64>() 
             },
         }
+
+
+    }*/
+
+    pub fn dist_bind_sq(&self, base: Option<&Base>) -> f64 {
+        /*let probs = unsafe { self.to_pwm(None).unwrap_unchecked()};
+        let alter_probs = base.map(|a| unsafe { a.to_pwm(None).unwrap_unchecked()}).unwrap_or([0.25;BASE_L]);
+        probs.into_iter().zip(alter_probs.into_iter()).map(|(a,b)| (a*b).sqrt()).sum::<f64>()
+        */
+        base.map(|b| if self.best_base() == b.best_base() {0.0} else {1.0}).unwrap_or(1.0)
+    }
+
+    pub fn pearson_distance(&self, base: Option<&Base>) -> f64 {
+
+        //SAFETY: to_pwm() is always Ok if the parameter is None
+
+        let Some(base_pwm) = base.map(|b| unsafe{b.to_pwm(None).unwrap_unchecked()}) else {return 1.0;};
+
+        let self_pwm = unsafe{ self.to_pwm(None).unwrap_unchecked()};
+
+        let self_vec: [f64; BASE_L] = core::array::from_fn(|a| self_pwm[a]-0.25);
+        let base_vec: [f64; BASE_L] = core::array::from_fn(|a| base_pwm[a]-0.25);
+
+        let inner_prod = self_vec.iter().zip(base_vec.iter()).map(|(&a,&b)| a*b).sum::<f64>();
+        let mag_self = self_vec.iter().map(|&a| a*a).sum::<f64>().sqrt();
+        let mag_base = base_vec.iter().map(|&a| a*a).sum::<f64>().sqrt();
+
+        1.0-inner_prod/(mag_self*mag_base)
 
 
     }
@@ -2794,18 +2822,20 @@ impl Motif {
 
         let mut final_distance: f64 = f64::INFINITY;
 
-        for off_center in 0..=(long_len-short_len) {
+        /*for off_center in 0..=(long_len-short_len) {
             let mut distance: f64 = 0.0;
             if off_center > 0 {
                 for i in 0..off_center {
                     //TODO: change this to get_unchecked if there's a performance benefit
-                    distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len);
+                    //distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len);
+                    distance += pwm_long[i].dist_bind_sq(None);
                 }
             }
 
             if (short_len+off_center) < long_len {
                 for i in (short_len+off_center)..long_len {
-                    distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len); 
+                    distance += pwm_long[i].dist_bind_sq(None);
+                    //distance += pwm_long[i].dist_matter_weight(long_len, min_height,None, short_len); 
                 }
             }
 
@@ -2815,15 +2845,53 @@ impl Motif {
                 let b2 = &pwm_long[off_center+ind];
 
 
-                distance += b2.dist_matter_weight(long_len, min_height,Some(b1), short_len);
+                //distance += b2.dist_matter_weight(long_len, min_height,Some(b1), short_len);
+                distance += b2.dist_bind_sq(Some(b1));
 
             }
+            //distance /= (long_len as f64);
+            //final_distance = final_distance.min(-distance.ln());
+            final_distance = final_distance.min(distance)
+        }*/
+
+
+        println!("short {short_len} long {long_len}");
+        for off_center in -((short_len-1) as isize)..(long_len as isize) {
+
+            let mut distance = 0_f64;
+
+            let mut long_ind = 0_usize;
+
+            for i in 0..off_center {
+                //println!("pre_long {i}");
+                distance+=pwm_long[i as usize].pearson_distance(None);
+            }
+
+            for i in 0_isize..(short_len as isize) {
+
+                //println!("{} {} {}", off_center, i, i+off_center);
+
+                if (i+off_center) < 0 || ( ((i+off_center) as usize) >= long_len) {
+                    distance+=pwm_short[i as usize].pearson_distance(None);
+                } else {
+                    long_ind=((i+off_center) as usize);
+                    distance+=pwm_short[i as usize].pearson_distance(Some(&pwm_long[long_ind]));
+                }
+
+            }
+            for i in (long_ind+1)..long_len {
+                //println!("long {i}");
+                distance+=pwm_long[i].pearson_distance(None);
+            }
+
             final_distance = final_distance.min(distance);
         }
 
 
+        final_distance
+
         //This isn't a CODE problem, it's an f64 precision one
-        if final_distance > 0.0 { final_distance.sqrt() } else {0.0}
+        //if final_distance > 0.0 { final_distance.sqrt() } else {0.0}
     }
 
 
@@ -3616,7 +3684,7 @@ impl<'a> MotifSet<'a> {
         outfile_handle.write(&buffer).expect("We just created this file");
 
         
-        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &BLUE, false, annotations, ontologies);
+        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &(RGBColor(0x56, 0xB4, 0xE9)), false, annotations, ontologies);
 
         let mut cumulative_signal = self.signal.derive_zero();
 
@@ -3625,13 +3693,13 @@ impl<'a> MotifSet<'a> {
 
                 let signal_name = format!("Motif_{}",i);
                 let sub_signal = motif_set.nth_motif(i).generate_waveform(self.data_ref);
-                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &BLUE, true,annotations, ontologies);
+                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &((RGBColor(0x56, 0xB4, 0xE9))), true,annotations, ontologies);
 
                 cumulative_signal += &sub_signal;
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
-                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &BLUE, true, annotations, ontologies);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &(RGBColor(0x56, 0xB4, 0xE9)), true, annotations, ontologies);
                 
                 }
 
@@ -3643,14 +3711,14 @@ impl<'a> MotifSet<'a> {
 
     /// This takes `self` and `other_set` and plots both of their occupancy 
     /// traces in each location in the directory 
-    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let self_sig = self.recalced_signal();
         let alter_sig = other_set.recalced_signal();
 
         let signal_directory: String = format!("{}/{}_{}_occupancy_compare",output_dir,file_name, other_name);
 
-       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &plotters::prelude::full_palette::PINK_600, &plotters::prelude::full_palette::BLUE_A200,self_name, other_name)?;
+       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &(RGBColor(0x56, 0xB4, 0xE9)), &(RGBColor(0xD5, 0x5E, 0x00)),self_name, other_name, annotations, ontologies)?;
 
        Ok(())
 

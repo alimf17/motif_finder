@@ -6,7 +6,7 @@ use std::io::Read;
 use motif_finder::ECOLI_FREQ;
 use motif_finder::base::*;
 use motif_finder::waveform::*;
-
+use motif_finder::gene_loci::*;
 
 
 
@@ -89,17 +89,31 @@ fn main() {
     let wave_file = format!("{}_waves", args[4].clone());
 
 
+    let gff_file = args.get(7);
+    let additional_annotations_file = args.get(8);
 
-    mot_set_bin.save_set_trace_comparisons(&mot_set_meme, &wave_file, "compare_wave", &args[5], &args[6]);
-    
-    if args.len() > 7 {
+    let mut potential_annotations: Option<GenomeAnnotations> = gff_file.as_ref().map(|a| match GenomeAnnotations::from_gff_file(a) {
+        Err(e) => {println!("genome annotations went wrong: {:?}. Continuing without them.", e); None},
+        Ok(annotated) => Some(annotated),
+    }).flatten();
 
-        for i in 7..args.len() {
+    if let Some(added_annotations) = additional_annotations_file { potential_annotations.as_mut().map(|a| {
+        let ontology = if a.ontologies().contains("CDS") { Some("CDS") } else if a.ontologies().contains("gene") { Some("gene")} else {None};
+        if let Err(e) = a.add_go_terms_from_tsv_proteome(ontology, &added_annotations) { println!("Adding terms went wrong {:?}. Left the genome annotations unmodified.", e);};
+    });};
+
+
+    mot_set_bin.save_set_trace_comparisons(&mot_set_meme, &wave_file, "compare_wave", &args[5], &args[6],potential_annotations.as_ref(),Some(&["CDS"]));
+   
+    let comparison = 7_usize + (gff_file.is_some() as usize) + (additional_annotations_file.is_some() as usize);
+    if args.len() > comparison {
+
+        for i in comparison..args.len() {
 
             let num_motifs: usize = args[i].parse().unwrap();
             let sub_bin = mot_set_bin.only_n_strongest(num_motifs);
 
-            mot_set_meme.save_set_trace_comparisons(&sub_bin, &wave_file, "compare_sub_wave", &args[5], &format!("TARJIM {num_motifs} Motifs"));
+            mot_set_meme.save_set_trace_comparisons(&sub_bin, &wave_file, "compare_sub_wave", &args[5], &format!("TARJIM {num_motifs} Motifs"), potential_annotations.as_ref(),Some(&["CDS"]));
 
 
         }

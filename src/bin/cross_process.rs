@@ -111,7 +111,7 @@ pub fn main() {
 
     let data_ref = AllDataUse::new(&data_struct, 0.0).unwrap();
 
-    let motif_sets: Vec<(String, StrippedMotifSet)> = motif_set_files.into_iter().filter_map(|(name, file)| {
+    let motif_sets: Vec<(String, StrippedMotifSet)> = motif_set_files.into_iter().filter_map(|(file, name)| {
 
         let parsed_set: Result<StrippedMotifSet, _> = attempt_bincode_serde_read_with_decomp(&file, Some(&mut scratch_space_for_buffer), None);
 
