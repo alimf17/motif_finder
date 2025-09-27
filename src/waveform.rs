@@ -19,7 +19,7 @@ use crate::gene_loci::*;
 use log::warn;
 
 use statrs::distribution::{StudentsT, Continuous, ContinuousCDF};
-
+use enum_dispatch::enum_dispatch;
 
 use aberth;
 use num_complex::Complex;
@@ -38,6 +38,7 @@ use plotters::coord::Shift;
 
 use plotters_backend::{BackendCoord, DrawingErrorKind};
 
+
 use rayon::prelude::*;
 
 use assume::assume;
@@ -48,6 +49,7 @@ use serde::{Serialize, Deserialize};
 use strum::{EnumCount, VariantArray as VariantArrayArr, IntoEnumIterator};
 use strum_macros::{EnumCount as EnumCountMacro, VariantArray, EnumIter};
 
+use thiserror::Error;
 pub(crate) const WIDE: f64 = 3.0;
 
 use rand::Rng;
@@ -222,6 +224,17 @@ pub enum WaveCreationError {
     MisalignedSequenceSpacer,
     OverruningDataBlock,
 }
+
+///This is a public enum that says whether you want SVGs or PNGs for your
+///occupancy trace outputs. Note that you generally want to favor PNGs over 
+///SVGs for general output, as they are smaller, while SVGs are larger but
+///easier to edit
+#[derive(Copy, Clone, Debug)]
+pub enum WaveOutputFile{
+    Png,
+    Svg,
+}
+
 
 impl std::fmt::Display for WaveCreationError {
 
@@ -852,6 +865,8 @@ impl<'a> Waveform<'a> {
         (0..self.start_dats.len()).map(|i| self.generate_ith_indexed_locs_and_data(i, start_lens[i])).collect()
     }
 
+
+
     pub(crate) fn generate_ith_indexed_locs_and_data(&self, i: usize, start_len: usize) ->  Option<(Vec<usize>, Vec<f64>)> {
 
         if i >= self.start_dats.len() {
@@ -866,37 +881,38 @@ impl<'a> Waveform<'a> {
 
     }
 
-    /// Saves an image set of occupancy traces compared to data twice: once to 
-    /// `{signal_directory}/{signal_name}/from_{start}_to_{end}.png, and once 
-    /// to `{signal_directory}/from_{start}_to_{end}/{signal_name}.png
+    pub(crate) fn hit_on_block(&self, i: usize) -> bool {
+        if i >= self.start_dats.len() { return false;}
+
+        let end_len = if i < (self.start_dats.len()-1) { self.start_dats[i+1] } else { self.wave.len() };
+        self.wave[self.start_dats[i]..end_len].iter().any(|&a| a> 0.0)
+    }
+
+    /// Saves an image set of occupancy traces compared to data to
+    /// to either `{signal_directory}/from_{start}_to_{end}/{signal_name}.svg`
+    /// or `{signal_directory}/from_{start}_to_{end}/{signal_name}.png` 
     /// If this fails, will simply warn you but won't return a hard error
+    /// If `only_sig` is true, will only return motif occupancy traces that 
+    /// actually hit on a locus. 
     /// If `annotations` is Some, will save loci as well. If `ontologies` 
     /// is Some while `annotations` is Some, will only save the ontologies included on top
-    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, only_sig: bool, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) {
+    /// The image format depends on `format_vector`:
+    /// - If `format_vector` is empty, everything will be a png. 
+    /// - If `format_vector` has only one element, all outputs will follow that format
+    /// - If `format_vector` has more than one element, all outputs will follow up to 
+    /// the final element, and the rest will be pngs. 
+    /// - The intention is that `format_vector` can be basically ignored if you just
+    /// want default behavior, specified once and repeated forever, or specified per
+    /// generated gene locus. The behavior where we "fill out" the rest of the gene loci
+    /// with PNGs is just because I don't want to do error handling, and if you're being
+    /// that specific, you should be paying attention granularly anyway. 
+    pub fn save_waveform_to_directory(&self, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, only_sig: bool, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>, format_vector: &[WaveOutputFile]) {
 
         let current_resid = data_ref.data()-&self;
 
         let zero_locs = data_ref.zero_locs();
         
         let block_lens = data_ref.data().seq().block_lens();
-
-        //let blocked_locs_and_signal = self.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
-
-        //let blocked_locs_and_data = data_ref.data().generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("Our data BETTER correspond to data_ref");
-
-        //let blocked_locs_and_resid = current_resid.generate_all_indexed_locs_and_data(data_ref.zero_locs()).expect("We designed signal to correspond to data_ref");
-
-        let total_dir = format!("{}/{}", signal_directory,signal_name);
-
-        //if only_sig {
-          //  _ = std::fs::remove_dir_all(&total_dir);
-        //}
-
-        if let Err(creation) = std::fs::create_dir_all(&total_dir) {
-            warn!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
-            println!("Could not make or find directory \"{}\"! \n{}", total_dir, creation);
-            return;
-        };
 
         let (ontology_count, ontology_vec, ontology_bins) = match annotations {
 
@@ -914,111 +930,33 @@ impl<'a> Waveform<'a> {
         };
 
 
-        const LOCUS_HEIGHT: u32 = 200;
+        const LOCUS_HEIGHT: u32 = 110;
 
         let height_loci: u32 = ontology_count*LOCUS_HEIGHT*2;
 
         let height: u32 = 1500+height_loci;
 
+        let format_specifier = |format_vector: &[WaveOutputFile], k: usize| {
+            match format_vector.len() {
+                0 => WaveOutputFile::Png,
+                1 => (format_vector[0]),
+                _ => format_vector.get(k).copied().unwrap_or(WaveOutputFile::Png),
+            }
+        };
 
 
         for i in 0..zero_locs.len() {
 
+            let mut format = format_specifier(format_vector, i);
+
             if only_sig {
                 if self.read_wave()[self.start_dats[i]..*self.start_dats().get(i+1).unwrap_or(&self.read_wave().len())].iter().all(|&x| x == 0.0) { continue; }
-            }
-
-            let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;
-
-            let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
-
-            let big_plot = BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area();
-
-            let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
-
-            big_plot.fill(&WHITE).unwrap();
-
-
-            /*let mut remain_loci = loci;
-            
-            let locus_spaces: Vec<_> = (0..ontology_count).map(move |_| {
-                let (locus_space, remainder) = remain_loci.split_vertically(LOCUS_HEIGHT);
-                remain_loci = remainder;
-                locus_space
-            }).collect();
-
-*/
-            //let (loci, plot) = big_plot.split_vertically(height_loci);
-
-            //let (left, right) = plot.split_horizontally((95).percent_width());
-
-            let (pre_left, right) = big_plot.split_horizontally((94).percent_width());
-            
-            let (_, left) = pre_left.split_horizontally((5).percent_width());
-
-            let (loci, plot) = left.split_vertically(height_loci);
-
-            let (right_pre, _) = right.split_vertically((95).percent_height());
-
-            let (_, right_space) = right.split_horizontally((10).percent_width());
-            let mut bar = ChartBuilder::on(&right_space).margin(15).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 40)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
-
-            bar.configure_mesh()
-                .y_label_style(("sans-serif", 40))
-                .disable_mesh().draw().unwrap();
-
-            let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
-
-            bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
-
-            let (upper, pre_lower) = plot.split_vertically((86).percent_height());
-
-            let (_, lower) = pre_lower.split_vertically((20).percent_height());
-
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
-/*
-            if let Some(ref ontology_collection) = ontology_vec {
-                let loci_to_draw =  annotations.expect("We would not be here if this was None").collect_ranges(loc_block[0] as u64, *loc_block.last().expect("non empty") as u64, &None, Some(ontology_collection), ontology_bins.as_ref());
-                for (k, locus_space) in locus_spaces.iter().enumerate() {
-
-                    let ontology = ontology_collection.get(k).expect("locus spaces and ontology collection are synced");
-
-                    eet mut draw_loc = ChartBuilder::on(locus_space).build_cartesian_2d(loc_block[0]..*loc_block.last().expect("non empty"), 0.0..1.0).unwrap();
-
-                    draw_loc.configure_mesh().disable_mesh().draw().unwrap();
-
-                    draw_loc.draw_series(loci_to_draw[k].iter().map(|(name, start, end, pos_orient)| {
-                        Rectangle::new([(start, 0.0), (end, 1.0)], CYAN.filled()) +
-                        Text::new(format!("{:?}", name), (14, 0), ("sans-serif", 10).into_font())
-                    })).unwrap();
-
-                    //TODO: make rectangles draw gene loci
-                    //      make text boxes on top of rectangles
-                    //      make an annotation for which way the gene locus goes 
-
-
-                };
+            } /*else {
+                if self.read_wave()[self.start_dats[i]..*self.start_dats().get(i+1).unwrap_or(&self.read_wave().len())].iter().all(|&x| x == 0.0) {format=WaveOutputFile::Png;}
             }*/
 
-            if let Some(ref ontology_collection) = ontology_vec{
-                let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
-            }
-            let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
-
-                let tup = data_ref.background_ref().cd_and_sf(a);
-                if tup.0 >= tup.1 { (tup.0-0.5)*2.0 } else {(tup.1-0.5)*2.0} } ).zip(loc_block.iter()).map(|(a, &b)| (a,  (b as f64))).collect();
-
-            let mut map = ChartBuilder::on(&lower)
-                .set_label_area_size(LabelAreaPosition::Left, 100)
-                .set_label_area_size(LabelAreaPosition::Bottom, 100)
-                .build_cartesian_2d(((loc_block[0] as f64))..((*loc_block.last().unwrap() as f64)), 0_f64..1_f64).unwrap();
-
-            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
-
-
-            map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
-
-
+            let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;
+            
             let by_loc_dir = format!("{}/from_{:011}_to_{:011}", signal_directory,zero_locs[i], zero_locs[i]+block_lens[i]);
            
 
@@ -1028,93 +966,48 @@ impl<'a> Waveform<'a> {
                 continue;
             }
 
+            let extension = match format { 
+                WaveOutputFile::Png => "png",
+                WaveOutputFile::Svg => "svg",
+            };
+
+            let by_loc_file = format!("{}/{}.{}", by_loc_dir, signal_name, extension);
 
 
-            
-            let by_loc_file = format!("{}/{}.png", by_loc_dir, signal_name);
-
-            let big_plot = BitMapBackend::new(&by_loc_file, (3300, height)).into_drawing_area();
-
-            let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
-
-            big_plot.fill(&WHITE).unwrap();
-            
-            //let (loci, plot) = big_plot.split_vertically(height_loci);
-
-            //let (left, right) = plot.split_horizontally((95).percent_width());
+             match format {
+                WaveOutputFile::Png => {
+                    let big_plot = BitMapBackend::new(&by_loc_file, (3300, height)).into_drawing_area();
+                    let (upper, loci) = prep_drawing_area(&big_plot, height_loci);
+                    let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
+                    if let Some(ref ontology_collection) = ontology_vec{
+                        let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
+                    };
+                },
 
 
-            let (left, right) = big_plot.split_horizontally((95).percent_width());
-            
-            let (loci, plot) = left.split_vertically(height_loci);
-
-            let (right_space, _) = right.split_vertically((95).percent_height());
-
-            let mut bar = ChartBuilder::on(&right_space).margin(10).set_label_area_size(LabelAreaPosition::Right, 100).caption("Deviance", ("sans-serif", 50)).build_cartesian_2d(0_f64..1_f64, 0_f64..1_f64).unwrap();
-
-            bar.configure_mesh()
-                .y_label_style(("sans-serif", 40))
-                .disable_mesh().draw().unwrap();
-
-            let deviances = (0..10000_usize).map(|x| (x as f64)/10000.0).collect::<Vec<_>>();
-
-            bar.draw_series(deviances.windows(2).map(|x| Rectangle::new([( 0.0, x[0]), (1.0, x[1])], derived_color.get_color(x[0]).filled()))).unwrap();
-
-            let (upper, lower) = plot.split_vertically((86).percent_height());
-
-            /*let mut chart = ChartBuilder::on(&upper)
-                .set_label_area_size(LabelAreaPosition::Left, 100)
-                .set_label_area_size(LabelAreaPosition::Bottom, 100)
-                .caption("Signal Comparison", ("Times New Roman", 80))
-                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
-
-            chart.configure_mesh()
-                .x_label_style(("sans-serif", 70))
-                .y_label_style(("sans-serif", 70))
-                .x_label_formatter(&|v| format!("{:.0}", v))
-                .x_desc("Genome Location (Bp)")
-                .y_desc("Signal Intensity")
-                .disable_mesh().draw().unwrap();
+                WaveOutputFile::Svg => {
+                    let big_plot = SVGBackend::new(&by_loc_file, (3300, height)).into_drawing_area();
+                    let (upper, loci) = prep_drawing_area(&big_plot, height_loci);
+                    let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
+                    if let Some(ref ontology_collection) = ontology_vec{
+                        let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
+                    };
+                },
+             };
 
 
-            chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
 
-
-            chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label("Proposed Occupancy Trace").legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
-
-            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Calibri", 40)).draw().unwrap();
-            */
-            
-            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
+/*            let (chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, true, &upper);
 
             if let Some(ref ontology_collection) = ontology_vec{
                 let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
             }
-
-            let abs_resid: Vec<(f64, f64)> = res_block.iter().map(|&a| {
-
-                let tup = data_ref.background_ref().cd_and_sf(a);
-                if tup.0 >= tup.1 { (tup.0-0.5)*2.0 } else {(tup.1-0.5)*2.0} } ).zip(loc_block.iter()).map(|(a, &b)| (a, b as f64)).collect();
-
-            let mut map = ChartBuilder::on(&lower)
-                .set_label_area_size(LabelAreaPosition::Left, 100)
-                .set_label_area_size(LabelAreaPosition::Bottom, 50)
-                .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), 0_f64..1_f64).unwrap();
-
-            map.configure_mesh().x_label_style(("sans-serif", 0)).y_label_style(("sans-serif", 0)).x_desc("Deviance").axis_desc_style(("sans-serif", 40)).set_all_tick_mark_size(0_u32).disable_mesh().draw().unwrap();
-
-
-            map.draw_series(abs_resid.windows(2).map(|x| Rectangle::new([(x[0].1, 0.0), (x[1].1, 1.0)], derived_color.get_color(x[0].0).filled()))).unwrap();
-
-
-
-
-
-
+*/
         }
-    
+   
 
     }
+
 
     //TODO: 
     /// Returns a blank chart without coordinates if `i` is not less than the the number of blocks in `self`.
@@ -1183,10 +1076,10 @@ impl<'a> Waveform<'a> {
     }
 
     /// Saves an image set of `self` and `alternative` compared to data
-    /// to `{signal_directory}/{signal_name}/from_{start}_to_{end}.png 
+    /// to `{signal_directory}/{signal_name}/from_{start}_to_{end}.svg 
     /// # Errors
     /// - If a necessary file or directory could not be created 
-    pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_waveform_comparison_to_directory(&self, alternative: &Waveform, data_ref: &AllDataUse, signal_directory: &str, signal_name: &str, trace_color: &RGBColor, alter_color: &RGBColor, self_name: &str, alter_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>, format_vector: &[WaveOutputFile]) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         //TODO: lowercase "bp". Use kbp instead of bp
         let current_resid = data_ref.data()-&self;
@@ -1214,8 +1107,16 @@ impl<'a> Waveform<'a> {
 
         std::fs::create_dir_all(&total_dir)?;
         
-        const LOCUS_HEIGHT: u32 = 80;
+        const LOCUS_HEIGHT: u32 = 110;
 
+        let format_specifier = |format_vector: &[WaveOutputFile], k: usize| {
+            match format_vector.len() {
+                0 => WaveOutputFile::Png,
+                1 => (format_vector[0]),
+                _ => format_vector.get(k).copied().unwrap_or(WaveOutputFile::Png),
+            }
+        };
+        
 
         let (ontology_count, ontology_vec, ontology_bins) = match annotations {
 
@@ -1233,6 +1134,7 @@ impl<'a> Waveform<'a> {
         };
 
 
+        const HORIZ_OFFSET: i32 = -5;
 
         let height_loci: u32 = ontology_count*LOCUS_HEIGHT*2;
 
@@ -1240,55 +1142,69 @@ impl<'a> Waveform<'a> {
 
         for i in 0..zero_locs.len() {
 
+            let mut format = format_specifier(format_vector, i);
+
+            /*if !self.hit_on_block(i) && !alternative.hit_on_block(i) {
+                format=WaveOutputFile::Png;
+            }*/
 
             let alt_block = alternative.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1; //&alterna_locs_and_signal[i].1;
-            let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;//&blocked_locs_and_resid[i].1;
 
             let min_alter  = *alt_block.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
             let max_alter  = *alt_block.iter().max_by(|a,b| a.partial_cmp(b).unwrap()).expect("Waves have elements");
 
+            let extension = match format{
+                WaveOutputFile::Png => "png",
+                WaveOutputFile::Svg => "svg",
+            };
 
-            let signal_file = format!("{}/from_{:011}_to_{:011}.png", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
+            let signal_file = format!("{}/from_{:011}_to_{:011}.{extension}", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
-            let big_plot = BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area();
+        /*    let big_plot: DrawingArea<_, Shift> = match format_specifier(format_vector, i){
+                Png => BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area(),
+
+                Svg => SVGBackend::new(&signal_file, (3300, height)).into_drawing_area(),
+            };
 
             big_plot.fill(&WHITE).unwrap();
 
             let (loci, plot) = big_plot.split_vertically(height_loci);
 
             let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, Some([min_alter, max_alter]), false, &plot);
-            /*let mut chart = ChartBuilder::on(&plot)
-              .set_label_area_size(LabelAreaPosition::Left, 200)
-              .set_label_area_size(LabelAreaPosition::Bottom, 200)
-              .caption("Signal Comparison", ("Times New Roman", 80))
-              .build_cartesian_2d((loc_block[0] as f64)..(*loc_block.last().unwrap() as f64), min..max).unwrap();
-
-              chart.configure_mesh()
-              .x_label_style(("sans-serif", 70))
-              .y_label_style(("sans-serif", 70))
-              .x_label_formatter(&|v| format!("{:.0}", v))
-              .x_desc("Genome Location (Bp)")
-              .y_desc("Signal Intensity")
-              .disable_mesh().draw().unwrap();
-
-              const HORIZ_OFFSET: i32 = -5;
-
-              chart.draw_series(dat_block.iter().zip(loc_block.iter()).map(|(&k, &i)| Circle::new((i as f64, k),2_u32, Into::<ShapeStyle>::into(&BLACK).filled()))).unwrap().label("True Occupancy Data").legend(|(x,y)| Circle::new((x+2*HORIZ_OFFSET,y),5_u32, Into::<ShapeStyle>::into(&BLACK).filled()));
-
-
-              chart.draw_series(LineSeries::new(sig_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), trace_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", self_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(trace_color).filled()));
-             */
 
             if let Some(ref ontology_collection) = ontology_vec{
                 let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
             }
+            */
+             match format {
+                WaveOutputFile::Png => {
+                    let big_plot = BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area();
+                    let (upper, loci) = prep_drawing_area(&big_plot, height_loci);
+                    let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, false, &upper);
+                    if let Some(ref ontology_collection) = ontology_vec{
+                        let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
+                    };
+                    chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
 
-            const HORIZ_OFFSET: i32 = -5;
 
-            chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
+                    chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(40).border_style(&WHITE).label_font(("Calibri", 80)).draw().unwrap();
+                },
 
-        
-            chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(40).border_style(&WHITE).label_font(("Calibri", 80)).draw().unwrap();
+
+                WaveOutputFile::Svg => {
+                    let big_plot = SVGBackend::new(&signal_file, (3300, height)).into_drawing_area();
+                    let (upper, loci) = prep_drawing_area(&big_plot, height_loci);
+                    let (mut chart, loc_block) = self.create_waveform_block_i(data_ref, i, zero_locs[i], trace_color, None, false, &upper);
+                    if let Some(ref ontology_collection) = ontology_vec{
+                        let locus_places=self.create_block_annotations(loc_block[0], *loc_block.last().expect("non empty"), &annotations.expect("We would not be here if this was None"), ontology_collection, ontology_bins.as_ref(), &CYAN, &loci);
+                    };
+                    chart.draw_series(LineSeries::new(alt_block.iter().zip(loc_block.iter()).map(|(&k, &i)| (i as f64, k)), alter_color.filled().stroke_width(10))).unwrap().label(format!("{} Occupancy Trace", alter_name).as_str()).legend(|(x, y)| Rectangle::new([(x+4*HORIZ_OFFSET, y-4), (x+4*HORIZ_OFFSET + 20, y+3)], Into::<ShapeStyle>::into(alter_color).filled()));
+
+
+                    chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(40).border_style(&WHITE).label_font(("Calibri", 80)).draw().unwrap();
+                },
+             };
+
             //chart.configure_series_labels().position(SeriesLabelPosition::LowerRight).margin(40).legend_area_size(10).border_style(&BLACK).label_font(("Times New Roman", 60)).draw().unwrap();
 
         }
@@ -1316,9 +1232,9 @@ impl<'a> Waveform<'a> {
 
         //let text_tuple = ("sans-serif", 120);
        
-        let text_type = FontDesc::new(FontFamily::SansSerif, 130., FontStyle::Italic);
+        let text_type = FontDesc::new(FontFamily::SansSerif, 90., FontStyle::Italic);
 
-        let lag_for_arrow = 50u64;
+        let lag_for_arrow = 30u64;
 
         let locus_drawing_vec: Vec<_> = locus_spaces.iter().enumerate().map(|(k, locus_space)| {
 
@@ -1364,7 +1280,7 @@ impl<'a> Waveform<'a> {
                     //let txt = Text::new(format!("{}", name), (*start, 0.5), ("sans-serif", 80).into_font());
                     //println!("{name} {:?}", locus_space.estimate_text_size(name, &("sans-serif", 80).into_text_style(locus_space)));
                 if text_widths[m] <= rect_widths[m] {
-                    Some(Text::new(format!("{}", name), ((*start+*end)/2-text_widths[m]/2, 0.7), text_type.clone().into_font()))
+                    Some(Text::new(format!("{}", name), ((*start+*end)/2-text_widths[m], 0.875), text_type.clone().into_font()))
                 } else {None}
             })).unwrap();
 
@@ -1951,6 +1867,30 @@ impl<'a> Noise<'a> {
 
 
 }
+/*
+#[derive(Error, Debug)]
+pub enum AbstractDrawingError {
+    Png(BitMapBackendError),
+    Svg(SVGBackendError),
+}
+
+impl Display for AbstractDrawingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Png(ref be) =>  write!(f, "Bitmap error: {}", be),
+            Svg(ref se) =>  write!(f, "Svg error: {}", se),
+        }
+    }
+}*/
+
+/*#[enum_dispatch(DrawingBackend)]
+enum AbstractDrawing<'a> {
+    Png(DrawingArea<BitMapBackend<'a>, Shift>), 
+    Svg(DrawingArea<SVGBackend<'a>, Shift>),
+}*/
+
+//implement DrawingBackend for AbstractDrawing
+
 
 
 pub(crate) const MULT_CONST_FOR_H: f64 = -1.835246330265487;
@@ -2022,6 +1962,21 @@ impl Mul<&Vec<f64>> for &Noise<'_> {
 }
 
 
+fn prep_drawing_area<'b, DB: DrawingBackend>(big_plot: &'b DrawingArea<DB, Shift>, height_loci: u32) -> ( DrawingArea<DB, Shift>,  DrawingArea<DB, Shift>) {
+
+    big_plot.fill(&WHITE).unwrap();
+
+    let (pre_left, right) = big_plot.split_horizontally((94).percent_width());
+
+    let (_, left) = pre_left.split_horizontally((5).percent_width());
+
+    let (loci, plot) = left.split_vertically(height_loci);
+
+    let (upper, pre_lower) = plot.split_vertically((86).percent_height());
+
+    (upper, loci)
+
+}
 
 
 #[cfg(test)]

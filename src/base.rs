@@ -18,7 +18,7 @@ use core::fmt::{Debug, Formatter};
 use core::slice::{Iter, IterMut};
 
 use crate::MAX_TF_NUM;
-use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety, MULT_CONST_FOR_H, ADD_CONST_FOR_H};
+use crate::waveform::{Kernel, Waveform, Noise, KernelWidth, KernelVariety, MULT_CONST_FOR_H, ADD_CONST_FOR_H, WaveOutputFile};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8, U64_BITMASK, BITS_PER_BP};
 use crate::modified_t::{ContinuousLnCDF, SymmetricBaseDirichlet};
 use crate::gene_loci::*;
@@ -3657,7 +3657,7 @@ impl<'a> MotifSet<'a> {
     /// - `{dir}/from_{start}_to_{end}/Strongest_{i}_motifs.png`, the sum of occupancy from base pair `start` to `end` for the set of the `i`th strongest motifs, generated only if the sum has positive occupancy
     /// # Errors
     /// If `dir` does not exist and cannot be created
-    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_set_trace_and_sub_traces(&self, output_dir: &str, file_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>, format_vector: &[WaveOutputFile]) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let mut motif_set = self.clone();
 
@@ -3684,7 +3684,7 @@ impl<'a> MotifSet<'a> {
         outfile_handle.write(&buffer).expect("We just created this file");
 
         
-        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &(RGBColor(0x56, 0xB4, 0xE9)), false, annotations, ontologies);
+        signal.save_waveform_to_directory(self.data_ref, &signal_directory, "total", &(RGBColor(0x56, 0xB4, 0xE9)), false, annotations, ontologies, format_vector);
 
         let mut cumulative_signal = self.signal.derive_zero();
 
@@ -3693,13 +3693,13 @@ impl<'a> MotifSet<'a> {
 
                 let signal_name = format!("Motif_{}",i);
                 let sub_signal = motif_set.nth_motif(i).generate_waveform(self.data_ref);
-                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &((RGBColor(0x56, 0xB4, 0xE9))), true,annotations, ontologies);
+                sub_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &signal_name, &((RGBColor(0x56, 0xB4, 0xE9))), true,annotations, ontologies, format_vector);
 
                 cumulative_signal += &sub_signal;
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
-                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &(RGBColor(0x56, 0xB4, 0xE9)), true, annotations, ontologies);
+                    cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &(RGBColor(0x56, 0xB4, 0xE9)), true, annotations, ontologies,format_vector);
                 
                 }
 
@@ -3711,14 +3711,14 @@ impl<'a> MotifSet<'a> {
 
     /// This takes `self` and `other_set` and plots both of their occupancy 
     /// traces in each location in the directory 
-    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn save_set_trace_comparisons(&self, other_set: &MotifSet, output_dir: &str, file_name: &str, self_name: &str, other_name: &str, annotations: Option<&GenomeAnnotations>, ontologies: Option<&[&str]>, format_vector: &[WaveOutputFile]) -> Result<(), Box<dyn Error+Send+Sync>> {
 
         let self_sig = self.recalced_signal();
         let alter_sig = other_set.recalced_signal();
 
         let signal_directory: String = format!("{}/{}_{}_occupancy_compare",output_dir,file_name, other_name);
 
-       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &(RGBColor(0x56, 0xB4, 0xE9)), &(RGBColor(0xD5, 0x5E, 0x00)),self_name, other_name, annotations, ontologies)?;
+       self_sig.save_waveform_comparison_to_directory(&alter_sig, self.data_ref, &signal_directory, self_name, &(RGBColor(0x56, 0xB4, 0xE9)), &(RGBColor(0xD5, 0x5E, 0x00)),self_name, other_name, annotations, ontologies, format_vector)?;
 
        Ok(())
 
@@ -5950,7 +5950,7 @@ impl StrippedMotifSet {
 
         let current_active = &self.reactivate_set(data_ref);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, file_name, annotations, ontologies)
+        current_active.save_set_trace_and_sub_traces(output_dir, file_name, annotations, ontologies, &[])
 
     }
 
@@ -6277,7 +6277,7 @@ impl<'a> SetTrace<'a> {
 
         let file_name = format!("{}/{:0>7}", run_name,zeroth_step);
 
-        current_active.save_set_trace_and_sub_traces(output_dir, &file_name, annotations, ontologies)
+        current_active.save_set_trace_and_sub_traces(output_dir, &file_name, annotations, ontologies, &[])
 
     }
 

@@ -46,6 +46,7 @@ gzp = "1.0.1"
 fishers_exact = "1.0.1"
 sptr = "0.3.2"
 plotters-backend = "0.3.7"
+enum_dispatch = "0.3.13"
 
 
 [[bin]]

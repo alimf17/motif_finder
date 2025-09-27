@@ -6,7 +6,8 @@ use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT, ECOLI_FREQ};
 use motif_finder::data_struct::{AllData, AllDataUse};
 use motif_finder::gene_loci::*;
-
+use motif_finder::waveform::WaveOutputFile;
+    
 use clap::{Parser, ValueEnum};
 
 use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}, syncz::{SyncZ, SyncZBuilder}, par::decompress::{ParDecompress, ParDecompressBuilder},ZWriter, Compression};
@@ -515,7 +516,7 @@ pub fn main() {
 
     }
     
-    activated.save_set_trace_and_sub_traces(&out_dir, &save_file, potential_annotations.as_ref(), Some(&["CDS"]));
+    activated.save_set_trace_and_sub_traces(&out_dir, &save_file, potential_annotations.as_ref(), Some(&["CDS"]), &[WaveOutputFile::Svg]);
     //If I don't document this as I'm writing it, it's going to blow a hole 
     //through my head and the head of anybody reading it
     //"pairings" is nested in the following way:

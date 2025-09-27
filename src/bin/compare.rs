@@ -69,7 +69,7 @@ fn main() {
 
     let wave_file = format!("{}_waves", motif_set_meme);
 
-    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false, None, None);
+    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, false, None, None, &[]);
 
     println!("No change");
     let mut mot_set: MotifSet = MotifSet::set_from_meme(&motif_set_meme, &data,None, f64::INFINITY, HandleImpossibleMotif::LeaveUnchanged, false, &mut rng).unwrap();
@@ -86,7 +86,7 @@ fn main() {
 
     let wave_file = format!("{}_waves", motif_set_meme);
 
-    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, true, None, None);
+    mot_set.recalced_signal().save_waveform_to_directory(&data, &wave_file, "total", &BLUE, true, None, None, &[]);
 
     //SAFETY: I used 3000 for the fragment length when generating the data I'm using now
     //let datas: Vec<AllDataUse> = background_lens.iter().map(|&a| unsafe{ data.with_new_fragment_length(a) }).collect();

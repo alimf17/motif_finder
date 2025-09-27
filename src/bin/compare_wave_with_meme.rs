@@ -103,7 +103,7 @@ fn main() {
     });};
 
 
-    mot_set_bin.save_set_trace_comparisons(&mot_set_meme, &wave_file, "compare_wave", &args[5], &args[6],potential_annotations.as_ref(),Some(&["CDS"]));
+    mot_set_bin.save_set_trace_comparisons(&mot_set_meme, &wave_file, "compare_wave", &args[5], &args[6],potential_annotations.as_ref(),Some(&["CDS"]), &[WaveOutputFile::Svg]);
    
     let comparison = 7_usize + (gff_file.is_some() as usize) + (additional_annotations_file.is_some() as usize);
     if args.len() > comparison {
@@ -113,7 +113,7 @@ fn main() {
             let num_motifs: usize = args[i].parse().unwrap();
             let sub_bin = mot_set_bin.only_n_strongest(num_motifs);
 
-            mot_set_meme.save_set_trace_comparisons(&sub_bin, &wave_file, "compare_sub_wave", &args[5], &format!("TARJIM {num_motifs} Motifs"), potential_annotations.as_ref(),Some(&["CDS"]));
+            mot_set_meme.save_set_trace_comparisons(&sub_bin, &wave_file, "compare_sub_wave", &args[5], &format!("TARJIM {num_motifs} Motifs"), potential_annotations.as_ref(),Some(&["CDS"]), &[WaveOutputFile::Svg]);
 
 
         }
