@@ -6968,14 +6968,14 @@ impl<'a> TemperSetTraces<'a> {
     /// steps between attempting parallel tempering steps. 
     /// First, on all adjacent pairs starting with the index `1` trace, then
     /// all adjacent pairs starting with the index `0` trace
-    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, no_motif_change: bool, rng_maker: fn() -> R) {
+    pub fn iter_and_swap<R: Rng>(&mut self, iters_before_swaps: usize, no_save:bool, no_motif_change: bool, rng_maker: fn() -> R) {
 
        
         //for _ in 0..iters_before_swaps {
             self.parallel_traces.par_iter_mut().for_each(|(set, track, _)| {
                 let mut rng = rng_maker();
                 for _ in 0..iters_before_swaps {
-                    set.advance(track.as_mut(), no_motif_change, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
+                    set.advance(track.as_mut(), no_save, no_motif_change, &mut rng); //The second no_motif_change is the one that actually ensures no motif change. The first one is there because I don't want steps saved while the reversible jump on the number of motifs is turned off. 
 
                 }
             });

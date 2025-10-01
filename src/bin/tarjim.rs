@@ -236,7 +236,7 @@ fn main() {
     let start_inference_time = Instant::now();
 
     if Some(InitialType::Meme) == initial_type {
-        initialization_chains.iter_and_swap(steps_per_exchange_attempt*10, true, rand::thread_rng);
+        initialization_chains.iter_and_swap(steps_per_exchange_attempt*10, true, true, rand::thread_rng);
         println!("Finished initializing without motif number changes");
     }
 
@@ -244,7 +244,7 @@ fn main() {
 
         println!("push {step}");
         
-        initialization_chains.iter_and_swap(steps_per_exchange_attempt, rigidify_motifs, rand::thread_rng);
+        initialization_chains.iter_and_swap(steps_per_exchange_attempt,false,  rigidify_motifs, rand::thread_rng);
 
         println!("finished iter");
         if step % save_step == 0 || step == pushes-1 {
