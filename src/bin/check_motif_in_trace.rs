@@ -2,6 +2,9 @@ use std::fs;
 use std::io::{Read, Write};
 use std::error::Error;
 
+use serde::*;
+use serde::de::DeserializeOwned;
+
 use motif_finder::base::*;
 use motif_finder::base::{SQRT_2, SQRT_3, LN_2, BPS};
 use motif_finder::{NECESSARY_MOTIF_IMPROVEMENT, ECOLI_FREQ};
@@ -25,8 +28,6 @@ use rayon::iter::IntoParallelIterator;
 use rand::prelude::*;
 
 use regex::Regex;
-use serde::*;
-use serde::de::DeserializeOwned;
 use poloto;
 use poloto::Croppable;
 use plotters::prelude::*;

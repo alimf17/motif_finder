@@ -1738,6 +1738,10 @@ impl Motif {
         Some(hamming)
 
     }
+    
+    pub fn shuffle_self<R: Rng + ?Sized>(&mut self, rng: &mut R) {
+        self.pwm.shuffle(rng);
+    }
 
     fn scramble_by_id_to_valid(&self, id: usize, opposite: bool, seq: &Sequence) -> Motif {
 
@@ -1760,7 +1764,8 @@ impl Motif {
         new_mot
 
     }
-    
+
+
     /// This returns `None` if `self` and `kmer` do not have the same length.
     /// Otherwise, this takes each position `i` where `self`'s best kmer mismatches
     /// `kmer`, and swaps the penalties of the 'i'th `Base` so that `kmer[i]` 
@@ -1779,7 +1784,6 @@ impl Motif {
 
         Some(new_mot)
     }
-
 
     /// This returns a vector of Motifs with all the values of `self`, but
     /// where every position in `to_scramble` has each possible combination of 
@@ -3699,6 +3703,7 @@ impl<'a> MotifSet<'a> {
 
                 if i >= 1 { 
                     let accumulator_name = format!("Strongest_{}_motifs", i+1);
+                    if sub_signal.read_wave()[sub_signal.start_dats()[i]..*sub_signal.start_dats().get(i+1).unwrap_or(&sub_signal.read_wave().len())].iter().all(|&x| x == 0.0) { continue; }
                     cumulative_signal.save_waveform_to_directory(self.data_ref,&signal_directory, &accumulator_name, &(RGBColor(0x56, 0xB4, 0xE9)), true, annotations, ontologies,format_vector);
                 
                 }
@@ -5606,6 +5611,15 @@ impl StrippedMotifSet {
         self.set.iter().map(|a| a.taxicab()).sum::<f64>()
     }
 
+    ///This shuffles each motif column-wise.
+    ///Note that most definitely renders the ln likelihood invalid.
+    pub fn shuffle_motifs<R: Rng + ?Sized>(&mut self, rng: &mut R) {
+
+        for mot in self.set.iter_mut() {
+            mot.shuffle_self(rng);
+        }
+
+    }
 
     /// This prints the StrippedMotifSet in descending height order into a meme 
     /// file `{output_dir}/{run_name}_savestate.meme`. The header of each motif
