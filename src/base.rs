@@ -2120,6 +2120,61 @@ impl Motif {
 
     }
     
+    ///Panics: if `start_genome_coordinates.len() != seq.num_blocks()`
+    pub fn return_bind_locs_rev_and_scores(&self, seq: &Sequence, min_height: f64, start_genome_coordinates: &[usize]) -> Vec<(usize, bool, f64)> {
+
+        assert!(start_genome_coordinates.len() == seq.num_blocks(), "This sequence and coordinate pairing does not align!");
+        let coded_sequence = seq.seq_blocks();
+        let block_lens = seq.block_lens(); //bp space
+        let block_starts = seq.block_u8_starts(); //stored index space
+
+        let best_motif = self.best_motif();
+
+        let mut ind: usize;
+
+        let mut store: [Bp; BP_PER_U8];
+
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+
+        let mut loc_rev_and_scores: Vec<(usize, bool, f64)> = vec![];
+
+        {
+            let uncoded_seq = uncoded_seq.as_mut_slice();
+            for i in 0..(block_starts.len()) {
+
+
+                for jd in 0..(block_lens[i]/BP_PER_U8) {
+
+                    store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
+                    for k in 0..BP_PER_U8 {
+                        uncoded_seq[BP_PER_U8*jd+k] = store[k];
+                    }
+
+                }
+
+
+                for j in 0..=((block_lens[i])-self.len()) {
+
+                    ind = BP_PER_U8*block_starts[i]+(j as usize);
+
+
+                    //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
+                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+
+                    let (score, rev) = unsafe {self.prop_binding(binding_borrow) };
+
+                    if score+min_height > 0.0 {
+                        loc_rev_and_scores.push((start_genome_coordinates[i]+j, rev, score));
+                    }
+                }
+
+            }
+        }
+
+        loc_rev_and_scores
+
+    }
+    
 
     fn has_multiple_binding_sites(&self, seq: &Sequence, thresh: f64) -> bool {
 
@@ -5481,7 +5536,26 @@ impl<'a> MotifSet<'a> {
         //If I get to the end without hitting a worse lasso like, return the whole thing with the last option None.
         //(lasso_likes, None, gene_names, go_term_counts)
     }
+    
+    pub fn generate_binding_against_genome(&self, data_ref: &AllDataUse) -> Vec<Vec<(usize, bool, f64)>> {
+        //return_bind_locs_rev_and_scores(&self, seq: &Sequence, min_height: f64, start_genome_coordinates: &[usize]) -> Vec<(usize, bool, f64)>
+        self.set.iter().map(|a| a.0.return_bind_locs_rev_and_scores(data_ref.data().seq(), data_ref.min_height(), data_ref.zero_locs())).collect()
+    }
 
+    pub fn return_regulated_loci_by_binding<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>) {
+
+        let binding_against_genome = self.generate_binding_against_genome(data_ref);
+
+        let regulated_loci: Vec<Vec<&'b Locus>> = binding_against_genome.iter().map(|single_binding_vector| {
+
+            let binding_locs: Vec<u64> = single_binding_vector.iter().map(|a| a.0 as u64).collect();
+            annotations.loci().iter().filter(|l| l.any_regulate_locus(&binding_locs, regulatory_distance, None)).collect()
+        }).collect();
+
+        (binding_against_genome, regulated_loci)
+    }
+
+    
 
 }
 

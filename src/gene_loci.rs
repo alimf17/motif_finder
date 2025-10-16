@@ -402,3 +402,83 @@ pub enum GffFormatError {
 impl std::fmt::Display for GffFormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "Not enough Regions for GFF formatted line") }
 }
+
+
+#[derive(Debug, Clone)]
+pub struct TFAnalyzer {
+    tfs: HashMap<String, Vec<(String, usize, usize)>>,
+}
+
+#[derive(Error, Debug, Copy, Clone)]
+pub enum TsvColumnError {
+    TFNameOOB,
+    ChrStartOOB,
+    ChrStartNotInt,
+    ChrEndOOB,
+    ChrEndNotInt,
+    ChrNameOOB,
+}
+
+impl std::fmt::Display for TsvColumnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            Self::TFNameOOB => write!(f, "TF Name index is out of bounds!"),
+            Self::ChrStartOOB => write!(f, "Chromosome start index is out of bounds!"),
+            Self::ChrStartNotInt => write!(f, "Chromosome start index does not point to an integer!"),
+            Self::ChrEndOOB => write!(f, "Chromosome end index is out of bounds!"),
+            Self::ChrEndNotInt => write!(f, "Chromosome end index does not point to an integer!"),
+            Self::ChrNameOOB => write!(f, "Chromosome name index is out of bounds!"),
+        }
+    }
+}
+
+impl TFAnalyzer {
+ 
+    pub fn from_regulon_tsv<'b>(tsv_file_name: &'b str, index_tf_name: usize, index_chr_start: usize, index_chr_end: usize, index_chr_name: Option<usize>) -> Result<Self, Box<dyn Error+Send+Sync>> {
+
+        let f = std::fs::File::open(tsv_file_name)?;
+        let f = BufReader::new(f);
+
+        let lines = f.lines().skip_while(|a| a.as_ref().map(|b| &b[(0..1)] == "#").unwrap_or(true)).skip(1);
+
+
+        //The constant is just a semi reasonable small-ish guess on the number of TFs
+        let mut tfs: HashMap<String, Vec<(String,usize, usize)>> = HashMap::with_capacity(100);
+
+        for line in lines {
+
+            let confirm_line = line?;
+            let collection: Vec<_> = confirm_line.split('\t').collect();
+            let Some(tf_name_str) = collection.get(index_tf_name) else {return Err(Box::new(TsvColumnError::TFNameOOB));};
+            let Some(start_str) = collection.get(index_chr_start) else { return Err(Box::new(TsvColumnError::ChrStartOOB));};
+            let Ok(start): Result<usize,_> = start_str.parse() else { return Err(Box::new(TsvColumnError::ChrStartNotInt));};
+            let Some(end_str) = collection.get(index_chr_end) else { return Err(Box::new(TsvColumnError::ChrEndOOB));};
+            let Ok(end): Result<usize, _> = end_str.parse() else { return Err(Box::new(TsvColumnError::ChrEndNotInt));};
+            let Some(chr_name) = index_chr_name.map_or_else(|| Some("chr"), |a| collection.get(a).map(|b| &**b)) else { return Err(Box::new(TsvColumnError::ChrNameOOB));};
+
+            //if tfs.contains_key(tf_name_str) {
+
+            //} 
+
+            if let Some(hashmap_handle) = tfs.get_mut(*tf_name_str) {
+                hashmap_handle.push((chr_name.to_string(), start, end));
+            } else {
+                tfs.insert(tf_name_str.to_string(), vec![(chr_name.to_string(), start, end)]);
+            };
+
+        }
+
+        Ok(Self{tfs})
+    }
+
+
+}
+
+
+
+
+
+
+
+
+
