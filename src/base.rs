@@ -2171,6 +2171,8 @@ impl Motif {
             }
         }
 
+        loc_rev_and_scores.sort_unstable_by(|a,b| a.0.cmp(&b.0));
+
         loc_rev_and_scores
 
     }
