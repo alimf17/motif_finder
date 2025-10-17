@@ -5557,7 +5557,7 @@ impl<'a> MotifSet<'a> {
         (binding_against_genome, regulated_loci)
     }
 
-    pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>) {
+    pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>) {
      
         let (bindings, ided_loci) = self.return_regulated_loci_by_binding(data_ref, annotations, regulatory_distance);
  
@@ -5569,7 +5569,7 @@ impl<'a> MotifSet<'a> {
 
     }
 
-    pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
+    pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
 
         let (bindings, ided_loci, potential_tfs) = self.assign_tfs(data_ref, annotations, regulatory_distance, tfs_to_compare, p_val_thresh);
 

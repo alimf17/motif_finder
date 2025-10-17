@@ -116,13 +116,21 @@ struct Cli {
     #[arg(short, long)]
     additional_annotations_file: Option<String>,
 
+    /// This is an optional argument to give a tsv of a set of TFs to try to compare motifs to
+    #[arg(short, long)]
+    tf_file: Option<String>,
+
+    /// This is an optional argument to give a sequence that has no null to compare motif binding on 
+    #[arg(short, long)]
+    no_null_analysis_file: Option<String>,
+
     
 }
 
 
 pub fn main() {
 
-    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, use_analysis_file, discard_num, fasta_file, gff_file, additional_annotations_file} = Cli::parse(); 
+    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, use_analysis_file, discard_num, fasta_file, gff_file, additional_annotations_file, tf_file, no_null_analysis_file} = Cli::parse(); 
 
     let min_chain = discard_num.unwrap_or(0);
 
@@ -148,6 +156,12 @@ pub fn main() {
         if let Err(e) = a.add_go_terms_from_tsv_proteome(ontology, &added_annotations) { println!("Adding terms went wrong {:?}. Left the genome annotations unmodified.", e);};
     });};
 
+
+    let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| match TFAnalyzer::from_regulon_tsv(&a, 3, 6,7, None) {
+        Ok(b) => Some(b),
+        Err(e) => {println!("{e}"); None}
+    }).or(None).flatten();
+    
     //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
@@ -244,6 +258,15 @@ pub fn main() {
 
     let all_data_file = use_analysis_file.unwrap_or_else(|| set_trace_collections[0].data_name().to_owned());
    
+    let non_null_data: Option<AllData> = no_null_analysis_file.map(|a| {
+        let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(a).expect("a trace should always refer to a valid data file"));
+        let _ = try_bincode.read_to_end(&mut buffer);
+        let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
+        buffer.clear();
+        data_reconstructed
+    });
+
+
     println!("{all_data_file}");
 
     let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(all_data_file.as_str()).expect("a trace should always refer to a valid data file"));
@@ -252,6 +275,11 @@ pub fn main() {
     let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
 
     let data_ref = AllDataUse::new(&data_reconstructed, 0.0).expect("AllData file must be valid!");
+
+    let non_null_data_active = non_null_data.as_ref().map(|a| AllDataUse::new(a, 0.0).expect("AllData file must be valid!"));
+
+    let non_null_data_ref = non_null_data_active.as_ref().unwrap_or(&data_ref);
+
 
     buffer.clear();
 
@@ -501,7 +529,13 @@ pub fn main() {
         };
     }
 
+    let mut std = std::io::stdout();
 
+    if let Some(tf_analyzer_real) = tf_analyzer.as_ref() {
+        if let Some(genes) = potential_annotations.as_ref(){
+            let _ = activated.output_tf_assignment(&mut std,non_null_data_ref ,genes, 200, tf_analyzer_real, 0.05);  
+        }
+    }
     let save_file = format!("{}_highest_post", base_file);
 
 
