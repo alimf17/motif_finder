@@ -5587,7 +5587,7 @@ impl<'a> MotifSet<'a> {
             };
 
 
-            let header_string = format!("Motif_{i} with peak height {} is {}", motif_and_nulls.0.peak_height(), hit_string);
+            let header_string = format!("Motif_{i} ({}) with peak height {} is {}", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
 
             if let Err(file_write_err) = file_handle.write(&header_string.into_bytes()) {
                     return Err(Box::new(file_write_err));
