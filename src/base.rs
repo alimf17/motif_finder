@@ -5557,7 +5557,93 @@ impl<'a> MotifSet<'a> {
         (binding_against_genome, regulated_loci)
     }
 
-    
+    pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>) {
+     
+        let (bindings, ided_loci) = self.return_regulated_loci_by_binding(data_ref, annotations, regulatory_distance);
+ 
+        let potential_tfs = self.set.iter().zip(bindings.iter()).map(|(motif, binding_of_motif)| tfs_to_compare.hypergeometric_p_test_on_motif_binding_sites(motif.0.len(), binding_of_motif).into_iter().enumerate().filter_map(|(i, a)| {
+                if i == 0 || a.1 <= p_val_thresh { Some(a) }  else {None}
+        }).collect::<Vec<_>>()).collect();
+
+        (bindings, ided_loci, potential_tfs)
+
+    }
+
+    pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
+
+        let (bindings, ided_loci, potential_tfs) = self.assign_tfs(data_ref, annotations, regulatory_distance, tfs_to_compare, p_val_thresh);
+
+        if let Err(file_write_err) = file_handle.write(b"<insert header here>\n") { 
+                return (bindings, ided_loci, potential_tfs, Err(Box::new(file_write_err)));
+        };
+
+        let result: Result<Vec<()>, _> = self.set.iter().zip(bindings.iter()).zip(ided_loci.iter()).zip(potential_tfs.iter()).enumerate().map(|(i, (((motif_and_nulls, binding_vec), ided_loci), potential_tf_list))| {
+
+            let best_hit = potential_tf_list.get(0);
+
+            let hit_string = match best_hit {
+                Some(hit) => format!("is most likely {} with p_value {}\n", hit.0, hit.1),
+                None => format!("has no hits!\n"),
+            };
+
+
+            let header_string = format!("Motif_{i} with peak height {} is {}", motif_and_nulls.0.peak_height(), hit_string);
+
+            if let Err(file_write_err) = file_handle.write(&header_string.into_bytes()) {
+                    return Err(Box::new(file_write_err));
+            };
+            
+
+
+            if potential_tf_list.len() > 1 {
+                if let Err(file_write_err) = file_handle.write(b"Potential alternate TFs\tp_value") {
+                    return Err(Box::new(file_write_err));
+                };
+            }
+            //This autoskips if potential_tf_list has less than two suggestions
+            for i in 1..potential_tf_list.len() {
+                let registered_tf = format!("{}\t{}\n", potential_tf_list[i].0, potential_tf_list[i].1);
+                if let Err(file_write_err) = file_handle.write(&registered_tf.into_bytes()) {
+                    return Err(Box::new(file_write_err));
+                };
+
+            }
+
+            let mut binding_vec_ordered = binding_vec.clone();
+            binding_vec_ordered.sort_unstable_by(|a,b| b.2.partial_cmp(&a.2).unwrap());
+
+            if let Err(file_write_err) = file_handle.write(b"start\tend\torientation\tscore\n") { 
+                return Err(Box::new(file_write_err));
+            };
+
+            for (location, is_reversed, score) in binding_vec_ordered{
+                let output_string = format!("{}\t{}\t{}\t{}\n", location, location+motif_and_nulls.0.len(), if is_reversed{"-"} else {"+"}, score);
+                if let Err(file_write_err) = file_handle.write(&output_string.into_bytes()) {
+                    return Err(Box::new(file_write_err));
+                };
+            }
+
+            let locus_names: Vec<_> = ided_loci.iter().map(|a| a.name()).collect();
+
+            let locus_strings = format!("{:?}", locus_names);
+            if let Err(file_write_err) = file_handle.write(b"Regulated Loci") {
+                return Err(Box::new(file_write_err));
+            };
+            if let Err(file_write_err) = file_handle.write(&locus_strings.into_bytes()) {
+                return Err(Box::new(file_write_err));
+            }; 
+
+           Ok(()) 
+        }).collect();
+
+        let res: Result<(), Box<dyn Error+Send+Sync>> = match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        };
+
+        return (bindings, ided_loci, potential_tfs, res)
+
+    }
 
 }
 

@@ -531,6 +531,8 @@ impl TFAnalyzer {
 
         }
 
+        p_values.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
         p_values
 
     }
