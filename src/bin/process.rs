@@ -122,7 +122,7 @@ struct Cli {
 
     /// This is an optional argument to give a sequence that has no null to compare motif binding on 
     #[arg(short, long)]
-    no_null_analysis_file: Option<String>,
+    retained_null_analysis_file: Option<String>,
 
     
 }
@@ -130,7 +130,7 @@ struct Cli {
 
 pub fn main() {
 
-    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, use_analysis_file, discard_num, fasta_file, gff_file, additional_annotations_file, tf_file, no_null_analysis_file} = Cli::parse(); 
+    let Cli { output: out_dir, base_file, mut num_chains, max_runs: max_chain, use_analysis_file, discard_num, fasta_file, gff_file, additional_annotations_file, tf_file, retained_null_analysis_file} = Cli::parse(); 
 
     let min_chain = discard_num.unwrap_or(0);
 
@@ -157,11 +157,15 @@ pub fn main() {
     });};
 
 
-    let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| match TFAnalyzer::from_regulon_tsv(&a, 3, 6,7, None) {
+    /*let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| match TFAnalyzer::from_regulon_tsv(&a, 3, 6,7, None) {
         Ok(b) => Some(b),
         Err(e) => {println!("{e}"); None}
     }).or(None).flatten();
-    
+    */
+
+
+    let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| TFAnalyzer::from_regulon_tsv(&a, 3, 6,7, None).unwrap());
+    //println!("tf analyzer: \n {} \n {:?}",tf_analyzer.as_ref().map(|a| a.output_state()).unwrap_or(String::new()), tf_analyzer ); 
     //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
     let mut set_trace_collections: Vec<SetTraceDef> = Vec::with_capacity(max_chain-min_chain);
@@ -258,7 +262,7 @@ pub fn main() {
 
     let all_data_file = use_analysis_file.unwrap_or_else(|| set_trace_collections[0].data_name().to_owned());
    
-    let non_null_data: Option<AllData> = no_null_analysis_file.map(|a| {
+    let non_null_data: Option<AllData> = retained_null_analysis_file.map(|a| {
         let mut try_bincode: ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader(fs::File::open(a).expect("a trace should always refer to a valid data file"));
         let _ = try_bincode.read_to_end(&mut buffer);
         let (data_reconstructed, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).expect("Monte Carlo chain should always point to data in proper format for inference!");
@@ -507,7 +511,37 @@ pub fn main() {
 
     println!("Cumulative analysis of highest posterior density motif set");
 
+    let mut std = std::io::stdout();
+    if let Some(tf_analyzer_real) = tf_analyzer.as_ref() {
+        if let Some(genes) = potential_annotations.as_ref(){
+            let (poses_and_scores,_, _, a) = activated.output_tf_assignment(&mut std,non_null_data_ref ,genes, 200, tf_analyzer_real, 0.05); 
+            let _ = a.unwrap();
+            let activated_ref = &activated;
+            //motif id, peak height, start position, reverse complement or no, score
+            let mut fimo_like_prep: Vec<(usize, f64, usize, bool, f64)> = poses_and_scores.iter().enumerate().map(|(id, vec_of_scores)| vec_of_scores.iter().map(move |(pos, rev, score)| (id, activated_ref.nth_motif(id).peak_height(), *pos, *rev, *score))).flatten().collect();
+            //I want to sort fimo_like_prep by the binding score (greatest to least) and break ties by putting the smallest id motif first and then by position of the motif
+            fimo_like_prep.sort_unstable_by(|a, b| {
+                let by_score = a.4-b.4;
+                if by_score > 0.001 { return std::cmp::Ordering::Less;} //Remember, we want descending order of scores, and rust's default sort is ascending
+                if by_score < -0.001 { return std::cmp::Ordering::Greater;}
+                let by_id = a.0.cmp(&b.0);
+                if by_id != std::cmp::Ordering::Equal { return by_id;}
+                a.2.cmp(&b.2) //If this is ALSO equal, then screw it, I don't care about order beyond this: a and b are the "same" hit
+            });
 
+            let mut fimo_like_file = fs::File::create(format!("{}/{}_fimo_like_highest_post.tsv", out_dir.clone(), base_file).as_str()).unwrap();
+
+            fimo_like_file.write(b"motif_id\tmotif_alt_id\tsequence_name\tstart\tstop\tstrand\tscore\tp-value\tq-value\tmatched_sequence\n");
+            for (id, height, position, rev, score) in fimo_like_prep {
+
+                fimo_like_file.write(&format!("motif_{id}\t{}\t{}\t{position}\t{}\t{}\t{score}\t0.001\t0.1\t{}\n",activated.nth_motif(id).peak_height(), fasta_file.as_ref().map(|a| a.as_str()).unwrap_or("sequence"), position+activated.nth_motif(id).len(), if rev {"-"} else {"+"}, match data_ref.return_kmer_by_loc(position, activated.nth_motif(id).len()) { Some(bases) => bases.iter().map(|a| format!("{a}")).collect::<Vec<_>>().concat(), None => "NA".to_string()}).into_bytes()) ;
+            }
+
+
+        }
+    }
+
+    //let (likes, first_failure, dists, gene_names, go_terms ) = activated.sort_self_by_lasso_and_yield_genes_and_go_terms(0.0, 200, potential_annotations.as_ref());
     println!("Number\tAdded Motif\tAdded Motif Height\tOccupancy Distance\tLn likelihood");
     for i in 0..activated.num_motifs() {
         let mot_ref = activated.get_nth_motif(i);
@@ -529,13 +563,7 @@ pub fn main() {
         };
     }
 
-    let mut std = std::io::stdout();
 
-    if let Some(tf_analyzer_real) = tf_analyzer.as_ref() {
-        if let Some(genes) = potential_annotations.as_ref(){
-            let _ = activated.output_tf_assignment(&mut std,non_null_data_ref ,genes, 200, tf_analyzer_real, 0.05);  
-        }
-    }
     let save_file = format!("{}_highest_post", base_file);
 
 

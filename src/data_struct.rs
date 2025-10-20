@@ -9,7 +9,7 @@ use std::error::Error;
 
 use crate::waveform::{Waveform, WaveformDef, Background, WIDE, Kernel, KernelWidth, KernelVariety, WaveCreationError};
 use crate::sequence::{Sequence, NullSequence, BP_PER_U8};
-use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MAX_HEIGHT,MotifSet, Motif, TruncatedLogNormal};
+use crate::base::{BPS, BASE_L, MIN_BASE, MAX_BASE, LOG_HEIGHT_MEAN, LOG_HEIGHT_SD, MAX_HEIGHT,MotifSet, Motif, TruncatedLogNormal, Bp};
 
 
 use thiserror::Error;
@@ -2010,6 +2010,18 @@ impl<'a> AllDataUse<'a> {
 
         Some(to_return)
 
+    }
+
+    pub fn return_kmer_by_loc(&self, coordinate_start: usize, size_kmer: usize) -> Option<Vec<Bp>> {
+ 
+        let block_in_pos = self.start_genome_coordinates.iter().enumerate().find(|&(i,start)| coordinate_start >= *start && (coordinate_start-*start)+size_kmer<= self.data().seq().ith_block_len(i));
+
+        match block_in_pos {
+            Some(block_id) => Some(self.data().seq().return_bases(block_id.0, coordinate_start-block_id.1, size_kmer)),
+            None => self.start_nullbp_coordinates.iter().enumerate()
+                    .find(|&(i,start)| coordinate_start >= *start && (coordinate_start-*start)+size_kmer<= self.null_seq().ith_block_len(i))
+                    .map(|a| self.null_seq().return_bases(a.0, coordinate_start-a.1, size_kmer)),
+        }
     }
 
 }

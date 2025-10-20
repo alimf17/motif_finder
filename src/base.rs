@@ -2134,16 +2134,17 @@ impl Motif {
 
         let mut store: [Bp; BP_PER_U8];
 
-        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
+        //let mut uncoded_seq: Vec<Bp> = vec![Bp::A; seq.max_len()];
 
+        let mut uncoded_seq: Vec<Bp> = vec![Bp::A; self.len()];
         let mut loc_rev_and_scores: Vec<(usize, bool, f64)> = vec![];
 
         {
-            let uncoded_seq = uncoded_seq.as_mut_slice();
+        //    let uncoded_seq = uncoded_seq.as_mut_slice();
             for i in 0..(block_starts.len()) {
 
 
-                for jd in 0..(block_lens[i]/BP_PER_U8) {
+          /*      for jd in 0..(block_lens[i]/BP_PER_U8) {
 
                     store = Sequence::code_to_bases(coded_sequence[block_starts[i]+jd]);
                     for k in 0..BP_PER_U8 {
@@ -2151,17 +2152,20 @@ impl Motif {
                     }
 
                 }
-
+*/
 
                 for j in 0..=((block_lens[i])-self.len()) {
 
                     ind = BP_PER_U8*block_starts[i]+(j as usize);
 
+                    uncoded_seq = seq.return_bases(i, j, self.len());
+
 
                     //SAFETY: notice how we defined j, and how it guarentees that get_unchecked is fine
-                    let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
+                    //let binding_borrow = unsafe { uncoded_seq.get_unchecked(j..(j+self.len())) };
 
-                    let (score, rev) = unsafe {self.prop_binding(binding_borrow) };
+                    //let (score, rev) = unsafe {self.prop_binding(binding_borrow) };
+                    let (score, rev) = unsafe {self.prop_binding(&uncoded_seq) };
 
                     if score+min_height > 0.0 {
                         loc_rev_and_scores.push((start_genome_coordinates[i]+j, rev, score));
@@ -5321,9 +5325,9 @@ impl<'a> MotifSet<'a> {
             }
         }
 
-        println!("single sets {:?}", single_sets_and_lasso_likes);
+        //println!("single sets {:?}", single_sets_and_lasso_likes);
         let (mut motif_set, _,_ ) = single_sets_and_lasso_likes.swap_remove(target_index);
-        println!("single sets after remove {target_index} {:?}", single_sets_and_lasso_likes);
+        //println!("single sets after remove {target_index} {:?}", single_sets_and_lasso_likes);
         
         //target_lasso is a float, so it is still alive after this
         lasso_likes.push(target_lasso);
@@ -5361,10 +5365,10 @@ impl<'a> MotifSet<'a> {
             match target_index {
                 None => return (motif_set, lasso_likes,lasso_dists, Some(potential_lasso)),
                 Some(index) => {
-                    println!("single sets {:?}", single_sets_and_lasso_likes);
+                    //println!("single sets {:?}", single_sets_and_lasso_likes);
                     (motif_set, _, _) = combined_sets_and_likes[index].clone();
                     _ = single_sets_and_lasso_likes.swap_remove(index);
-                    println!("single sets after remove {index} {:?}", single_sets_and_lasso_likes);
+                    //println!("single sets after remove {index} {:?}", single_sets_and_lasso_likes);
                     lasso_likes.push(target_lasso);
                     lasso_dists.push(target_dist);
                 },
@@ -5541,14 +5545,15 @@ impl<'a> MotifSet<'a> {
     
     pub fn generate_binding_against_genome(&self, data_ref: &AllDataUse) -> Vec<Vec<(usize, bool, f64)>> {
         //return_bind_locs_rev_and_scores(&self, seq: &Sequence, min_height: f64, start_genome_coordinates: &[usize]) -> Vec<(usize, bool, f64)>
-        self.set.iter().map(|a| a.0.return_bind_locs_rev_and_scores(data_ref.data().seq(), data_ref.min_height(), data_ref.zero_locs())).collect()
+        self.set.par_iter().map(|a| a.0.return_bind_locs_rev_and_scores(data_ref.data().seq(), data_ref.min_height(), data_ref.zero_locs())).collect()
     }
 
     pub fn return_regulated_loci_by_binding<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>) {
 
         let binding_against_genome = self.generate_binding_against_genome(data_ref);
 
-        let regulated_loci: Vec<Vec<&'b Locus>> = binding_against_genome.iter().map(|single_binding_vector| {
+        println!("Finished outputting binding");
+        let regulated_loci: Vec<Vec<&'b Locus>> = binding_against_genome.par_iter().map(|single_binding_vector| {
 
             let binding_locs: Vec<u64> = single_binding_vector.iter().map(|a| a.0 as u64).collect();
             annotations.loci().iter().filter(|l| l.any_regulate_locus(&binding_locs, regulatory_distance, None)).collect()
@@ -5560,7 +5565,8 @@ impl<'a> MotifSet<'a> {
     pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>) {
      
         let (bindings, ided_loci) = self.return_regulated_loci_by_binding(data_ref, annotations, regulatory_distance);
- 
+
+        println!("Finished regulated loci");
         let potential_tfs = self.set.iter().zip(bindings.iter()).map(|(motif, binding_of_motif)| tfs_to_compare.hypergeometric_p_test_on_motif_binding_sites(motif.0.len(), binding_of_motif).into_iter().enumerate().filter_map(|(i, a)| {
                 if i == 0 || a.1 <= p_val_thresh { Some(a) }  else {None}
         }).collect::<Vec<_>>()).collect();
@@ -5573,6 +5579,7 @@ impl<'a> MotifSet<'a> {
 
         let (bindings, ided_loci, potential_tfs) = self.assign_tfs(data_ref, annotations, regulatory_distance, tfs_to_compare, p_val_thresh);
 
+        println!("Assigned TFs");
         if let Err(file_write_err) = file_handle.write(b"<insert header here>\n") { 
                 return (bindings, ided_loci, potential_tfs, Err(Box::new(file_write_err)));
         };
@@ -5587,7 +5594,7 @@ impl<'a> MotifSet<'a> {
             };
 
 
-            let header_string = format!("Motif_{i} ({}) with peak height {} is {}", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
+            let header_string = format!("\nMotif_{i} ({}) with peak height {} {}\n", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
 
             if let Err(file_write_err) = file_handle.write(&header_string.into_bytes()) {
                     return Err(Box::new(file_write_err));
@@ -5626,7 +5633,7 @@ impl<'a> MotifSet<'a> {
             let locus_names: Vec<_> = ided_loci.iter().map(|a| a.name()).collect();
 
             let locus_strings = format!("{:?}", locus_names);
-            if let Err(file_write_err) = file_handle.write(b"Regulated Loci") {
+            if let Err(file_write_err) = file_handle.write(b"Regulated Loci\n") {
                 return Err(Box::new(file_write_err));
             };
             if let Err(file_write_err) = file_handle.write(&locus_strings.into_bytes()) {

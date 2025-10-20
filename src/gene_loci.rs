@@ -406,8 +406,8 @@ impl std::fmt::Display for GffFormatError {
 
 #[derive(Debug, Clone)]
 pub struct TFAnalyzer {
-    tfs: HashMap<String, Vec<(String, usize, usize)>>,
-    by_locs: HashMap<usize, Vec<String>>,
+    tfs: HashMap<String, HashSet<(String, usize, usize)>>,
+    by_locs: HashMap<usize, HashSet<String>>,
 }
 
 #[derive(Error, Debug, Copy, Clone)]
@@ -444,8 +444,8 @@ impl TFAnalyzer {
 
 
         //The constant is just a semi reasonable small-ish guess on the number of TFs
-        let mut tfs: HashMap<String, Vec<(String,usize, usize)>> = HashMap::with_capacity(100);
-        let mut by_locs: HashMap<usize, Vec<String>> = HashMap::with_capacity(1000);
+        let mut tfs: HashMap<String, HashSet<(String,usize, usize)>> = HashMap::with_capacity(100);
+        let mut by_locs: HashMap<usize, HashSet<String>> = HashMap::with_capacity(1000);
 
         for line in lines {
 
@@ -453,8 +453,11 @@ impl TFAnalyzer {
             let collection: Vec<_> = confirm_line.split('\t').collect();
             let Some(tf_name_str) = collection.get(index_tf_name) else {return Err(Box::new(TsvColumnError::TFNameOOB));};
             let Some(start_str) = collection.get(index_chr_start) else { return Err(Box::new(TsvColumnError::ChrStartOOB));};
+            println!("{start_str} start");
+            if *start_str == "" {continue;}
             let Ok(mut start): Result<usize,_> = start_str.parse() else { return Err(Box::new(TsvColumnError::ChrStartNotInt));};
             let Some(end_str) = collection.get(index_chr_end) else { return Err(Box::new(TsvColumnError::ChrEndOOB));};
+            if *end_str == "" {continue;}
             let Ok(mut end): Result<usize, _> = end_str.parse() else { return Err(Box::new(TsvColumnError::ChrEndNotInt));};
             let Some(chr_name) = index_chr_name.map_or_else(|| Some("chr"), |a| collection.get(a).map(|b| &**b)) else { return Err(Box::new(TsvColumnError::ChrNameOOB));};
 
@@ -467,16 +470,20 @@ impl TFAnalyzer {
             }
 
             if let Some(hashmap_handle) = tfs.get_mut(*tf_name_str) {
-                hashmap_handle.push((chr_name.to_string(), start, end));
+                _ = hashmap_handle.insert((chr_name.to_string(), start, end));
             } else {
-                tfs.insert(tf_name_str.to_string(), vec![(chr_name.to_string(), start.saturating_sub(10), end+10)]);
+                let mut insert = HashSet::<(String, usize, usize)>::new();
+                insert.insert((chr_name.to_string(), start.saturating_sub(10), end+10));
+                tfs.insert(tf_name_str.to_string(), insert);
             };
 
             for loc in start.saturating_sub(10)..(end+10){
                 if let Some(hashmap_handle) = by_locs.get_mut(&loc) {
-                    hashmap_handle.push(tf_name_str.to_string());
+                    hashmap_handle.insert(tf_name_str.to_string());
                 } else {
-                    by_locs.insert(loc, vec![tf_name_str.to_string()]);
+                    let mut insert = HashSet::<String>::new();
+                    insert.insert(tf_name_str.to_string());
+                    by_locs.insert(loc, insert);
                 };
             }
 
@@ -486,15 +493,28 @@ impl TFAnalyzer {
         Ok(Self{tfs,by_locs})
     }
 
+    pub fn output_state(&self) -> String {
+        let by_tfs_count: Vec<(String, usize)> = self.tfs.iter().map(|(a,b)| (a.clone(), b.iter().map(|c| c.2-c.1).sum::<usize>())).collect();
+        let by_locs_count: Vec<(usize, usize)> = self.by_locs.iter().map(|(a,b)| (*a, b.len())).collect();
+
+        format!("Total tfs_count: {} Total locs count {}\nTF counts:\n{:?}\nLoc counts\n{:?}\n", by_tfs_count.iter().map(|(_,b)| *b).sum::<usize>(), by_locs_count.iter().map(|(_,b)| *b).sum::<usize>(), by_tfs_count, by_locs_count)
+    }
+
     fn tf_vs_counts(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> HashMap<String, usize> {
 
         let mut tf_vs_counts: HashMap<String, usize> = HashMap::with_capacity(30);
 
-        for &(binding_hit, _,_) in loc_info.iter() {
- 
-            let tfs: HashSet<String> = (binding_hit.saturating_sub(10)..(binding_hit+motif_size+10)).map(|a| self.by_locs.get(&a).clone().into_iter()).flatten().flatten().map(|a| a.clone()).collect();
-            for tf in tfs {
-                if let Some(tf_count) = tf_vs_counts.get_mut(&tf) { *tf_count += 1; } else {tf_vs_counts.insert(tf, 1);};
+        //sometimes, motif hits can themselves overlap a bit, especially if they're near each other
+        let binding_hits: HashSet<usize> = loc_info.iter().map(|a| (a.0.saturating_sub(10)..(a.0+motif_size+10))).flatten().collect();
+
+        for binding_hit in binding_hits {
+
+            let Some(tf_hits) = self.by_locs.get(&binding_hit) else {continue;};
+            //let tfs = self.by_locs.get(&binding_hit).clone().into_iter()).flatten().flatten().map(|a| a.clone()).collect();
+            //println!("tfs {:?}", tfs);
+            for tf in tf_hits {
+                println!("tf {:?}", tf);
+                if let Some(tf_count) = tf_vs_counts.get_mut(tf) { *tf_count += 1; } else {tf_vs_counts.insert(tf.clone(), 1);};
             }
         }
 
@@ -504,7 +524,17 @@ impl TFAnalyzer {
 
     pub fn hypergeometric_p_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64)> {
 
-        let tf_counts: HashMap<String,usize> = self.tfs.iter().map(|a| (a.0.clone(), a.1.len())).collect();
+        let mut tf_counts: HashMap<String,usize> = HashMap::with_capacity(self.tfs.len());
+        for (loc, tfs) in self.by_locs.iter() {
+            for tf in tfs.iter() {
+                if let Some(hashmap_handle) = tf_counts.get_mut(tf) {
+                    *hashmap_handle+=1;
+                } else {
+                    tf_counts.insert(tf.clone(), 1);
+                };
+            }
+
+        }//.map(|a| (a.0.clone(), a.1.iter().map(|c| c.2-c.1).sum::<usize>())).collect();
 
         let total_counts = tf_counts.iter().map(|a| a.1).sum::<usize>();
 
@@ -527,7 +557,14 @@ impl TFAnalyzer {
 
             let undrawn_failures = total_nonmatching_tf-test_total_no_match;
 
-            p_values.push((tf_name.to_string(), fishers_exact(&[count as u32, test_total_no_match as u32, undrawn_successes as u32, undrawn_failures as u32]).unwrap().greater_pvalue))
+            println!("testing {tf_name} ({total_matching_tf}) with {count} {test_total_no_match} {undrawn_successes} {undrawn_failures}");
+
+            match fishers_exact(&[count as u32, test_total_no_match as u32, undrawn_successes as u32, undrawn_failures as u32]) {
+            
+                Ok(a) => p_values.push((tf_name.to_string(), a.greater_pvalue)),
+                Err(e) => {println!("fisher exact error {e} {count} {test_total_no_match} {undrawn_successes} {undrawn_failures}")},
+            }
+
 
         }
 
