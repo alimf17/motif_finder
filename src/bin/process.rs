@@ -164,7 +164,6 @@ pub fn main() {
     */
 
 
-    let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| TFAnalyzer::from_regulon_tsv(&a, 3, 6,7, None).unwrap());
     //println!("tf analyzer: \n {} \n {:?}",tf_analyzer.as_ref().map(|a| a.output_state()).unwrap_or(String::new()), tf_analyzer ); 
     //let max_max_length = 100000;
     //This is the code that actually sets up our independent chain reading
@@ -284,6 +283,8 @@ pub fn main() {
 
     let non_null_data_ref = non_null_data_active.as_ref().unwrap_or(&data_ref);
 
+    let sequence_len = non_null_data_ref.number_bp();
+    let tf_analyzer: Option<TFAnalyzer> = tf_file.map(|a| TFAnalyzer::from_regulon_tsv(&a, sequence_len, 0, 1,2, None).unwrap());
 
     buffer.clear();
 

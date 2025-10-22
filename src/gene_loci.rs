@@ -5,6 +5,8 @@ use std::io::{BufReader, BufRead};
 use fishers_exact::fishers_exact;
 use itertools::Itertools;
 
+use statrs::distribution::{Binomial, Discrete, DiscreteCDF};
+
 use thiserror::Error;
 
 use once_cell::sync::Lazy;
@@ -18,6 +20,8 @@ static ID_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("ID=").unwrap());
 static ONT_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("Ontology_term=").unwrap());
 static GO_PARSE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"go_\w+=([a-zA-Z -]+\|\d+\|\|,?)+;").unwrap());
 static GO_TERM_ANALYZE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"([\w ]+)\[GO:(\d{7})\]").unwrap());
+
+const PADDING: usize = 20;
 
 /// This is the struct that tells you where and what the locus is
 #[derive(Debug,Clone)]
@@ -407,6 +411,7 @@ impl std::fmt::Display for GffFormatError {
 #[derive(Debug, Clone)]
 pub struct TFAnalyzer {
     tfs: HashMap<String, HashSet<(String, usize, usize)>>,
+    tf_props: HashMap<String, f64>,
     by_locs: HashMap<usize, HashSet<String>>,
 }
 
@@ -435,7 +440,7 @@ impl std::fmt::Display for TsvColumnError {
 
 impl TFAnalyzer {
  
-    pub fn from_regulon_tsv<'b>(tsv_file_name: &'b str, index_tf_name: usize, index_chr_start: usize, index_chr_end: usize, index_chr_name: Option<usize>) -> Result<Self, Box<dyn Error+Send+Sync>> {
+    pub fn from_regulon_tsv<'b>(tsv_file_name: &'b str, sequence_length: usize, index_tf_name: usize, index_chr_start: usize, index_chr_end: usize, index_chr_name: Option<usize>) -> Result<Self, Box<dyn Error+Send+Sync>> {
 
         let f = std::fs::File::open(tsv_file_name)?;
         let f = BufReader::new(f);
@@ -473,11 +478,11 @@ impl TFAnalyzer {
                 _ = hashmap_handle.insert((chr_name.to_string(), start, end));
             } else {
                 let mut insert = HashSet::<(String, usize, usize)>::new();
-                insert.insert((chr_name.to_string(), start.saturating_sub(10), end+10));
+                insert.insert((chr_name.to_string(), start.saturating_sub(PADDING), end+PADDING));
                 tfs.insert(tf_name_str.to_string(), insert);
             };
 
-            for loc in start.saturating_sub(10)..(end+10){
+            for loc in start.saturating_sub(PADDING)..(end+PADDING){
                 if let Some(hashmap_handle) = by_locs.get_mut(&loc) {
                     hashmap_handle.insert(tf_name_str.to_string());
                 } else {
@@ -487,10 +492,15 @@ impl TFAnalyzer {
                 };
             }
 
+            for (tf, loc_info) in tfs.iter() {
+
+            }
+ 
 
         }
+        let tf_props: HashMap<String, f64> = tfs.iter().map(|(tf, loc_info)| (tf.clone(), (loc_info.iter().map(|a| a.2-a.1).sum::<usize>() as f64)/(sequence_length as f64))).collect();
 
-        Ok(Self{tfs,by_locs})
+        Ok(Self{tfs,tf_props, by_locs})
     }
 
     pub fn output_state(&self) -> String {
@@ -505,7 +515,7 @@ impl TFAnalyzer {
         let mut tf_vs_counts: HashMap<String, usize> = HashMap::with_capacity(30);
 
         //sometimes, motif hits can themselves overlap a bit, especially if they're near each other
-        let binding_hits: HashSet<usize> = loc_info.iter().map(|a| (a.0.saturating_sub(10)..(a.0+motif_size+10))).flatten().collect();
+        let binding_hits: HashSet<usize> = loc_info.iter().map(|a| (a.0.saturating_sub(PADDING)..(a.0+motif_size+PADDING))).flatten().collect();
 
         for binding_hit in binding_hits {
 
@@ -513,7 +523,7 @@ impl TFAnalyzer {
             //let tfs = self.by_locs.get(&binding_hit).clone().into_iter()).flatten().flatten().map(|a| a.clone()).collect();
             //println!("tfs {:?}", tfs);
             for tf in tf_hits {
-                println!("tf {:?}", tf);
+          //      println!("tf {:?}", tf);
                 if let Some(tf_count) = tf_vs_counts.get_mut(tf) { *tf_count += 1; } else {tf_vs_counts.insert(tf.clone(), 1);};
             }
         }
@@ -522,7 +532,33 @@ impl TFAnalyzer {
 
     }
 
-    pub fn hypergeometric_p_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64)> {
+    //return is TF name, p value, log2 fold enrichment
+    pub fn binomial_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64, f64)> {
+
+        let mut tf_vs_counts: HashMap<String, usize> = HashMap::with_capacity(30);
+
+        for (loc, _, _) in loc_info {
+
+            let hits_in_this_loc: HashSet::<String> = (*loc..(loc+motif_size)).map(|position| self.by_locs.get(&position).clone()).flatten().flatten().map(|a| a.clone()).collect();
+
+            for tf in hits_in_this_loc {
+                if let Some(tf_count) = tf_vs_counts.get_mut(&tf) { *tf_count += 1; } else {tf_vs_counts.insert(tf.clone(), 1);};
+            }
+
+        }
+ 
+        let mut tests: Vec<(String, f64, f64)> = tf_vs_counts.into_iter().filter_map(|(tf, count)| self.tf_props.get(&tf).map(|&p| (tf, p, count))).map(|(tf, p, count)| {
+            let binom = Binomial::new(p, loc_info.len() as u64).unwrap();
+            (tf, binom.sf(count as u64), ((count as f64)/(p*(loc_info.len() as f64))).log2())
+        }).collect();
+
+        tests.sort_unstable_by(|a,b| b.2.partial_cmp(&a.2).unwrap());
+
+        tests
+
+    }
+
+    /*pub fn hypergeometric_p_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64)> {
 
         let mut tf_counts: HashMap<String,usize> = HashMap::with_capacity(self.tfs.len());
         for (loc, tfs) in self.by_locs.iter() {
@@ -557,7 +593,7 @@ impl TFAnalyzer {
 
             let undrawn_failures = total_nonmatching_tf-test_total_no_match;
 
-            println!("testing {tf_name} ({total_matching_tf}) with {count} {test_total_no_match} {undrawn_successes} {undrawn_failures}");
+        //    println!("testing {tf_name} ({total_matching_tf}) with {count} {test_total_no_match} {undrawn_successes} {undrawn_failures}");
 
             match fishers_exact(&[count as u32, test_total_no_match as u32, undrawn_successes as u32, undrawn_failures as u32]) {
             
@@ -572,8 +608,17 @@ impl TFAnalyzer {
 
         p_values
 
-    }
+    }*/
 
+    pub fn loc_lookup(&self, loc: usize) -> Option<&HashSet<String>> {
+        self.by_locs.get(&loc)
+    }
+    pub fn tf_lookup<'a>(&'a self, tf: &str) -> Option<&'a HashSet<(String, usize, usize)>> {
+        self.tfs.get(tf)
+    }
+    pub fn tf_prop_lookup<'a>(&'a self, tf: &str) -> Option<&'a f64> {
+        self.tf_props.get(tf)
+    }
 }
 
 
