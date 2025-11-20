@@ -73,11 +73,10 @@ struct Cli {
     #[arg(short, long)]
     prior: f64,
 
-    /// The number of 1.4826*Median Absolute Deviations away from the median a data 
-    /// a data point has to be to trigger peakiness. Default is 3.0: more, and we  
-    /// filter more. Less, and more gets called potential peaks. If this
-    /// is not supplied or infinite, we set it to 3.0. If this is negative, we
-    /// take its absolute value. 
+    /// Currently, this is just a legacy parameter 
+    /// It is possible that this will be altered in the future to have functionality to 
+    /// make the initial filtering function either more or less sensitivity to potential 
+    /// peaks.
     #[arg(short, long)]
     height_scale: Option<f64>,
 

@@ -1744,6 +1744,9 @@ impl<'a> AllDataUse<'a> {
         self.min_height
     }
 
+    pub fn set_min_height(&mut self, height: f64) {
+        self.min_height = height.max(1.0);
+    }
 
     pub fn credibility(&self) -> f64 {
         self.credibility

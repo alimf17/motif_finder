@@ -5563,7 +5563,7 @@ impl<'a> MotifSet<'a> {
     }
 
     //pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>) {
-    pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64, f64)>>) {
+    pub fn assign_tfs<'b>(&self, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64, f64, usize, f64)>>) {
      
         let (bindings, ided_loci) = self.return_regulated_loci_by_binding(data_ref, annotations, regulatory_distance);
 
@@ -5582,7 +5582,7 @@ impl<'a> MotifSet<'a> {
     //}
 
     //pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
-    pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
+    pub fn output_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64, f64, usize, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
 
         let (bindings, ided_loci, potential_tfs) = self.assign_tfs(data_ref, annotations, regulatory_distance, tfs_to_compare, p_val_thresh);
 
@@ -5596,7 +5596,7 @@ impl<'a> MotifSet<'a> {
             let best_hit = potential_tf_list.get(0);
 
             let hit_string = match best_hit {
-                Some(hit) => format!("is most enriched for sites consistent with {}, with log2 fold enrichment {} and p_value {}\n", hit.0, hit.2, hit.1),
+                Some(hit) => format!("is most likely {}, with log2 fold enrichment {} ({} site(s) vs an expected {} site(s)) and p_value {}\n", hit.0, hit.2, hit.3, hit.4, hit.1),
                 None => format!("has no hits!\n"),
             };
 
@@ -5610,13 +5610,13 @@ impl<'a> MotifSet<'a> {
 
 
             if potential_tf_list.len() > 1 {
-                if let Err(file_write_err) = file_handle.write(b"Potential alternate TFs\tlog2 enrichment\tp_value\n") {
+                if let Err(file_write_err) = file_handle.write(b"Potential alternate TFs\tlog2 enrichment\tp_value\tnumber of hits\texpected number of hits in null distribution\n") {
                     return Err(Box::new(file_write_err));
                 };
             }
             //This autoskips if potential_tf_list has less than two suggestions
             for i in 1..potential_tf_list.len() {
-                let registered_tf = format!("{}\t{}\t{}\n", potential_tf_list[i].0, potential_tf_list[i].2, potential_tf_list[i].1);
+                let registered_tf = format!("{}\t{}\t{}\t{}\t{}\n", potential_tf_list[i].0, potential_tf_list[i].2, potential_tf_list[i].1, potential_tf_list[i].3, potential_tf_list[i].4);
                 if let Err(file_write_err) = file_handle.write(&registered_tf.into_bytes()) {
                     return Err(Box::new(file_write_err));
                 };

@@ -411,8 +411,9 @@ impl std::fmt::Display for GffFormatError {
 #[derive(Debug, Clone)]
 pub struct TFAnalyzer {
     tfs: HashMap<String, HashSet<(String, usize, usize)>>,
-    tf_props: HashMap<String, f64>,
+    tf_props: HashMap<String, usize>,
     by_locs: HashMap<usize, HashSet<String>>,
+    sequence_length: usize,
 }
 
 #[derive(Error, Debug, Copy, Clone)]
@@ -498,9 +499,9 @@ impl TFAnalyzer {
  
 
         }
-        let tf_props: HashMap<String, f64> = tfs.iter().map(|(tf, loc_info)| (tf.clone(), (loc_info.iter().map(|a| a.2-a.1).sum::<usize>() as f64)/(sequence_length as f64))).collect();
+        let tf_props: HashMap<String, usize> = tfs.iter().map(|(tf, loc_info)| (tf.clone(), (loc_info.iter().map(|a| a.2-a.1).sum::<usize>()))).collect();
 
-        Ok(Self{tfs,tf_props, by_locs})
+        Ok(Self{tfs,tf_props, by_locs, sequence_length})
     }
 
     pub fn output_state(&self) -> String {
@@ -532,8 +533,8 @@ impl TFAnalyzer {
 
     }
 
-    //return is TF name, p value, log2 fold enrichment
-    pub fn binomial_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64, f64)> {
+    //return is TF name, p value, log2 fold enrichment, number of sites, expected number of sites
+    pub fn binomial_test_on_motif_binding_sites(&self, motif_size: usize, loc_info: &[(usize, bool, f64)]) -> Vec<(String, f64, f64, usize, f64)> {
 
         let mut tf_vs_counts: HashMap<String, usize> = HashMap::with_capacity(30);
 
@@ -547,12 +548,18 @@ impl TFAnalyzer {
 
         }
  
-        let mut tests: Vec<(String, f64, f64)> = tf_vs_counts.into_iter().filter_map(|(tf, count)| self.tf_props.get(&tf).map(|&p| (tf, p, count))).map(|(tf, p, count)| {
-            let binom = Binomial::new(p, loc_info.len() as u64).unwrap();
-            (tf, binom.sf(count as u64), ((count as f64)/(p*(loc_info.len() as f64))).log2())
+        let mut tests: Vec<_> = tf_vs_counts.into_iter().filter_map(|(tf, count)| self.tf_props.get(&tf).map(|&p| (tf, p, count))).map(|(tf, p, count)| {
+            let prob = ((p+motif_size*loc_info.len()) as f64)/(self.sequence_length as f64);
+            println!("{prob} prob");
+            let binom = Binomial::new(prob, loc_info.len() as u64).unwrap();
+            (tf, binom.sf(count as u64), ((count as f64)/(prob*(loc_info.len() as f64))).log2(), count, prob*(loc_info.len() as f64))
         }).collect();
 
-        tests.sort_unstable_by(|a,b| b.2.partial_cmp(&a.2).unwrap());
+        tests.sort_unstable_by(|a,b| match a.1.partial_cmp(&b.1).unwrap(){
+            std::cmp::Ordering::Equal => b.2.partial_cmp(&a.2).unwrap(),
+            std::cmp::Ordering::Less => std::cmp::Ordering::Less,
+            std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
+        });
 
         tests
 
@@ -616,7 +623,7 @@ impl TFAnalyzer {
     pub fn tf_lookup<'a>(&'a self, tf: &str) -> Option<&'a HashSet<(String, usize, usize)>> {
         self.tfs.get(tf)
     }
-    pub fn tf_prop_lookup<'a>(&'a self, tf: &str) -> Option<&'a f64> {
+    pub fn tf_prop_lookup<'a>(&'a self, tf: &str) -> Option<&'a usize> {
         self.tf_props.get(tf)
     }
 }
