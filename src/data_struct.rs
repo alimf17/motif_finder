@@ -1988,7 +1988,7 @@ impl<'a> AllDataUse<'a> {
             start_nullbp_coordinates: start_nullbp_coordinates,
             genome_block_chrs: genome_block_chrs, 
             nullbp_block_chrs: nullbp_block_chrs, 
-            chr_names: chr_names, 
+            chr_names: chr_names,
             background: background.clone(),
             offset: 0.0,
             min_height: min_height.max(1.0),
