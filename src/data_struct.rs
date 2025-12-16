@@ -449,7 +449,7 @@ impl AllData {
 
         println!("processed fasta");
         let sequence_len_or_fasta_error = match (pre_sequence).as_ref() { 
-            Ok(seq_ref) => Ok(seq_ref.len()),
+            Ok(seq_ref) => Ok(seq_ref.iter().map(|(name, seq)| (name.clone(), seq.len())).collect::<HashMap<String, usize>>()),
             Err(e) => Err(e.clone()),
         };
 
@@ -565,8 +565,9 @@ impl AllData {
     //         but the only possible fix here would have to not know that one of the chromosomes is circular.
     //         If it's really important that you need to do inference on that chromosome with circularity, 
     //         do multiple inferences.
-    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Result<Vec<Option<usize>>, FastaError> {
+    fn process_fasta(fasta_file_name: &str, null_char: Option<char>) -> Result<HashMap<String, Vec<Option<usize>>>, FastaError> {
 
+        println!("If this fasta file has multiple chromosomes, we VERY strongly recommend chromosome names match the names from any gff file you're using to assign loci, later");
         let file_string = match fs::read_to_string(fasta_file_name) {
 
             Ok(file) => file, 
@@ -586,13 +587,15 @@ impl AllData {
         if fasta_is_empty_or_blank { return Err(FastaError::BlankFile(EmptyFastaError));}
 
 
+        let mut chromosome_base_vec: HashMap<String, Vec<Option<usize>>> = HashMap::new();
+
         let mut base_vec: Vec<Option<usize>> = Vec::new();
        
         let mut fasta_iter = fasta_as_vec.iter().enumerate();
 
         let first_line = fasta_iter.next().expect("We already returned an error if the fasta file is empty or is all whitespace");
 
-        if !first_line.1.starts_with('>') { return Err(FastaError::BadFastaStart(MaybeNotFastaError)); }
+        let mut current_chromosome: String = if first_line.1.starts_with('>') {first_line.1.trim_start_matches('>').to_owned()} else { return Err(FastaError::BadFastaStart(MaybeNotFastaError));};
 
         let mut has_a_valid_bp = false;
 
@@ -601,13 +604,19 @@ impl AllData {
         for (line_pos, line) in fasta_iter {
 
             if line.starts_with('>'){
+
+                //TODO: add way to also include any located bad bases before this point
+                let None = chromosome_base_vec.insert(current_chromosome.clone(), base_vec) else { return Err(FastaError::RedundantChromosome(ChromosomeError::new(current_chromosome, potential_invalid_bp_err)));};
+                base_vec = Vec::new();
+                current_chromosome = line.trim_start_matches('>').to_owned();
                 continue;
             }
             for (char_pos, chara) in line.chars().enumerate(){
 
                 let (valid_base_or_known_null, to_push) = {
                     let mut valid_answer = true;
-                    let can_push = GET_BASE_USIZE.get(&chara).copied();
+                    //We make no semantic distinction between A v a, T vs t, etc
+                    let can_push = GET_BASE_USIZE.get(&chara.to_ascii_uppercase()).copied();
                     if can_push.is_none() {valid_answer = Some(chara) == null_char;
                     } else {has_a_valid_bp |= true;}
 
@@ -628,6 +637,7 @@ impl AllData {
             }
         }
 
+        let None = chromosome_base_vec.insert(current_chromosome.clone(), base_vec) else { return Err(FastaError::RedundantChromosome(ChromosomeError::new(current_chromosome, potential_invalid_bp_err)));};
         if !has_a_valid_bp { return Err(FastaError::BlankFile(EmptyFastaError));}
         if let Some(invalid_bp) = potential_invalid_bp_err {
             return Err(FastaError::BadFastaInput(invalid_bp));
@@ -637,7 +647,7 @@ impl AllData {
 
         //This regular expression cleans the fasta_file_name to remove the last extension
         //Examples: ref.fasta -> ref, ref.txt.fasta -> ref.txt, ref_Fd -> ref_Fd
-        Ok(base_vec)
+        Ok(chromosome_base_vec)
     }
 
     //TODO: I need a data processing function that reads in a CSV along with a
@@ -650,7 +660,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<usize, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>, f64), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<HashMap<String, usize>, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>, f64), AllProcessingError> {
        
         if spacing == 0 {
             let err = DataProcessError::BadSpacer(BadSpacerError);
@@ -816,7 +826,9 @@ impl AllData {
 
         //Note: this is the last possible place where possible_sequence_len can 
         //      possibly be live. If it died before this, we already returned.
-        let sequence_len = possible_sequence_len.expect("We only get here if we didn't have an error");
+        //TODO: sequence_len needs to be massively updated to account for multiple chromosomes. This get() is only to type check for the compiler for now
+
+        let sequence_len = *(possible_sequence_len.expect("We only get here if we didn't have an error").get("").unwrap());
 
         if last_loc > sequence_len {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::SequenceMismatch));
@@ -1232,7 +1244,7 @@ impl AllData {
     //      But these are on the edge between being positive and negative data,
     //      so they're in a little bit of a grey area to classify, and saving 
     //      them isn't my highest priority anyway.
-    fn synchronize_sequence_and_data(pre_sequence: Vec<Option<usize>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>), WaveCreationError> {
+    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>), WaveCreationError> {
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_null_data.len());
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
@@ -1244,6 +1256,8 @@ impl AllData {
         let mut positive_window_parts: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
         let mut i = 0_usize;
 
+        //TODO: pre_sequence needs to be properly initialized in a loop over the hashmap, this is just placeholder code to make the compiler typecheck
+        let pre_sequence = pre_sequence_map.get("").unwrap();
         let seq_len = pre_sequence.len();
 
         while i < pre_data.len() {
@@ -2040,6 +2054,8 @@ pub enum FastaError {
     BadFastaStart(#[from] MaybeNotFastaError),
     #[error(transparent)]
     BadFastaInput(#[from] InvalidBasesError),
+    #[error(transparent)]
+    RedundantChromosome(#[from] ChromosomeError),
 }
 
 
@@ -2070,6 +2086,7 @@ impl std::fmt::Display for SequenceWaveformIncompatible {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {write!(f, "The sequence and the data you are using are incompatible!") }
 }
 
+
 impl InvalidBasesError {
 
     fn new(line: u64, pos: u64) -> Self {
@@ -2093,6 +2110,7 @@ impl InvalidBasesError {
 
     }
 
+
 }
 
 fn improvised_push_within_capacity<T>(vector: &mut Vec<T>, element: T) -> Result<(), T> {
@@ -2114,6 +2132,34 @@ impl std::fmt::Display for InvalidBasesError{
 
         Ok(())
     }
+}
+
+#[derive(Error, Debug, Clone)]
+struct ChromosomeError {
+    redundant_chromosome_name: String,
+    also_bad_base: Option<InvalidBasesError>,
+}
+
+impl ChromosomeError {
+
+    fn new(bad_chromosome: String, also_bad_base: Option<InvalidBasesError>) -> Self {
+
+        Self  {
+            redundant_chromosome_name: bad_chromosome, 
+            also_bad_base: also_bad_base,
+        }
+
+    }
+}
+
+impl std::fmt::Display for ChromosomeError {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Redundant chromosome name: \"{}\"! Chromosome names cannot repeat because of how we coordinate the bedgraph with the FASTA!\nNOTE: You might also have bad base pairs in parts of the FASTA file beyond this chromosome: this is a lethal point of failure and we don't do further checks after this point.", self.redundant_chromosome_name)?;
+        if let Some(bad) = self.also_bad_base.as_ref() { bad.fmt(f)?; };
+        Ok(())
+    }
+
 }
 
 /// This documents all the things that can go wrong from processing a data file
