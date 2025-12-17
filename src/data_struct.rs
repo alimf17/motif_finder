@@ -660,6 +660,27 @@ impl AllData {
         Ok(chromosome_base_vec)
     }
 
+
+    //Note: we assign the FIRST location in a bedgraph line as the location of the data
+    fn try_read_bedgraph_line<E: Error>(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_check: & Result<HashMap<String, usize>, E>, is_circular: bool) -> Option<(String, usize, f64)> {
+
+        let check_chromosome = chromosome_check.is_ok_and(|a| a.len() > 1);
+
+        let error_on_len_problem = !is_circular;
+
+        let Some(split_line): Option<[&str; 4]> = line.1.split('\t').collect::Vec<_>().try_into() else { potential_error.add_problem_line(line.0, true, false, false, false); return None;};
+
+        if check_chromosome { if !(chromosome_check.is_ok_and(|a| a.get(split_line[0]))) { potential_error.add_problem_line(line.0, false, true, false, false);} }
+
+        if split_line[1].try_into::<usize>().is_none() { potential_error.add_problem_line(line.0, false, false, true, false); }
+        if split_line[3].try_into::<f64>().is_none() { potential_error.add_problem_line(line.0, false, false, false, true);}
+
+        let Some(loc): Option<usize> = split_line[1].try_into::<usize>() else {return None;};
+        let Some(data): Option<f64> = split_line[3].try_into::<f64>() else {return None;};
+
+        Some((split_line[0].to_string(), loc, data))
+    }
+
     //TODO: I need a data processing function that reads in a CSV along with a
     //      boolean that tells us if the genome is circular or not
     //      The output needs to be a Vec<Vec<f64>> giving blocks of data we're going to infer on,
@@ -2503,6 +2524,7 @@ impl std::fmt::Display for EmptyDataError {
 struct DataFileBadFormat {
     bad_header: bool, 
     empty_lines: Vec<u64>,
+    bad_chromosome_lines: Vec<u64>,
     no_location_lines: Vec<u64>, 
     no_data_lines: Vec<u64>,
 }
@@ -2513,6 +2535,7 @@ impl DataFileBadFormat {
         Self {
             bad_header: bad_header, 
             empty_lines: Vec::new(),
+            bad_chromosome_lines: Vec::new(),
             no_location_lines: Vec::new(),
             no_data_lines: Vec::new(),
         }
@@ -2540,18 +2563,19 @@ impl std::fmt::Display for TooManyBindingSites {
 }
 
 trait UpgradeToErr {
-    fn add_problem_line(&mut self, empty_line: Option<u64>, locationless_line: Option<u64>, dataless_line: Option<u64>);
+    fn add_problem_line(&mut self, line: u64, empty: bool, bad_chromosome: bool, locationless: bool, dataless: bool);
 }
 
 impl UpgradeToErr for Option<DataFileBadFormat> {
 
-    fn add_problem_line(&mut self, empty_line: Option<u64>, locationless_line: Option<u64>, dataless_line: Option<u64>) {
+    fn add_problem_line(&mut self, line: u64, empty: bool, bad_chromosome: bool, locationless: bool, dataless: bool) { 
 
         if self.is_none() { *self = Some(DataFileBadFormat::new(false));}
         let inside = self.as_mut().expect("already returned if this was null");
-        if let Some(empty) = empty_line { inside.empty_lines.push(empty);} 
-        if let Some(locationless) = locationless_line { inside.no_location_lines.push(locationless); }
-        if let Some(dataless) = dataless_line { inside.no_data_lines.push(dataless); }
+        if empty_line { inside.empty_lines.push(line);} 
+        if bad_chromosome { inside.bad_chromosome_lines.push(line);} 
+        if locationless { inside.no_location_lines.push(line); }
+        if dataless { inside.no_data_lines.push(line); }
     }
 }
 
@@ -2560,7 +2584,10 @@ impl std::fmt::Display for DataFileBadFormat {
         write!(f, "Your data is formatted poorly:\n")?;
         if self.bad_header { write!(f, "Your data header is incorrect: it must start 'loc data'\n")?;}
         if self.empty_lines.len() > 0 {
-            write!(f, "You have empty lines at the following line numbers: {:?}\n", self.empty_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
+            write!(f, "You have empty or unreadable lines. Recall that a data line in bedgraph file is tab delimited, with four entries: a chromosome name, a start location (that we use), an ending location (which we do not), and a data point (which we use as the occupancy trace).\nThe problems can be found at the following line numbers, using vi numbering: {:?}\n", self.empty_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
+        }
+        if self.bad_chromosome_lines.len() > 0 {
+            write!(f, "You have bad chromosome names. This results if your FASTA file has multiple chromosomes and the chromosome names in your bedgraph don't match the names in your FASTA file.\nThe problems can be found at the following line numbers, using vi numbering: {:?}", self.bad_chromosome_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
         }
         if self.no_location_lines.len() > 0 {
             write!(f, "You have lines that do not start with a valid location (a nonnegative integer) at the following line numbers: {:?}\n", self.no_location_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
