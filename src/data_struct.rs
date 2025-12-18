@@ -605,7 +605,13 @@ impl AllData {
 
         let first_line = fasta_iter.next().expect("We already returned an error if the fasta file is empty or is all whitespace");
 
-        let mut current_chromosome: String = if first_line.1.starts_with('>') {first_line.1.trim_start_matches('>').to_owned()} else { return Err(FastaError::BadFastaStart(MaybeNotFastaError));};
+        let mut current_chromosome: String = if first_line.1.starts_with('>') {
+            let mut chr_name = first_line.1.trim_start_matches('>').to_owned();
+            if let Some(found_chromosome_name) = chr_name.find("chromosome:") {
+                chr_name = (&asd[(found_chromosome_name+11)..].trim()).to_string();
+            } 
+            chr_name
+        } else { return Err(FastaError::BadFastaStart(MaybeNotFastaError));};
 
         let mut has_a_valid_bp = false;
 
@@ -618,7 +624,11 @@ impl AllData {
                 //TODO: add way to also include any located bad bases before this point
                 let None = chromosome_base_vec.insert(current_chromosome.clone(), base_vec) else { return Err(FastaError::RedundantChromosome(ChromosomeError::new(current_chromosome, potential_invalid_bp_err)));};
                 base_vec = Vec::new();
-                current_chromosome = line.trim_start_matches('>').to_owned();
+                let mut chr_name = first_line.1.trim_start_matches('>').to_owned();
+                if let Some(found_chromosome_name) = chr_name.find("chromosome:") {
+                    chr_name = (&asd[(found_chromosome_name+11)..].trim()).to_string();
+                }
+                current_chromosome = chr_name;
                 continue;
             }
             for (char_pos, chara) in line.chars().enumerate(){
@@ -662,24 +672,56 @@ impl AllData {
 
 
     //Note: we assign the FIRST location in a bedgraph line as the location of the data
-    fn try_read_bedgraph_line<E: Error>(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_check: & Result<HashMap<String, usize>, E>, is_circular: bool) -> Option<(String, usize, f64)> {
+    fn try_read_bedgraph_line<E: Error>(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_check: & Result<HashMap<String, usize>, E>, chromsomes_acquired: &mut HashSet<String>) -> Option<(String, usize, f64)> {
 
         let check_chromosome = chromosome_check.is_ok_and(|a| a.len() > 1);
 
-        let error_on_len_problem = !is_circular;
+        let ensure_only_one_chromosome = chromosome_check.is_ok_and(|a| a.len() == 1);
 
         let Some(split_line): Option<[&str; 4]> = line.1.split('\t').collect::Vec<_>().try_into() else { potential_error.add_problem_line(line.0, true, false, false, false); return None;};
 
-        if check_chromosome { if !(chromosome_check.is_ok_and(|a| a.get(split_line[0]))) { potential_error.add_problem_line(line.0, false, true, false, false);} }
+        if check_chromosome { 
+            if !(chromosome_check.is_ok_and(|a| a.get(split_line[0]).is_some())) { 
+                potential_error.add_problem_line(line.0, false, true, false, false);
+            } else {
+                let _ = chromsomes_acquired.insert(split_line[0].clone());
+            }
+        } 
+        if ensure_only_one_chromosome {
+            let inserted = chromsomes_acquired.insert(split_line[0].clone());
+            if inserted && chromsomes_acquired.len() > 1 {
+                potential_error.add_problem_line(line.0, false, true, false, false);//We shouldn't have multiple chromosomes in the data if there's only one fasta chromosome
+            }
+        }
 
+        //I write this in this weird redundant way because I don't want to return before catching all the errors I can. 
         if split_line[1].try_into::<usize>().is_none() { potential_error.add_problem_line(line.0, false, false, true, false); }
         if split_line[3].try_into::<f64>().is_none() { potential_error.add_problem_line(line.0, false, false, false, true);}
 
         let Some(loc): Option<usize> = split_line[1].try_into::<usize>() else {return None;};
         let Some(data): Option<f64> = split_line[3].try_into::<f64>() else {return None;};
 
+        if data.is_nan() { potential_error.add_problem_line(line.0, false, false, false, true); return None;}
+
         Some((split_line[0].to_string(), loc, data))
     }
+    
+
+
+    fn try_read_wiggle_line(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_name: &str) -> Option<(String, usize, f64)> {
+
+        let Some(split_line): Option<[&str; 2]> = line.1.split('\t').collect::Vec<_>().try_into() else { potential_error.add_problem_line(line.0, true, false, false, false); return None;};
+
+        if split_line[0].try_into::<usize>().is_none() { potential_error.add_problem_line(line.0, false, false, true, false); }
+        if split_line[1].try_into::<f64>().is_none() { potential_error.add_problem_line(line.0, false, false, false, true);}
+
+        //wiggle files are 1-indexed. 
+        let Some(loc): Option<usize> = split_line[0].try_into::<usize>().map(|a| a-1) else {return None;};
+        let Some(data): Option<f64> = split_line[1].try_into::<f64>() else {return None;};
+
+        Some((chromosome_name.clone().to_string(), loc, data))
+    }
+
 
     //TODO: I need a data processing function that reads in a CSV along with a
     //      boolean that tells us if the genome is circular or not
@@ -716,70 +758,16 @@ impl AllData {
         //let mut locs: Vec<usize> = Vec::with_capacity(data_as_vec.len());
         //let mut data: Vec<f64> = Vec::with_capacity(data_as_vec.len());
 
-        let mut raw_locs_data: Vec<(usize, f64)> = Vec::with_capacity(data_as_vec.len());
 
-        let mut data_iter = data_as_vec.iter().peekable();
-
-        let check_header = data_iter.next();
-
-        if check_header.is_none() {
-            let err = DataProcessError::BlankFile(EmptyDataError);
-            return Err(err.collect_wrongdoing(possible_sequence_len));
-        }
-
-        let first_line = check_header.expect("We already returned if this was None.");
-
-        let header = first_line.split(" ").collect::<Vec<_>>();
+        let mut data_iter = data_as_vec.into_iter().peekable();
 
         let mut format_error: Option<DataFileBadFormat> = None;
-        if (header[0] != "loc") || (header[1] != "data") {
-            format_error = Some(DataFileBadFormat::new(true)); //TODO: make a DataFileBadFormat Error, which has a variant "Header is incorrect"
-        }
-
 
         if data_iter.peek().is_none() { return Err(DataProcessError::BlankFile(EmptyDataError).collect_wrongdoing(possible_sequence_len)); }
 
-        //This gets us the raw data and location data, paired together and sorted
-        for (line_num_u, line) in data_iter.enumerate() {
+        let mut collected_chromosomes: HashSet<String> = HashSet::new();
 
-            let line_num = line_num_u as u64;
-
-            let mut line_iter = line.split_whitespace();
-
-            let content_0 = line_iter.next();
-
-            if content_0.is_none() { 
-                format_error.add_problem_line(Some(line_num), None, None);
-                continue;
-            }
-
-
-            let loc: usize = match content_0.expect("Getting here requires content in the line").parse() {
-                Ok(l) => l,
-                Err(_) => { 
-                    format_error.add_problem_line(None, Some(line_num), None);
-                    continue; 
-                }, //This arm diverges, so so nothing else gets executed for this line if it goes wrong
-            };
-
-            let content_1 = line_iter.next();
-
-            if content_1.is_none() {       
-                format_error.add_problem_line(None, None, Some(line_num));
-                continue;
-            }
-
-            let data: f64 = match content_1.expect("Getting here requires content in the second part of the line").parse() {
-                Ok(d) => d,
-                Err(_) => {
-                    format_error.add_problem_line(None, None, Some(line_num));
-                    continue;
-                },
-            };
-
-            raw_locs_data.push((loc,data));
-
-        }
+        let mut raw_locs_data = data_iter.enumerate().filter_map(|a| AllData::try_read_bedgraph_line(a, &mut format_error, &possible_sequence_len, &mut collected_chromosomes)).collect::<Vec<_>>();
 
         if let Some(bad_file) = format_error {
             let err = DataProcessError::BadDataFormat(bad_file);
@@ -790,18 +778,20 @@ impl AllData {
         if possible_sequence_len.is_err() { return Err(AllProcessingError::SequenceOnly(possible_sequence_len.unwrap_err())); }
 
         //Between peeking the data_file iterator and the code to process it after, we know that we have at least ONE data point now
-        raw_locs_data.sort_by(|(a, _), (b, _)| a.cmp(b));
+        raw_locs_data.sort_by(|(chr_a, loc_a, _), (chr_b, loc_b, _)| {
+            if chr_a.cmp(chr_b) == std::cmp::Ordering::Equal {
+                loc_a.cmp(loc_b)
+            } else {
+                chr_a.cmp(chr_b)
+        
+            }
+        });
 
 
 
         println!("Data sorted");
-        let start_loc: usize = raw_locs_data[0].0;
-        let last_loc: usize = raw_locs_data.last().unwrap().0;
 
-        let mut sorted_raw_data: Vec<f64> = raw_locs_data.iter().map(|(_,a)| *a).collect();
-
-
-
+        let mut sorted_raw_data: Vec<f64> = raw_locs_data.iter().map(|(_,a)
         sorted_raw_data.sort_unstable_by(|a,b| a.partial_cmp(&b).unwrap());
 
         let median = if sorted_raw_data.len() & 1 == 0 {
@@ -810,12 +800,6 @@ impl AllData {
             sorted_raw_data[sorted_raw_data.len()/2]
         };
 
-        for item in sorted_raw_data.iter_mut() {
-           *item -= median;
-        }
-        for item in raw_locs_data.iter_mut() {
-            item.1 -= median;
-        }
 
 
         let mut peak_scale: f64 = scale_peak_thresh.unwrap_or(1.0);
@@ -835,12 +819,12 @@ impl AllData {
             None => {
                 warn!("Fit failed to converge! Approximating from mad!");
                 let dat_off = Data::new(sorted_raw_data.iter().map(|&a| (a-median).abs()).collect::<Vec<f64>>());
-                vec![0.0, dat_off.median()*MAD_ADJUSTER]
+                vec![median, dat_off.median()*MAD_ADJUSTER]
             }
         };
 
         for dat in raw_locs_data.iter_mut() {
-            dat.1 -= pars[0];
+            dat.2 -= pars[0];
         }
 
         for dat in sorted_raw_data.iter_mut() {
@@ -858,31 +842,11 @@ impl AllData {
         //Note: this is the last possible place where possible_sequence_len can 
         //      possibly be live. If it died before this, we already returned.
         //TODO: sequence_len needs to be massively updated to account for multiple chromosomes. This get() is only to type check for the compiler for now
-
+        //Ali, this is your next assignment 
         let sequence_len = *(possible_sequence_len.expect("We only get here if we didn't have an error").get("").unwrap());
 
         if last_loc > sequence_len {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::SequenceMismatch));
-        }
-
-        let hits_end: bool = last_loc == sequence_len;
-        let mut zero_indexed: bool = start_loc == 0;
-
-        if hits_end && zero_indexed {
-            //Same panic as overrunning the sequence, because it overruns the sequence by one
-            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::SequenceMismatch));
-        }
-
-        if (!hits_end) && (!zero_indexed) {
-            warn!("Program is assuming that your locations are zero indexed, but doesn't have evidence of this!");
-            zero_indexed = true;
-        }
-
-        if !zero_indexed {
-
-            for point in raw_locs_data.iter_mut() {
-                (*point).0 -= 1;
-            }
         }
 
         println!("Normalized data location");
@@ -2581,20 +2545,30 @@ impl UpgradeToErr for Option<DataFileBadFormat> {
 
 impl std::fmt::Display for DataFileBadFormat {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut header_tip = false;
         write!(f, "Your data is formatted poorly:\n")?;
         if self.bad_header { write!(f, "Your data header is incorrect: it must start 'loc data'\n")?;}
         if self.empty_lines.len() > 0 {
+            header_tip |= self.empty_lines[0] ==0;
             write!(f, "You have empty or unreadable lines. Recall that a data line in bedgraph file is tab delimited, with four entries: a chromosome name, a start location (that we use), an ending location (which we do not), and a data point (which we use as the occupancy trace).\nThe problems can be found at the following line numbers, using vi numbering: {:?}\n", self.empty_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
         }
         if self.bad_chromosome_lines.len() > 0 {
-            write!(f, "You have bad chromosome names. This results if your FASTA file has multiple chromosomes and the chromosome names in your bedgraph don't match the names in your FASTA file.\nThe problems can be found at the following line numbers, using vi numbering: {:?}", self.bad_chromosome_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
+            header_tip |= self.bad_chromosome_lines[0] ==0;
+            write!(f, "You have bad chromosome names. This results if: \n- Your FASTA file has multiple chromosomes and the chromosome names in your bedgraph don't match the names in your FASTA file, OR \n- Your FASTA file has a single chromosome, and the bedgraph has multiple chromosome names. \n\nThe problems can be found at the following line numbers, using vi numbering: {:?}", self.bad_chromosome_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
         }
         if self.no_location_lines.len() > 0 {
-            write!(f, "You have lines that do not start with a valid location (a nonnegative integer) at the following line numbers: {:?}\n", self.no_location_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
+            header_tip |= self.no_location_lines[0] ==0;
+            write!(f, "You have lines with invalid location values (a nonnegative integer) at the following line numbers: {:?}\n", self.no_location_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
         }
 
         if self.no_data_lines.len() > 0 {
+            header_tip |= self.no_data_lines[0] ==0;
             write!(f, "You have lines that do not have valid data after the location at the following line numbers: {:?}\n", self.no_data_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
+        }
+
+
+        if header_tip {
+            write!(f, "Your first error is at the beginning of the file. A reminder that we do not process headers for this algorithm. For us, a suitable bedgraph file is a tab delimited, four column file where each row is the chromosome name, the locations, and then finally, the data")?;
         }
 
         Ok(())
