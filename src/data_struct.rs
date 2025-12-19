@@ -742,7 +742,7 @@ impl AllData {
     //      and the length of non-interaction (defined as the length across which a 
     //      a read in one location does not influence the presence of a read in another 
     //      location and set to the fragment length)
-    fn process_data(data_file_name: &str, possible_sequence_len: Result<HashMap<String, usize>, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<Vec<(usize, f64)>>, Background, f64, Vec<Vec<(usize, f64)>>, f64), AllProcessingError> {
+    fn process_data(data_file_name: &str, possible_sequence_len: Result<HashMap<String, usize>, FastaError>, fragment_length: usize, spacing: usize, min_height: f64, is_circular: bool, scale_peak_thresh: Option<f64>, retain_null: bool) -> Result<(Vec<(String, Vec<Vec<(usize, f64)>>)>, Background, f64, Vec<(String, Vec<Vec<(usize, f64)>>)>, f64), AllProcessingError> {
        
         if spacing == 0 {
             let err = DataProcessError::BadSpacer(BadSpacerError);
@@ -960,9 +960,6 @@ impl AllData {
 
         let mut certify_cut: HashMap<String, bool> = internal_cuts.iter().map(|(a, b)| (a.clone(), !is_circular || b.len() > 0 || !try_circle.get(a).expect("has the same keys as chromosome_boundaries by construction"))).collect();
 
-        let num_blocks = try_circle.iter().map(|(a, b)| if !(*b) { internal_cuts.get(a).expect("has the same keys as chromosome_boundaries by construction").len() +1 } else {1_usize.max(internal_cuts.get(a).expect("has the same keys as chromosome_boundaries by construction").len())});
-
-
 
         let mut first_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = chromosome_boundaries.iter().map(|(chrom,(start, end))| {
 
@@ -987,16 +984,18 @@ impl AllData {
 
 
 
+        first_blocks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
 
         //Now, we have finished first_blocks, which is a vec of Vec<(usize, f64)>s such that I can lerp each block according to the spacer
 
-        let mut lerped_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = first_blocks.into_iter().map(|(a, block)| (a, Self::lerp(&block, spacing))).collect();
+        let mut lerped_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = first_blocks.into_iter().map(|(a, block_vec)| (a, block_vec.into_iter(|block| Self::lerp(&block, spacing)).collect::<Vec<Vec(usize, f64)>>())).collect();
 
         let num_lerped_blocks = lerped_blocks.iter().map(|a| a.1.len()).sum();
 
 
         //TODO: This is where I got to for implementing the multiple chromosomes
+
         //Now, we have lerped_blocks, which is a vec of Vec<(usize, f64)>s such that all independent blocks are lerped according to the spacer, amd are non-empty where they exist
         //Sort data into two parts: kept data that has peaks, and not kept data that I can derive the AR model from
         //Keep data that has peaks in preparation for being synced with the sequence
@@ -1008,59 +1007,179 @@ impl AllData {
         let norm_back = Normal::new(0.0, pars[1]).unwrap();
         let peak_thresh = AllData::find_qval_cutoff(&sorted_raw_data, &norm_back, None);
         println!("peak thresh is {peak_thresh} or in pre terms {}", peak_thresh+pars[0]);
-        let mut ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(num_lerped_blocks);
-        let mut data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(lerped_blocks.len());
+        let mut ar_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = Vec::with_capacity(lerped_blocks.len());
+        let mut data_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = Vec::with_capacity(lerped_blocks.len());
 
         //The maximum spacing where things can start interfering with one another is 3 kernel sds
         //away, because we decided that fragment lengths should be about 6 kernel sds long
         let data_zone: usize = (100/spacing).max(2*fragment_length/spacing); //(2500/spacing).max(2*fragment_length/(spacing));
         
 
-        if retain_null { data_blocks = lerped_blocks.into_iter().map(|a| a.1;} else {
-            for block in lerped_blocks {
+        if retain_null { data_blocks = lerped_blocks;} else {
+            
+            for (chrom, this_chrom_lerped_blocks) in lerped_blocks.into_iter() { 
+            
+                let mut this_chrom_ar_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(this_chrom_lerped_blocks.len());
+                let mut this_chrom_data_blocks: Vec<Vec<(usize, f64)>> = Vec::with_capacity(this_chrom_lerped_blocks.len());
 
-                //Even though I only match positive peaks, I match on b.abs() because it lets me
-                //make stronger assumptions about any data NOT included in the actual inference
-                let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
-                
-                //Trying what happens on NOT abs filtering
-                //let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| *b > peak_thresh).collect();
+                for block in this_chrom_lerped_blocks {
 
+                    //Even though I only match positive peaks, I match on b.abs() because it lets me
+                    //make stronger assumptions about any data NOT included in the actual inference
+                    let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| b.abs() > peak_thresh).collect();
 
-                let mut next_ar_ind = 0_usize;
-                let mut curr_data_start: usize;
-
-                let mut check_ind = 0_usize;
-
-                while check_ind < block.len() {
-
-                    if poss_peak_vec[check_ind] {
-                        curr_data_start = if (next_ar_ind + data_zone) > check_ind {next_ar_ind} else {check_ind-data_zone}; //the if should only ever activate on the 0th block
-                        if curr_data_start > next_ar_ind { ar_blocks.push(block[next_ar_ind..curr_data_start].to_vec()); }
-
-                        next_ar_ind = block.len().min(check_ind+data_zone+1);
+                    //Trying what happens on NOT abs filtering
+                    //let poss_peak_vec: Vec<bool> = block.iter().map(|(_, b)| *b > peak_thresh).collect();
 
 
+                    let mut next_ar_ind = 0_usize;
+                    let mut curr_data_start: usize;
 
-                        while check_ind < next_ar_ind {
-                            if poss_peak_vec[check_ind] {
-                                next_ar_ind = block.len().min(check_ind+data_zone+1);
+                    let mut check_ind = 0_usize;
+
+                    while check_ind < block.len() {
+
+                        if poss_peak_vec[check_ind] {
+                            curr_data_start = if (next_ar_ind + data_zone) > check_ind {next_ar_ind} else {check_ind-data_zone}; //the if should only ever activate on the 0th block
+                            if curr_data_start > next_ar_ind { this_chrom_ar_blocks.push(block[next_ar_ind..curr_data_start].to_vec()); }
+
+                            next_ar_ind = block.len().min(check_ind+data_zone+1);
+
+
+
+                            while check_ind < next_ar_ind {
+                                if poss_peak_vec[check_ind] {
+                                    next_ar_ind = block.len().min(check_ind+data_zone+1);
+                                }
+                                check_ind += 1;
                             }
+
+                            if spacing < BASE_L {
+
+                                next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
+
+                            }
+
+
+                            this_chrom_data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
+                        } else {
                             check_ind += 1;
                         }
-
-                        if spacing < BASE_L {
-
-                            next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
-
-                        }
-
-
-                        data_blocks.push(block[curr_data_start..next_ar_ind].to_vec());
-                    } else {
-                        check_ind += 1;
                     }
+                } //This finished the block splitting logic for this chromosome. 
+
+
+                if try_circle.get(&chrom).expect("has the same keys as chromosome_boundaries by construction") { //This code is only run if chromosomes are circular and weren't cut already by the existence of missing data
+
+                    let starts_data = this_chrom_data_blocks[0][0].0 < this_chrom_ar_blocks[0][0].0;
+                    let ends_data = (*(*this_chrom_data_blocks.last().unwrap()).last().unwrap()).0 > 
+                        (*(*this_chrom_ar_blocks.last().unwrap()).last().unwrap()).0;
+                    match (starts_data, ends_data) {
+                        (true, true) => { //If both the beginning and end are data, glom the beginning onto the end in data
+                            if this_chrom_data_blocks.len() > 1 {
+                                let mut rem_block = this_chrom_data_blocks.remove(0); 
+                                rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                if let Some(end_vec) = this_chrom_data_blocks.last_mut() { //This is infallible, as the length for data blocks is more than 1 in this chromosome
+                                    end_vec.append(&mut rem_block);
+                                    *end_vec = Self::lerp(&*end_vec, spacing);
+                                    *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false;
+                                    //I need to record that the circularization is taken care of only here, as this could be a single glob of data across the chromosome.
+                                    //If this is the case, then I need to issue a warning, and thus I will remember it if we take this conditional. 
+                                };
+                            }
+                        },
+                        (false, false) => { //If both the beginning and end are for AR inference, glom the beginning onto the end for AR inference
+                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            if this_chrom_data_blocks.len() > 1 {
+                                let mut rem_block = this_chrom_ar_blocks.remove(0);
+                                rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                if let Some(end_vec) = this_chrom_ar_blocks.last_mut() { //This is infallible, as the length for ar blocks is more than 1 in this chromosome here
+                                    end_vec.append(&mut rem_block);
+                                    *end_vec = Self::lerp(&*end_vec, spacing);
+                                };
+                            }
+                        },
+                        (true, false) => {
+
+                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            let first_force_data = this_chrom_data_blocks[0].iter().position(|(_, b)| b.abs() > peak_thresh).unwrap();
+                            let last_data_place = this_chrom_data_blocks[0][first_force_data].0+sequence_len-data_zone;
+                            let bleed_into_final_ar = last_data_place <= (*(*this_chrom_ar_blocks.last().unwrap()).last().unwrap()).0;
+                            let bleed_into_last_data = last_data_place <= (*this_chrom_ar_blocks.last().unwrap())[0].0;
+
+                            if bleed_into_last_data {
+                                let mut rem_block = this_chrom_data_blocks.remove(0);
+                                rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                let mut fuse_ar = this_chrom_ar_blocks.pop().unwrap();
+                                if let Some(end_vec) = this_chrom_data_blocks.last_mut()  {
+                                    end_vec.append(&mut fuse_ar);
+                                    end_vec.append(&mut rem_block);
+                                    *end_vec = Self::lerp(&*end_vec, spacing);
+                                } else {
+                                    fuse_ar.append(&mut rem_block);
+                                    fuse_ar = Self::lerp(&*fuse_ar, spacing);
+                                    this_chrom_data_blocks.push(fuse_ar);
+                                };
+
+                            } else if bleed_into_final_ar {
+                                let mut rem_block = this_chrom_data_blocks.remove(0);
+                                rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                let mut split = 1_usize;
+                                if let Some(end_vec) = this_chrom_ar_blocks.last_mut() { //This match is infallible
+                                    while (*end_vec)[split].0 < last_data_place {split+=1;}
+                                    let mut begin_fin_dat = end_vec.split_off(split);
+                                    begin_fin_dat.append(&mut rem_block);
+                                    begin_fin_dat = Self::lerp(&begin_fin_dat, spacing);
+                                    this_chrom_data_blocks.push(begin_fin_dat);
+                                };
+                            } //Don't need a final else. It basically boils down to "else: I don't care"
+
+
+                        },
+
+                        (false, true) => {
+                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            let last_force_data = this_chrom_data_blocks.last().unwrap().len()-1-(this_chrom_data_blocks.last().unwrap().iter().rev().position(|(_, b)| b.abs() > peak_thresh).unwrap());
+                            if this_chrom_data_blocks.last().unwrap()[last_force_data].0+data_zone > sequence_len {
+
+                                let last_data_place = this_chrom_data_blocks.last().expect("this_chrom_data_blocks must have data if we're here")[last_force_data].0+data_zone-sequence_len;
+                                let bleed_into_final_ar = last_data_place <= this_chrom_ar_blocks[0][0].0; 
+                                let bleed_into_last_data = last_data_place <= (*((this_chrom_ar_blocks[0]).last().expect("this_chrom_ar_blocks must have data if we're here"))).0;
+
+                                if bleed_into_last_data {
+                                    let mut rem_block = this_chrom_data_blocks.remove(0);
+                                    rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                    let mut fuse_ar = this_chrom_ar_blocks.remove(0);
+                                    fuse_ar = fuse_ar.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
+                                    if let Some(end_vec) = this_chrom_data_blocks.last_mut()  {
+                                        end_vec.append(&mut fuse_ar);
+                                        end_vec.append(&mut rem_block);
+                                        *end_vec = Self::lerp(&*end_vec, spacing);
+                                    } else {
+                                        fuse_ar.append(&mut rem_block);
+                                        fuse_ar = Self::lerp(&*fuse_ar, spacing);
+                                        this_chrom_data_blocks.push(fuse_ar);
+                                    };
+
+                                } else if bleed_into_final_ar {
+
+                                    let start_vec = &mut this_chrom_ar_blocks[0];
+                                    let mut split = start_vec.len()-2;
+                                    while (*start_vec)[split].0 < last_data_place {split-=1;}
+                                    let mut begin_fin_dat = start_vec.drain(0..split).map(|(a, b)| (a+sequence_len, b)).collect::<Vec<_>>();
+                                    this_chrom_data_blocks.last_mut().expect("this_chrom_data_blocks must have data if we're here").append(&mut begin_fin_dat);
+                                    *(this_chrom_data_blocks.last_mut().expect("this_chrom_data_blocks must have data if we're here")) = Self::lerp(this_chrom_data_blocks.last().expect("this_chrom_data_blocks must have data if we're here"), spacing);
+                                } //Don't need a final else. It basically boils down to "else: I don't care"
+
+                            }
+                        },
+                    };
+
                 }
+
+
+                ar_blocks.push((chrom.clone(), this_chrom_ar_blocks));
+                data_blocks.push((chrom, this_chrom_data_blocks));
             }
         }
 
@@ -1068,115 +1187,24 @@ impl AllData {
         println!("sorted data data away from background inference data");
 
 
-        if !retain_null && (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+        let ar_lens = ar_blocks.iter().map(|a| a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>();
+        let data_lens = data_blocks.iter().map(|a|  a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>();
+
+        if !retain_null && (ar_lens == 0) && (data_lens == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
 
         println!("past first");
 
-        if !retain_null && ar_blocks.len() == 0 {
+        if !retain_null && ar_lens == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
         }
 
-        if data_blocks.len() == 0 {
+        if data_lens == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
         }
 
-        if !retain_null && !cut { //This code is only run if the genome is circular and has no missing data
-
-            let starts_data = data_blocks[0][0].0 < ar_blocks[0][0].0;
-            let ends_data = (*(*data_blocks.last().unwrap()).last().unwrap()).0 > 
-                             (*(*ar_blocks.last().unwrap()).last().unwrap()).0;
-            match (starts_data, ends_data) {
-                (true, true) => { //If both the beginning and end are data, glom the beginning onto the end in data
-                    let mut rem_block = data_blocks.remove(0); 
-                    rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                    let Some(end_vec) = data_blocks.last_mut() else {
-                        return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
-                    };
-                    end_vec.append(&mut rem_block);
-
-                    *end_vec = Self::lerp(&*end_vec, spacing);
-                },
-                (false, false) => { //If both the beginning and end are for AR inference, glom the beginning onto the end for AR inference
-
-                    let mut rem_block = ar_blocks.remove(0);
-                    rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                    let Some(end_vec) = ar_blocks.last_mut() else {
-                        return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
-                    };
-                    end_vec.append(&mut rem_block);
-                    *end_vec = Self::lerp(&*end_vec, spacing);
-                },
-                (true, false) => {
-                    let first_force_data = data_blocks[0].iter().position(|(_, b)| b.abs() > peak_thresh).unwrap();
-                    let last_data_place = data_blocks[0][first_force_data].0+sequence_len-data_zone;
-                    let bleed_into_final_ar = last_data_place <= (*(*ar_blocks.last().unwrap()).last().unwrap()).0;
-                    let bleed_into_last_data = last_data_place <= (*ar_blocks.last().unwrap())[0].0;
-
-                    if bleed_into_last_data {
-                        let mut rem_block = data_blocks.remove(0);
-                        rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                        let mut fuse_ar = ar_blocks.pop().unwrap();
-                        let Some(end_vec) = data_blocks.last_mut() else {
-                            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
-                        };
-
-                        end_vec.append(&mut fuse_ar);
-                        end_vec.append(&mut rem_block);
-                        *end_vec = Self::lerp(&*end_vec, spacing);
-                    } else if bleed_into_final_ar {
-                        let mut rem_block = data_blocks.remove(0);
-                        rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                        let mut split = 1_usize;
-                        let Some(end_vec) = ar_blocks.last_mut() else {
-                            return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
-                        };
-                        while (*end_vec)[split].0 < last_data_place {split+=1;}
-                        let mut begin_fin_dat = end_vec.split_off(split);
-                        begin_fin_dat.append(&mut rem_block);
-                        begin_fin_dat = Self::lerp(&begin_fin_dat, spacing);
-                        data_blocks.push(begin_fin_dat);
-                    } //Don't need a final else. It basically boils down to "else: I don't care"
-                    
-
-                },
-
-                (false, true) => {
-                    let last_force_data = data_blocks.last().unwrap().len()-1-(data_blocks.last().unwrap().iter().rev().position(|(_, b)| b.abs() > peak_thresh).unwrap());
-                    if data_blocks.last().unwrap()[last_force_data].0+data_zone > sequence_len {
-                        
-                        let last_data_place = data_blocks.last().unwrap()[last_force_data].0+data_zone-sequence_len;
-                        let bleed_into_final_ar = last_data_place <= ar_blocks[0][0].0; 
-                        let bleed_into_last_data = last_data_place <= (*((ar_blocks[0]).last().unwrap())).0;
-
-                        if bleed_into_last_data {
-                            let mut rem_block = data_blocks.remove(0);
-                            rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                            let mut fuse_ar = ar_blocks.remove(0);
-                            fuse_ar = fuse_ar.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
-                            let Some(end_vec) = data_blocks.last_mut() else {
-                                return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
-                            };
-
-                            end_vec.append(&mut fuse_ar);
-                            end_vec.append(&mut rem_block);
-                            *end_vec = Self::lerp(&*end_vec, spacing);
-                        } else if bleed_into_final_ar {
-
-                            let start_vec = &mut ar_blocks[0];
-                            let mut split = start_vec.len()-2;
-                            while (*start_vec)[split].0 < last_data_place {split-=1;}
-                            let mut begin_fin_dat = start_vec.drain(0..split).map(|(a, b)| (a+sequence_len, b)).collect::<Vec<_>>();
-                            data_blocks.last_mut().unwrap().append(&mut begin_fin_dat);
-                            *(data_blocks.last_mut().unwrap()) = Self::lerp(data_blocks.last().unwrap(), spacing);
-                        } //Don't need a final else. It basically boils down to "else: I don't care"
-                    
-                    }
-                },
-            };
-
-        }
+        //TODO:This is where I stopped. 
 
         println!("Ensured that cutting happened");
 
@@ -1184,33 +1212,33 @@ impl AllData {
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
 
-        ar_blocks.retain(|a| a.len() > data_zone);
-        
+        ar_blocks = ar_blocks.into_iter().map(|(a, b)| (a, b.retain(|c| c.len() > data_zone))).collect();
+
         //SAFETY: This data block filtering is what allows us to guarentee Kernel
         //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
         //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
         //never rounds down
-        data_blocks.retain(|a| (a.len()+1)*spacing > fragment_length);
+        data_blocks = data_blocks.into_iter().map(|(c, b)| (c, b.retain(|a| (a.len()+1)*spacing > fragment_length))).collect();
 
 
-        let mut trimmed_data_blocks: Vec<Vec<(usize, f64)>> = data_blocks.iter()
-                                                                     .map(|a| a.clone()).collect();
        
-        if !retain_null && (ar_blocks.len() == 0) && (data_blocks.len() == 0) {
+        let ar_lens = ar_blocks.iter().map(|a| a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>();
+        let data_lens = data_blocks.iter().map(|a|  a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>();
+
+        if !retain_null && (ar_lens == 0) && (data_lens == 0) {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NeedDifferentExperiment));
         }
 
-        println!("past second");
 
-        if !retain_null && ar_blocks.len() == 0 {
+        if !retain_null && ar_lens == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughNullData));
         }
 
-        if data_blocks.len() == 0 {
+        if data_lens == 0 {
             return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData));
         }
 
-        let length_of_data: usize = data_blocks.iter().map(|a| a.len()).sum();
+        println!("past second");
 
         //This is a hard limit, because technically, we only ever computed the
         //limit of the eth statistic as the number of points increases without bound
@@ -1224,15 +1252,15 @@ impl AllData {
         //Again, I'm blatantly pretending that 100 is sufficient. I would guess 
         //it's _probably_ fine???? 100 vs 8 is a lot of wiggle room, and eth is
         //quite related to AD
-        if length_of_data < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
+        if data_len < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
 
-        let ar_info = if !retain_null { ar_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>()} else {Vec::new()} ;
-        let data_info = data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>();
+        let ar_info = if !retain_null { ar_blocks.iter().map(|(b, c)| (b, c.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>())).collect::<Vec<_>>()} else {Vec::new()} ;
+        let data_info = data_blocks.iter().map(|(b, c)| (b, c.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>())).collect::<Vec<_>>();
 
         println!("AR lens, start loc, and end datas {:?}", ar_info);
-        println!("total AR amount {}", ar_info.iter().map(|a| a.0).sum::<usize>());
-        println!("data lens, start loc, and end datas {:?}", data_blocks.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>());
-        println!("total data amount {}", data_info.iter().map(|a| a.0).sum::<usize>());
+        println!("total AR amount {}", ar_lens);
+        println!("data lens, start loc, and end datas {:?}", data_info); 
+        println!("total data amount {}", data_lens);
 
         //let ar_inference: Vec<Vec<f64>> = ar_blocks.iter().map(|a| a.iter().map(|(_, b)| *b).collect::<Vec<f64>>() ).collect();
 
@@ -1244,10 +1272,9 @@ impl AllData {
         //the inference of the results, but only if we have like fewer than 2 data
         //points, which doesn't happen with the way we defined data_zone
 
-        let trimmed_ar_blocks: Vec<Vec<(usize, f64)>> = ar_blocks.into_iter().map(|a| a.into_iter().map(|(c,b)|(c, b)).collect::<Vec<(usize,f64)>>()).collect();
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
-        Ok((trimmed_data_blocks, background_dist, min_height, trimmed_ar_blocks, peak_thresh))
+        Ok((data_blocks, background_dist, min_height, ar_blocks, peak_thresh))
 
 
 
@@ -1266,118 +1293,149 @@ impl AllData {
     //      But these are on the edge between being positive and negative data,
     //      so they're in a little bit of a grey area to classify, and saving 
     //      them isn't my highest priority anyway.
-    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_data: Vec<Vec<(usize, f64)>>, pre_null_data: Vec<Vec<(usize, f64)>>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
-        let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
-        let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(pre_null_data.len());
-        let mut start_data: Vec<f64> = Vec::with_capacity(pre_data.iter().map(|a| a.len()).sum::<usize>());
-        let mut starting_coords: Vec<usize> = Vec::with_capacity(pre_data.len());
-        let mut null_starts_bps: Vec<usize> = Vec::with_capacity(pre_null_data.len());
+    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
+        let data_block_num = pre_chrom_data.iter().map(|a| a.1.len()).sum::<usize>();
+        let null_block_num = pre_chrom_null_data.iter().map(||a| a.1.len()).sum::<usize>();
+        let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(data_block_num);
+        let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(null_block_num);
+        let mut start_data: Vec<f64> = Vec::with_capacity(pre_chrom_data.iter().map(|a| a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>());
+        let mut starting_coords: Vec<usize> = Vec::with_capacity(data_block_num);
+        let mut null_starts_bps: Vec<usize> = Vec::with_capacity(null_block_num);
+        let mut which_chromosomes_seq: Vec<usize> = Vec::with_capacity(data_block_num);
+        let mut which_chromosomes_null: Vec<usize> = Vec::with_capacity(data_block_num);
         let peak_thresh = peak_thresh.max(0.0);
         //let mut windows_are_positive: Vec<bool> = Vec::with_capacity(pre_data.len());
 
-        let mut positive_window_parts: Vec<Vec<usize>> = Vec::with_capacity(pre_data.len());
-        let mut i = 0_usize;
+        let mut positive_window_parts: Vec<Vec<usize>> = Vec::with_capacity(data_block_num);
 
-        //TODO: pre_sequence needs to be properly initialized in a loop over the hashmap, this is just placeholder code to make the compiler typecheck
-        let pre_sequence = pre_sequence_map.get("").unwrap();
-        let seq_len = pre_sequence.len();
+        let mut chromosome_id: HashMap<String, usize> = pre_chrom_data.iter().enumerate().map(|(i, a)| (a.0.clone(), i)).collect();
 
-        while i < pre_data.len() {
+        let mut match_chromosomes: Vec<String> = pre_chrom_data.iter().map(|a| a.0.clone()).collect();
 
-            let mut no_null_base = true;
-
-
-            let mut bp_ind = pre_data[i][0].0;
-            let bp_prior = bp_ind;
-            let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
-            //let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
-            //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
-
-            let positive_window_part = float_batch.iter().enumerate().filter_map(|(i, &f)| if f >= peak_thresh { Some(i*spacing)} else {None}).collect::<Vec<usize>>();
-            //This needs to be float_batch.len()-1 because we need the bp that matches
-            //the last INDEX of float_batch, not its length. We handle this slightly 
-            //differently if spacing is small, because that edge case needs special care
-            let min_target_bp = if spacing >= BP_PER_U8 {bp_prior + (float_batch.len()-1)*spacing + 1} else {bp_prior + float_batch.len()*spacing +1};
-
-            //SAFETY: This line, in conjunction with the previous checks on pre_data
-            //        necessary to call this function, upholds our safety invariants 
-            //        when we actually generate the occupancy signals with Waveform::place_peak
-            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
-
-            let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
-
-
-            
-            while no_null_base && (bp_ind < target_bp){ 
-                match pre_sequence[bp_ind % sequence_len] { //I don't need to explicitly check for circularity: process_data handled this for me already
-                    Some(bp) => bases_batch.push(bp),
-                    None => no_null_base = false,
-                };
-                bp_ind+=1;
+        for (chrom, _) in pre_chrom_null_data.iter() {
+            if chromosome_id.get(chrom).is_none() { 
+                chromosome_id.insert(chrom.clone(), match_chromosomes.len());
+                match_chromosomes.push(chrom.clone());
             }
-
-            if no_null_base {
-                //10 Seq block 0, 1104 276 110 4210650 110 1100 1101 1104
-                //10 Seq block 1, 2032 508 203 4212520 203 2030 2031 2032
-                println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
-                sequence_blocks.push(bases_batch);
-                starting_coords.push(bp_prior % seq_len);
-                positive_window_parts.push(positive_window_part);
-                start_data.append(&mut float_batch);
-            } else {
-                //This gives the 1-indexed position of the null base in vim
-                warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
-            }
-         
-
-
-
-            i += 1;
         }
 
-        i = 0_usize;
 
-        while i < pre_null_data.len() {
+        for (chromosome_name, pre_data) in pre_chrom_data.into_iter() {
 
-            let mut bp_ind = pre_null_data[i][0].0;
-            let mut bp_prior = bp_ind;
-            let min_target_bp = (*(pre_null_data[i].last().unwrap())).0+1;
-            let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+            let this_id = *(chromosome_id.get(&chromosome_name).expect("We constructed chromosome_id to have this chromosome"));
 
-            println!("bp_ind {bp_ind}, target_bp {target_bp}, i {i}");
+            let mut i = 0_usize;
 
-            let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_null_data[i].len()*spacing);
+            let pre_sequence = pre_sequence_map.get(&chromosome_name).expect("This is a private function where I expect pre_chrom_data to have proper chromosome names or to have panicked if not");
+            let seq_len = pre_sequence.len();
+            while i < pre_data.len() {
 
-            while bp_ind < target_bp {
-                match pre_sequence[bp_ind % sequence_len] {
-                    Some(bp) => {
-                        //println!("In some case");
-                        bases_batch.push(bp)
-                    },
-                    None => {
+                let mut no_null_base = true;
 
-                        //println!("In None Case");
-                        let final_prev_bp = bp_ind-((bp_ind-bp_prior) % BP_PER_U8);//This keeps our number of bases in each block divisible by BP_PER_U8
 
-                        let previous_batch: Vec<usize> = bases_batch.drain(0..(final_prev_bp-bp_prior)).collect();
-                        
-                        if previous_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
-                            null_starts_bps.push(bp_prior);
-                            null_sequence_blocks.push(previous_batch);
-                        }
-                        bases_batch.clear(); //In case there are a couple of straggling bases before the current bp
-                        bp_prior = bp_ind+1; //We want to skip the null base
-                    },
-                };
-                bp_ind += 1;
+                let mut bp_ind = pre_data[i][0].0;
+                let bp_prior = bp_ind;
+                let mut float_batch: Vec<f64> = pre_data[i].iter().map(|&(_,b)| b).collect();
+                //let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
+                //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
+
+                let positive_window_part = float_batch.iter().enumerate().filter_map(|(i, &f)| if f >= peak_thresh { Some(i*spacing)} else {None}).collect::<Vec<usize>>();
+                //This needs to be float_batch.len()-1 because we need the bp that matches
+                //the last INDEX of float_batch, not its length. We handle this slightly 
+                //differently if spacing is small, because that edge case needs special care
+                let min_target_bp = if spacing >= BP_PER_U8 {bp_prior + (float_batch.len()-1)*spacing + 1} else {bp_prior + float_batch.len()*spacing +1};
+
+                //SAFETY: This line, in conjunction with the previous checks on pre_data
+                //        necessary to call this function, upholds our safety invariants 
+                //        when we actually generate the occupancy signals with Waveform::place_peak
+                let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+
+                let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
+
+
+
+                while no_null_base && (bp_ind < target_bp){ 
+                    match pre_sequence[bp_ind % sequence_len] { //I don't need to explicitly check for circularity: process_data handled this for me already
+                        Some(bp) => bases_batch.push(bp),
+                        None => no_null_base = false,
+                    };
+                    bp_ind+=1;
+                }
+
+                if no_null_base {
+                    //10 Seq block 0, 1104 276 110 4210650 110 1100 1101 1104
+                    //10 Seq block 1, 2032 508 203 4212520 203 2030 2031 2032
+                    println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
+                    sequence_blocks.push(bases_batch);
+                    which_chromosomes_seq.push(this_id)
+                    starting_coords.push(bp_prior % seq_len);
+                    positive_window_parts.push(positive_window_part);
+                    start_data.append(&mut float_batch);
+                } else {
+                    //This gives the 1-indexed position of the null base in vim
+                    warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
+                }
+
+
+
+
+                i += 1;
             }
+        }
 
-            if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
-                null_sequence_blocks.push(bases_batch);
-                null_starts_bps.push(bp_prior % seq_len);
+        for (chromosome_name, pre_null_data) in pre_chrom_null_data.into_iter() {
+
+            let this_id = *(chromosome_id.get(&chromosome_name).expect("We constructed chromosome_id to have this chromosome"));
+
+
+            let mut i = 0_usize;
+            let pre_sequence = pre_sequence_map.get(&chromosome_name).expect("This is a private function where I expect pre_chrom_data to have proper chromosome names or to have panicked if not");
+            let seq_len = pre_sequence.len();
+
+            while i < pre_null_data.len() {
+
+                let mut bp_ind = pre_null_data[i][0].0;
+                let mut bp_prior = bp_ind;
+                let min_target_bp = (*(pre_null_data[i].last().unwrap())).0+1;
+                let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+
+                println!("bp_ind {bp_ind}, target_bp {target_bp}, i {i}");
+
+                let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_null_data[i].len()*spacing);
+
+                while bp_ind < target_bp {
+                    match pre_sequence[bp_ind % sequence_len] {
+                        Some(bp) => {
+                            //println!("In some case");
+                            bases_batch.push(bp)
+                        },
+                        None => {
+
+                            //println!("In None Case");
+                            let final_prev_bp = bp_ind-((bp_ind-bp_prior) % BP_PER_U8);//This keeps our number of bases in each block divisible by BP_PER_U8
+
+                            let previous_batch: Vec<usize> = bases_batch.drain(0..(final_prev_bp-bp_prior)).collect();
+
+                            if previous_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                                null_starts_bps.push(bp_prior);
+                                null_sequence_blocks.push(previous_batch);
+                                which_chromosomes_null.push(this_id);
+                            }
+                            bases_batch.clear(); //In case there are a couple of straggling bases before the current bp
+                            bp_prior = bp_ind+1; //We want to skip the null base
+                        },
+                    };
+                    bp_ind += 1;
+                }
+
+                if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                    null_sequence_blocks.push(bases_batch);
+                    null_starts_bps.push(bp_prior % seq_len);
+                    which_chromosomes_null.push(this_id);
+                }
+
+                i += 1;
             }
-
-            i += 1;
         }
 
         let seq = Sequence::new(sequence_blocks, &positive_window_parts);
@@ -1390,7 +1448,7 @@ impl AllData {
         let wave_ret = WaveformDef::from(&wave);
 
         //TODO: this needs to actually use the right names and chromosome coordinates
-        Ok((seq, null_seq, wave_ret, starting_coords, null_starts_bps, Vec::new(), Vec::new(), Vec::new()))
+        Ok((seq, null_seq, wave_ret, starting_coords, null_starts_bps, which_chromosomes_seq, which_chromosomes_null, match_chromosomes))
 
     }
 
