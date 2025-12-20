@@ -1401,6 +1401,14 @@ impl<'a> Waveform<'a> {
         self.wave.len()
     }
 
+    pub fn print_this(&self) {
+
+        println!("wave");
+        println!("{:?}", self.wave);
+        println!("seq");
+        self.seq.print_seq();
+    }
+            
 
 }
 

@@ -870,6 +870,13 @@ impl Sequence {
         id_set.into_iter().collect()
     }
 
+    pub fn print_seq(&self)  {
+
+        println!("seq_blocks {:?}", &self.seq_blocks);
+        println!("block_lens {:?}", &self.block_lens);
+
+    }
+
 }
 
 impl Serialize for Sequence {
@@ -1198,15 +1205,6 @@ impl NullSequence {
 
         &self.kmer_lists[len-MIN_BASE]
     }
-    /* pub struct NullSequence {
-    seq_blocks: Vec<u8>,
-    block_u8_starts: Vec<usize>,
-    block_lens: Vec<usize>,
-    max_len: usize,
-    kmer_counts: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE],
-    kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE],
-}
-*/  
 
     pub fn new_empty() -> Self {
 
@@ -1218,6 +1216,15 @@ impl NullSequence {
             kmer_counts: core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0))),
             kmer_lists: core::array::from_fn(|a| Vec::new()),
         }
+    
+    }
+
+
+    pub fn print_seq(&self)  {
+
+        println!("seq_blocks {:?}", &self.seq_blocks);
+        println!("block_lens {:?}", &self.block_lens);
+
     }
 }
 

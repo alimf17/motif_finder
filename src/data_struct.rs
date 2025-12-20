@@ -465,13 +465,13 @@ impl AllData {
             Err(e) => Err(e.clone()),
         };
 
-        let (pre_data, background,min_height, pre_noise, thresh) = Self::process_data(data_file, sequence_len_or_fasta_error, fragment_length, spacing, min_height, is_circular, peak_scale, retain_null.unwrap_or(false))?;
+        let (pre_data, background,min_height, pre_noise, thresh) = Self::process_data(data_file, sequence_len_or_fasta_error.clone(), fragment_length, spacing, min_height, is_circular, peak_scale, retain_null.unwrap_or(false))?;
  
         println!("processed data");
 
         let pre_seq = pre_sequence.expect("already returned if this was an error");
 
-        let pre_seq_len = pre_seq.len();
+        let pre_seq_len = sequence_len_or_fasta_error.expect("already returned if this was an error");
 
         
         let test_sync = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing, thresh);
@@ -714,7 +714,13 @@ impl AllData {
 
         if let Some(length) = length_checking(split_line[0]) { if loc >= length { potential_error.add_problem_line(line_number, false, false, false, false, true); return None;}};
 
-        Some((split_line[0].to_string(), loc, data))
+        if check_chromosome || chromosome_check.is_err() || chromosome_check.as_ref().is_ok_and(|a| a.len() == 0) {
+            Some((split_line[0].to_string(), loc, data))
+        } else if ensure_only_one_chromosome {
+            chromosome_check.as_ref().ok().map(|a| a.keys().next()).flatten().cloned().map(|a| (a, loc, data))
+        } else {
+            unreachable!()
+        }
     }
     
 
@@ -814,6 +820,19 @@ impl AllData {
             sorted_raw_data[sorted_raw_data.len()/2]
         };
 
+        //This looks ridiculous, when I'm clearly trying to subtract off the median AGAIN later. 
+        //This is actually fairly intentional: it makes the estimation of the median a bit more precise
+        for item in sorted_raw_data.iter_mut() {
+
+           *item -= median;
+
+        }
+
+        for item in raw_locs_data.iter_mut() {
+
+            item.2 -= median;
+
+        }
 
 
         let mut peak_scale: f64 = scale_peak_thresh.unwrap_or(1.0);
@@ -833,7 +852,7 @@ impl AllData {
             None => {
                 warn!("Fit on background data failed to converge! Approximating from mad!");
                 let dat_off = Data::new(sorted_raw_data.iter().map(|&a| (a-median).abs()).collect::<Vec<f64>>());
-                vec![median, dat_off.median()*MAD_ADJUSTER]
+                vec![0.0, dat_off.median()*MAD_ADJUSTER]
             }
         };
 
@@ -860,6 +879,8 @@ impl AllData {
         //let sequence_len = *(possible_sequence_len.expect("We only get here if we didn't have an error").get("").unwrap());
 
         let sequence_len_hashmap = possible_sequence_len.expect("We only get here if we didn't have an error");
+
+        println!("sequence_len_hashmap {:?}", sequence_len_hashmap);
 
         if sequence_len_hashmap.len() == 0 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NoChromosomes));}
         
@@ -948,6 +969,7 @@ impl AllData {
 
                 if is_circular { 
 
+                    println!("{name} {:?}", chromosome_boundaries);
                     //We should only circularize if the non present data between the start and the end does not exceed 2*(fragment_length)+5
                     *try_circle.get_mut(name).expect("Already errorred if this would be None") = (refined_locs_data[*start].1+(*sequence_len_hashmap.get(name).expect("Already errorred if this would be None")-refined_locs_data[*end-1].1)) < (2*(fragment_length)+5); 
                 }
@@ -1312,7 +1334,7 @@ impl AllData {
     //      But these are on the edge between being positive and negative data,
     //      so they're in a little bit of a grey area to classify, and saving 
     //      them isn't my highest priority anyway.
-    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
+    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_sequence_lens: HashMap<String, usize>, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
         let data_block_num = pre_chrom_data.iter().map(|a| a.1.len()).sum::<usize>();
         let null_block_num = pre_chrom_null_data.iter().map(|a| a.1.len()).sum::<usize>();
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(data_block_num);
@@ -1339,6 +1361,7 @@ impl AllData {
         }
 
 
+
         for (chromosome_name, pre_data) in pre_chrom_data.into_iter() {
 
             let this_id = *(chromosome_id.get(&chromosome_name).expect("We constructed chromosome_id to have this chromosome"));
@@ -1346,7 +1369,7 @@ impl AllData {
             let mut i = 0_usize;
 
             let pre_sequence = pre_sequence_map.get(&chromosome_name).expect("This is a private function where I expect pre_chrom_data to have proper chromosome names or to have panicked if not");
-            let seq_len = pre_sequence.len();
+            let sequence_len = pre_sequence.len();
             while i < pre_data.len() {
 
                 let mut no_null_base = true;
@@ -1371,6 +1394,7 @@ impl AllData {
 
                 let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
 
+                println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % sequence_len)]);
 
 
                 while no_null_base && (bp_ind < target_bp){ 
@@ -1387,7 +1411,7 @@ impl AllData {
                     println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                     sequence_blocks.push(bases_batch);
                     which_chromosomes_seq.push(this_id);
-                    starting_coords.push(bp_prior % seq_len);
+                    starting_coords.push(bp_prior % sequence_len);
                     positive_window_parts.push(positive_window_part);
                     start_data.append(&mut float_batch);
                 } else {
@@ -1409,7 +1433,7 @@ impl AllData {
 
             let mut i = 0_usize;
             let pre_sequence = pre_sequence_map.get(&chromosome_name).expect("This is a private function where I expect pre_chrom_data to have proper chromosome names or to have panicked if not");
-            let seq_len = pre_sequence.len();
+            let sequence_len = pre_sequence.len();
 
             while i < pre_null_data.len() {
 
@@ -1449,7 +1473,7 @@ impl AllData {
 
                 if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
                     null_sequence_blocks.push(bases_batch);
-                    null_starts_bps.push(bp_prior % seq_len);
+                    null_starts_bps.push(bp_prior % sequence_len);
                     which_chromosomes_null.push(this_id);
                 }
 
@@ -1778,14 +1802,14 @@ impl Serialize for AllData {
         state.serialize_field("data", &self.data)?;
         state.serialize_field("start_genome_coordinates", &self.start_genome_coordinates)?;
         state.serialize_field("start_nullbp_coordinates", &self.start_nullbp_coordinates)?;
+        state.serialize_field("background", &self.background)?;
+        state.serialize_field("min_height", &self.min_height)?;
+        state.serialize_field("credibility", &self.credibility)?;
         if !neglect_chr_names{
             state.serialize_field("genome_block_chrs", &self.genome_block_chrs)?;
             state.serialize_field("nullbp_block_chrs", &self.nullbp_block_chrs)?;
             state.serialize_field("chr_names", &self.chr_names)?;
         }
-        state.serialize_field("background", &self.background)?;
-        state.serialize_field("min_height", &self.min_height)?;
-        state.serialize_field("credibility", &self.credibility)?;
 
 
         state.end()
@@ -1817,13 +1841,28 @@ impl<'de> Deserialize<'de> for AllData {
                 let data: WaveformDef = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
                 let start_genome_coordinates: Vec<usize> = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
                 let start_nullbp_coordinates: Vec<usize> = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(4, &self))?;
-                let genome_block_chrs: Vec<usize> = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
-                let nullbp_block_chrs: Vec<usize> = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(6, &self))?;
-                let chr_names: Vec<String> = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(7, &self))?;
-                let background: Background = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(8, &self))?;
-                let min_height: f64 = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(9, &self))?;
-                let credibility: f64 = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(10, &self))?;
+                let background: Background = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(5, &self))?;
+                let min_height: f64 = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(6, &self))?;
+                let credibility: f64 = seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(7, &self))?;
+                let mut continuation: bool = true;
+                let genome_block_chrs: Vec<usize> = match seq_acc.next_element() {
+                    Ok(Some(chr)) => chr, 
+                    _ => {continuation = false; warn!("No stored chromosome information. Using only one chromosome for your data"); vec![0_usize; start_genome_coordinates.len()]},
+                };
 
+                let nullbp_block_chrs: Vec<usize> = if !continuation { vec![0_usize; start_genome_coordinates.len()]} else {seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(9, &self))?};
+
+                let chr_names: Vec<String> = if !continuation { vec!["".to_string()]} else {seq_acc.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(10, &self))?};
+/*
+                let nullbp_block_chrs: Vec<usize> = match seq_acc.next_element()? {
+                    Some(chr) => chr,
+                    None => vec![0_usize; start_genome_coordinates.len()],
+                };
+                let chr_names: Vec<String> = match seq_acc.next_element()? {
+                    Some(chr) => chr,
+                    None => vec!["".to_string()],
+                };
+*/
                 Ok(AllData {
                     seq,
                     null_seq,
@@ -2102,6 +2141,22 @@ impl<'a> AllDataUse<'a> {
         new_data
     }
 
+
+    pub fn print_this_out(&self) {
+
+        println!("data");
+        self.data.print_this();
+        println!("null_seq");
+        self.null_seq.print_seq();
+        
+        println!("orientation info");
+        println!("{:?}", self.start_genome_coordinates);
+        println!("{:?}", self.start_nullbp_coordinates);
+        println!("{:?}", self.genome_block_chrs);
+        println!("{:?}", self.nullbp_block_chrs);
+        println!("{:?}", self.chr_names);
+
+    }
 
     pub fn data(&self) -> &Waveform {
         &self.data
