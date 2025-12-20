@@ -316,7 +316,8 @@ impl<'a> Waveform<'a> {
         //println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
         
         if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
-           // println!("{:?} {:?}", &start_data[28910..28919], seq.block_lens());
+            println!("{:?} {:?} {:?} {}", point_lens, start_dats, start_dats.iter().zip(point_lens.iter()).map(|(a,b)| *a+*b).collect::<Vec<_>>(), start_data.len());
+
             panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
         }
  
@@ -354,6 +355,7 @@ impl<'a> Waveform<'a> {
           non-integer part in its representation is dropped in the waveform.
          */
         let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| if spacer >= BP_PER_U8 {1+((a-1)/spacer)} else {(a-1)/spacer}).collect();
+        //let point_lens: Vec<usize> = seq.block_lens().iter().map(|a| if spacer >= BP_PER_U8 {1+((a-1)/spacer)} else if spacer > 1 {(a-1)/spacer} else {*a-1}).collect();
 
         let mut size: usize = 1;
 
@@ -911,7 +913,9 @@ impl<'a> Waveform<'a> {
         let current_resid = data_ref.data()-&self;
 
         let zero_locs = data_ref.zero_locs();
-        
+       
+        let which_chroms = data_ref.chrom_id_for_starts();
+
         let block_lens = data_ref.data().seq().block_lens();
 
         let (ontology_count, ontology_vec, ontology_bins) = match annotations {
@@ -956,8 +960,10 @@ impl<'a> Waveform<'a> {
             }*/
 
             let res_block = current_resid.generate_ith_indexed_locs_and_data(i, zero_locs[i]).unwrap().1;
-            
-            let by_loc_dir = format!("{}/from_{:011}_to_{:011}", signal_directory,zero_locs[i], zero_locs[i]+block_lens[i]);
+           
+            let add_chrom = if data_ref.num_chroms() == 1 { "".to_string()} else { format!("chromosome_{}_", data_ref.ids_chrom_name(which_chroms[i]).expect("We set this up to be in bounds always")) };
+
+            let by_loc_dir = format!("{}/{add_chrom}from_{:011}_to_{:011}", signal_directory,zero_locs[i], zero_locs[i]+block_lens[i]);
            
 
 
@@ -1049,11 +1055,13 @@ impl<'a> Waveform<'a> {
 
         let mut chart = build_chart.build_cartesian_2d(((dat_block.0[0] as f64))..((*dat_block.0.last().unwrap() as f64)), min..max).unwrap();
 
+        let add_chromosome_label = if data_ref.num_chroms() == 1 { "".to_string()} else {format!("Chromosome {} ", data_ref.ids_chrom_name(data_ref.chrom_id_for_starts()[i]).expect("already returned if this would be none"))};
+
         chart.configure_mesh()
             .x_label_style(("sans-serif", LABEL_FONT_SIZE))
             .y_label_style(("sans-serif", LABEL_FONT_SIZE))
             .x_label_formatter(&|v| format!("{:.0}", v))
-            .x_desc("Genome Location (kbp)")
+            .x_desc(&(format!("{add_chromosome_label}Genome Location (kbp)")))
             .y_desc("log2(IP/control)")
             .x_labels(4)
             .y_labels(8)
@@ -1158,7 +1166,9 @@ impl<'a> Waveform<'a> {
                 WaveOutputFile::Svg => "svg",
             };
 
-            let signal_file = format!("{}/from_{:011}_to_{:011}.{extension}", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
+            let add_chrom = if data_ref.num_chroms() == 1 { "".to_string()} else { format!("chromosome_{}_", data_ref.ids_chrom_name(data_ref.chrom_id_for_starts()[i]).expect("We set this up to be in bounds always")) };
+
+            let signal_file = format!("{}/{add_chrom}from_{:011}_to_{:011}.{extension}", total_dir, zero_locs[i], zero_locs[i]+block_lens[i]);
 
         /*    let big_plot: DrawingArea<_, Shift> = match format_specifier(format_vector, i){
                 Png => BitMapBackend::new(&signal_file, (3300, height)).into_drawing_area(),

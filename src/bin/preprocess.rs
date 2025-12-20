@@ -128,7 +128,8 @@ fn main() {
     println!("Args parsed");
 
 
-    let total_data: AllData  = AllData::create_inference_data(&fasta_file, &data_file, &output_dir, is_circular, fragment_length, spacing, min_height, credibility, &NULL_CHAR, peak_cutoff, retain_null).unwrap();
+    //This null character isn't important for any of the E. coli sets, but I needed to set it to test my multichromsomal analysis with a pombe set
+    let total_data: AllData  = AllData::create_inference_data(&fasta_file, &data_file, &output_dir, is_circular, fragment_length, spacing, min_height, credibility, &Some('N'), peak_cutoff, retain_null).unwrap();
 
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();

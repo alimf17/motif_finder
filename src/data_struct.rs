@@ -538,6 +538,14 @@ impl AllData {
         &self.start_genome_coordinates
     }
 
+    pub fn chrom_id_for_starts(&self) -> &Vec<usize> {
+        &self.genome_block_chrs
+    }
+
+    pub fn ids_chrom_name(&self, id: usize) -> Option<String> {
+        self.chr_names.get(id).cloned()
+    }
+
     //SAFETY: genome_block_chrs has to have the same length as start_genome_coordinates, start_nullbp_coordinates has to ahve the same length as nullbp_block_chrs, all values of both must be less than chr_names.len(), and the sequence, nullsequence, waveform, and background must all be compatible
     pub(crate) unsafe fn create_manual(seq: Sequence, null_seq: NullSequence, data: WaveformDef, start_genome_coordinates: Vec<usize>, start_nullbp_coordinates: Vec<usize>, genome_block_chrs: Vec<usize>, nullbp_block_chrs: Vec<usize>, chr_names: Vec<String>, background: Background, min_height: f64, credibility: f64) -> Self {
 
@@ -627,12 +635,14 @@ impl AllData {
 
             if line.starts_with('>'){
 
+                println!("inserting {current_chromosome} line {}", line_pos+1);
                 //TODO: add way to also include any located bad bases before this point
                 let None = chromosome_base_vec.insert(current_chromosome.clone(), base_vec) else { return Err(FastaError::RedundantChromosome(ChromosomeError::new(current_chromosome, potential_invalid_bp_err)));};
                 base_vec = Vec::new();
-                let mut chr_name = first_line.1.trim_start_matches('>').to_owned();
+                let mut chr_name = line.trim_start_matches('>').to_owned();
                 if let Some(found_chromosome_name) = chr_name.find("chromosome:") {
                     chr_name = (&chr_name[(found_chromosome_name+11)..].trim()).to_string();
+                    println!("{chr_name} chr_name");
                 }
                 current_chromosome = chr_name;
                 continue;
@@ -1394,7 +1404,7 @@ impl AllData {
 
                 let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
 
-                println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % sequence_len)]);
+                println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % (sequence_len+1))]);
 
 
                 while no_null_base && (bp_ind < target_bp){ 
@@ -2184,6 +2194,18 @@ impl<'a> AllDataUse<'a> {
 
     pub fn zero_locs(&self) -> &Vec<usize> {
         &self.start_genome_coordinates
+    }
+    
+    pub fn chrom_id_for_starts(&self) -> &Vec<usize> {
+        &self.genome_block_chrs
+    }
+    
+    pub fn num_chroms(&self) -> usize {
+        self.chr_names.len()
+    }
+
+    pub fn ids_chrom_name(&self, id: usize) -> Option<String> {
+        self.chr_names.get(id).cloned()
     }
     pub fn null_zero_locs(&self) -> &Vec<usize> {
         &self.start_nullbp_coordinates
