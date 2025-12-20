@@ -1,6 +1,6 @@
 use std::{f64, fs, fmt};
 use std::io::{Read, Write};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 //use std::time::{Duration, Instant};
 
@@ -614,7 +614,7 @@ impl AllData {
         let mut current_chromosome: String = if first_line.1.starts_with('>') {
             let mut chr_name = first_line.1.trim_start_matches('>').trim().to_owned();
             if let Some(found_chromosome_name) = chr_name.find("chromosome:") {
-                chr_name = (&asd[(found_chromosome_name+11)..].trim()).to_string();
+                chr_name = (&chr_name[(found_chromosome_name+11)..].trim()).to_string();
             } 
             chr_name
         } else { return Err(FastaError::BadFastaStart(MaybeNotFastaError));};
@@ -632,7 +632,7 @@ impl AllData {
                 base_vec = Vec::new();
                 let mut chr_name = first_line.1.trim_start_matches('>').to_owned();
                 if let Some(found_chromosome_name) = chr_name.find("chromosome:") {
-                    chr_name = (&asd[(found_chromosome_name+11)..].trim()).to_string();
+                    chr_name = (&chr_name[(found_chromosome_name+11)..].trim()).to_string();
                 }
                 current_chromosome = chr_name;
                 continue;
@@ -680,37 +680,39 @@ impl AllData {
     //Note: we assign the FIRST location in a bedgraph line as the location of the data
     fn try_read_bedgraph_line<E: Error>(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_check: & Result<HashMap<String, usize>, E>, chromsomes_acquired: &mut HashSet<String>) -> Option<(String, usize, f64)> {
 
-        let check_chromosome = chromosome_check.is_ok_and(|a| a.len() > 1);
+        let check_chromosome = chromosome_check.as_ref().is_ok_and(|a| a.len() > 1);
 
-        let ensure_only_one_chromosome = chromosome_check.is_ok_and(|a| a.len() == 1);
+        let ensure_only_one_chromosome = chromosome_check.as_ref().is_ok_and(|a| a.len() == 1);
 
-        let length_checking = |x: &str| if check_chromosome { chromosome_check.as_ref().map(|a| *a.get(x)).ok() } else if ensure_only_one_chromosome { a.values().next().copied() } else {None};
-        let Some(split_line): Option<[&str; 4]> = line.1.split('\t').collect::Vec<_>().try_into() else { potential_error.add_problem_line(line.0, true, false, false, false, false); return None;};
+        let line_number = line.0 as u64; 
+
+        let length_checking = |x: &str| if check_chromosome { chromosome_check.as_ref().ok().map(|a| a.get(x).copied()).flatten() } else if ensure_only_one_chromosome { chromosome_check.as_ref().ok().map(|a| a.values().next()).flatten().copied() } else {None};
+        let Some(split_line): Option<[&str; 4]> = line.1.split('\t').collect::<Vec<_>>().try_into().ok() else { potential_error.add_problem_line(line_number, true, false, false, false, false); return None;};
 
         if check_chromosome { 
-            if !(chromosome_check.is_ok_and(|a| a.get(split_line[0]).is_some())) { 
-                potential_error.add_problem_line(line.0, false, true, false, false, false);
+            if !(chromosome_check.as_ref().is_ok_and(|a| a.get(split_line[0]).is_some())) { 
+                potential_error.add_problem_line(line_number, false, true, false, false, false);
             } else {
-                let _ = chromsomes_acquired.insert(split_line[0].clone());
+                let _ = chromsomes_acquired.insert(split_line[0].to_string());
             }
         } 
         if ensure_only_one_chromosome {
-            let inserted = chromsomes_acquired.insert(split_line[0].clone());
+            let inserted = chromsomes_acquired.insert(split_line[0].to_string());
             if inserted && chromsomes_acquired.len() > 1 {
-                potential_error.add_problem_line(line.0, false, true, false, false), false;//We shouldn't have multiple chromosomes in the data if there's only one fasta chromosome
+                potential_error.add_problem_line(line_number, false, true, false, false, false);//We shouldn't have multiple chromosomes in the data if there's only one fasta chromosome
             }
         }
 
         //I write this in this weird redundant way because I don't want to return before catching all the errors I can. 
-        if split_line[1].try_into::<usize>().is_none() { potential_error.add_problem_line(line.0, false, false, true, false, false); }
-        if split_line[3].try_into::<f64>().is_none() { potential_error.add_problem_line(line.0, false, false, false, true, false);}
+        if split_line[1].parse::<usize>().is_err() { potential_error.add_problem_line(line_number, false, false, true, false, false); }
+        if split_line[3].parse::<f64>().is_err() { potential_error.add_problem_line(line_number, false, false, false, true, false);}
 
-        let Some(loc): Option<usize> = split_line[1].try_into::<usize>() else {return None;};
-        let Some(data): Option<f64> = split_line[3].try_into::<f64>() else {return None;};
+        let Some(loc): Option<usize> = split_line[1].parse().ok() else {return None;};
+        let Some(data): Option<f64> = split_line[3].parse().ok() else {return None;};
 
-        if data.is_nan() { potential_error.add_problem_line(line.0, false, false, false, true, false); return None;}
+        if data.is_nan() { potential_error.add_problem_line(line_number, false, false, false, true, false); return None;}
 
-        if let Some(length) = length_checking(split_line[0]) { if data >= length { potential_error.add_problem_line(line.0, false, false, false, false, true); return None;}};
+        if let Some(length) = length_checking(split_line[0]) { if loc >= length { potential_error.add_problem_line(line_number, false, false, false, false, true); return None;}};
 
         Some((split_line[0].to_string(), loc, data))
     }
@@ -719,14 +721,16 @@ impl AllData {
 
     fn try_read_wiggle_line(line: (usize, &str), potential_error: &mut Option<DataFileBadFormat>, chromosome_name: &str) -> Option<(String, usize, f64)> {
 
-        let Some(split_line): Option<[&str; 2]> = line.1.split('\t').collect::Vec<_>().try_into() else { potential_error.add_problem_line(line.0, true, false, false, false); return None;};
+        let line_number = line.0 as u64; 
+        
+        let Some(split_line): Option<[&str; 2]> = line.1.split('\t').collect::<Vec<_>>().try_into().ok() else { potential_error.add_problem_line(line_number, true, false, false, false, false); return None;};
 
-        if split_line[0].try_into::<usize>().is_none() { potential_error.add_problem_line(line.0, false, false, true, false); }
-        if split_line[1].try_into::<f64>().is_none() { potential_error.add_problem_line(line.0, false, false, false, true);}
+        if split_line[0].parse::<usize>().is_err() { potential_error.add_problem_line(line_number, false, false, true, false, false); }
+        if split_line[1].parse::<f64>().is_err() { potential_error.add_problem_line(line_number, false, false, false, true, false);}
 
         //wiggle files are 1-indexed. 
-        let Some(loc): Option<usize> = split_line[0].try_into::<usize>().map(|a| a-1) else {return None;};
-        let Some(data): Option<f64> = split_line[1].try_into::<f64>() else {return None;};
+        let Some(loc): Option<usize> = split_line[0].parse::<usize>().map(|a| a-1).ok() else {return None;};
+        let Some(data): Option<f64> = split_line[1].parse().ok() else {return None;};
 
         Some((chromosome_name.clone().to_string(), loc, data))
     }
@@ -888,7 +892,7 @@ impl AllData {
             let mut sum_of_data: f64 = 0.0;
 
             for j in i..(i+to_next_unique) {
-                sum_of_data += raw_locs_data[j].1;
+                sum_of_data += raw_locs_data[j].2;
             }
 
             //For each location, we want to push it onto the data one time, with the mean of its data points
@@ -926,7 +930,7 @@ impl AllData {
         if !retain_null {
             for (name, (start, end)) in chromosome_boundaries.iter() {
                 
-                for i in start..(end-1) {
+                for i in (*start)..((*end)-1) {
 
                     let jump: usize = refined_locs_data[i+1].1-refined_locs_data[i].1; //We can guarentee this is fine because we sorted the data already, and we wouldn't reach here if these were on different chromosomes
                     if jump >= 2*(fragment_length)+5 { //We need the times 2 because the ar correlations can be at least that big. We then add 5 because we want to leave some buffer: there's a division and then multiplication by 6 for the kernels and we don't want to ever have a sequence block with too small a number of spots
@@ -939,7 +943,7 @@ impl AllData {
                 if is_circular { 
 
                     //We should only circularize if the non present data between the start and the end does not exceed 2*(fragment_length)+5
-                    *try_circle.get_mut(name).expect("Already errorred if this would be None") = (refined_locs_data[start].1+(*sequence_len_hashmap.get(name).expect("Already errorred if this would be None")-refined_locs_data[end-1])) < (2*(fragment_length)+5); 
+                    *try_circle.get_mut(name).expect("Already errorred if this would be None") = (refined_locs_data[*start].1+(*sequence_len_hashmap.get(name).expect("Already errorred if this would be None")-refined_locs_data[*end-1].1)) < (2*(fragment_length)+5); 
                 }
 
             }
@@ -950,12 +954,12 @@ impl AllData {
             let mut bounds: Vec<usize> = vec![*start];
             bounds.extend(internal_cuts.get(chrom).expect("has the same keys as chromosome_boundaries by construction"));
             bounds.push(*end);
-            let mut lengths = bounds.windows(2).map(|a| *a[1]-*a[0]).collect::<Vec<_>>();
-            if lengths.len() > 1 && try_circle.get(chrom).expect("has the same keys as chromosome_boundaries by construction") {
-                let to_add = lengths.pop();
+            let mut lengths = bounds.windows(2).map(|a| a[1]-a[0]).collect::<Vec<_>>();
+            if lengths.len() > 1 && *(try_circle.get(chrom).expect("has the same keys as chromosome_boundaries by construction")) {
+                let to_add = lengths.pop().expect("You saw that we didn't enter this unless we had a positive length, right?");
                 lengths[0]+= to_add;
             }
-            lengths.iter().max().expect("definitely non empty because there's at least one end-start element")
+            lengths.iter().max().copied().expect("definitely non empty because there's at least one end-start element")
         }).max().expect("definitely non empty because there's at least one chromosome");
 
         let mut certify_cut: HashMap<String, bool> = internal_cuts.iter().map(|(a, b)| (a.clone(), !is_circular || b.len() > 0 || !try_circle.get(a).expect("has the same keys as chromosome_boundaries by construction"))).collect();
@@ -968,12 +972,12 @@ impl AllData {
             bounds.extend(internal_cuts.get(chrom).expect("has the same keys as chromosome_boundaries by construction"));
             bounds.push(*end);
 
-            let mut pre_block: Vec<Vec<_>> = bounds.windows(2).map(|b| refined_locs_data[b[0]..b[1]].map(|a| (a.1, a.2)).collect::<Vec<(usize, f64)>>()).collect(); 
+            let mut pre_block: Vec<Vec<_>> = bounds.windows(2).map(|b| refined_locs_data[b[0]..b[1]].iter().map(|a| (a.1, a.2)).collect::<Vec<(usize, f64)>>()).collect(); 
 
-            if try_circle.get(chrom).expect("has the same keys as chromosome_boundaries by construction") && (pre_block.len() > 1) {
+            if *(try_circle.get(chrom).expect("has the same keys as chromosome_boundaries by construction")) && (pre_block.len() > 1) {
 
                 let mut to_append = pre_block.remove(0); //Yeah yeah, muh performance. I'm pretty sure I have to take this hit somewhere.
-                to_append = to_append.iter().map(|a| a.0 += *sequence_len_hashmap.get(chrom).expect("has the same keys as chromosome_boundaries by construction")).collect();
+                to_append = to_append.into_iter().map(|mut a| {a.0 += *sequence_len_hashmap.get(chrom).expect("has the same keys as chromosome_boundaries by construction"); a}).collect();
                 pre_block.last_mut().expect("didn't get here if we would be empty at this point").append(&mut to_append);
                 *(try_circle.get_mut(chrom).expect("has the same keys as chromosome_boundaries by construction")) = false;
             }
@@ -989,9 +993,9 @@ impl AllData {
 
         //Now, we have finished first_blocks, which is a vec of Vec<(usize, f64)>s such that I can lerp each block according to the spacer
 
-        let mut lerped_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = first_blocks.into_iter().map(|(a, block_vec)| (a, block_vec.into_iter(|block| Self::lerp(&block, spacing)).collect::<Vec<Vec(usize, f64)>>())).collect();
+        let mut lerped_blocks: Vec<(String, Vec<Vec<(usize, f64)>>)> = first_blocks.into_iter().map(|(a, block_vec)| (a, block_vec.into_iter().map(|block| Self::lerp(&block, spacing)).collect::<Vec<Vec<(usize, f64)>>>())).collect();
 
-        let num_lerped_blocks = lerped_blocks.iter().map(|a| a.1.len()).sum();
+        let num_lerped_blocks = lerped_blocks.iter().map(|a| a.1.len()).sum::<usize>();
 
 
         //TODO: This is where I got to for implementing the multiple chromosomes
@@ -1069,11 +1073,12 @@ impl AllData {
                 } //This finished the block splitting logic for this chromosome. 
 
 
-                if try_circle.get(&chrom).expect("has the same keys as chromosome_boundaries by construction") { //This code is only run if chromosomes are circular and weren't cut already by the existence of missing data
+                if *(try_circle.get(&chrom).expect("has the same keys as chromosome_boundaries by construction")) { //This code is only run if chromosomes are circular and weren't cut already by the existence of missing data
 
                     let starts_data = this_chrom_data_blocks[0][0].0 < this_chrom_ar_blocks[0][0].0;
                     let ends_data = (*(*this_chrom_data_blocks.last().unwrap()).last().unwrap()).0 > 
                         (*(*this_chrom_ar_blocks.last().unwrap()).last().unwrap()).0;
+                    let sequence_len = sequence_len_hashmap.get(&chrom).copied().expect("has the same keys as chromosome_boundaries by construction");
                     match (starts_data, ends_data) {
                         (true, true) => { //If both the beginning and end are data, glom the beginning onto the end in data
                             if this_chrom_data_blocks.len() > 1 {
@@ -1082,14 +1087,14 @@ impl AllData {
                                 if let Some(end_vec) = this_chrom_data_blocks.last_mut() { //This is infallible, as the length for data blocks is more than 1 in this chromosome
                                     end_vec.append(&mut rem_block);
                                     *end_vec = Self::lerp(&*end_vec, spacing);
-                                    *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false;
+                                    *try_circle.get_mut(&chrom).expect("has the same keys as chromosome_boundaries by construction") = false;
                                     //I need to record that the circularization is taken care of only here, as this could be a single glob of data across the chromosome.
                                     //If this is the case, then I need to issue a warning, and thus I will remember it if we take this conditional. 
                                 };
                             }
                         },
                         (false, false) => { //If both the beginning and end are for AR inference, glom the beginning onto the end for AR inference
-                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            *try_circle.get_mut(&chrom).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
                             if this_chrom_data_blocks.len() > 1 {
                                 let mut rem_block = this_chrom_ar_blocks.remove(0);
                                 rem_block = rem_block.into_iter().map(|(a,b)| (a+sequence_len, b)).collect();
@@ -1101,7 +1106,7 @@ impl AllData {
                         },
                         (true, false) => {
 
-                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            *try_circle.get_mut(&chrom).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
                             let first_force_data = this_chrom_data_blocks[0].iter().position(|(_, b)| b.abs() > peak_thresh).unwrap();
                             let last_data_place = this_chrom_data_blocks[0][first_force_data].0+sequence_len-data_zone;
                             let bleed_into_final_ar = last_data_place <= (*(*this_chrom_ar_blocks.last().unwrap()).last().unwrap()).0;
@@ -1138,7 +1143,7 @@ impl AllData {
                         },
 
                         (false, true) => {
-                            *try_circle.get_mut(a).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
+                            *try_circle.get_mut(&chrom).expect("has the same keys as chromosome_boundaries by construction") = false; //This is now always false, as there's no way for us to just be a single glob of data
                             let last_force_data = this_chrom_data_blocks.last().unwrap().len()-1-(this_chrom_data_blocks.last().unwrap().iter().rev().position(|(_, b)| b.abs() > peak_thresh).unwrap());
                             if this_chrom_data_blocks.last().unwrap()[last_force_data].0+data_zone > sequence_len {
 
@@ -1212,13 +1217,13 @@ impl AllData {
         //Now, we have data_blocks and ar_blocks, the former of which will be returned and the latter of which will be processed by AR prediction
 
 
-        ar_blocks = ar_blocks.into_iter().map(|(a, b)| (a, b.retain(|c| c.len() > data_zone))).collect();
+        ar_blocks = ar_blocks.into_iter().map(|(a, mut b)| { b.retain(|c| c.len() > data_zone); (a, b)}).collect();
 
         //SAFETY: This data block filtering is what allows us to guarentee Kernel
         //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
         //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
         //never rounds down
-        data_blocks = data_blocks.into_iter().map(|(c, b)| (c, b.retain(|a| (a.len()+1)*spacing > fragment_length))).collect();
+        data_blocks = data_blocks.into_iter().map(|(c, mut b)| { b.retain(|a| (a.len()+1)*spacing > fragment_length); (c, b)}).collect();
 
 
        
@@ -1252,7 +1257,7 @@ impl AllData {
         //Again, I'm blatantly pretending that 100 is sufficient. I would guess 
         //it's _probably_ fine???? 100 vs 8 is a lot of wiggle room, and eth is
         //quite related to AD
-        if data_len < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
+        if data_lens < 100 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NotEnoughPeakData)); } 
 
         let ar_info = if !retain_null { ar_blocks.iter().map(|(b, c)| (b, c.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>())).collect::<Vec<_>>()} else {Vec::new()} ;
         let data_info = data_blocks.iter().map(|(b, c)| (b, c.iter().map(|a| (a.len(), a[0].0, a[a.len()-1].0)).collect::<Vec<_>>())).collect::<Vec<_>>();
@@ -1295,7 +1300,7 @@ impl AllData {
     //      them isn't my highest priority anyway.
     fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, sequence_len: usize, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
         let data_block_num = pre_chrom_data.iter().map(|a| a.1.len()).sum::<usize>();
-        let null_block_num = pre_chrom_null_data.iter().map(||a| a.1.len()).sum::<usize>();
+        let null_block_num = pre_chrom_null_data.iter().map(|a| a.1.len()).sum::<usize>();
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(data_block_num);
         let mut null_sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(null_block_num);
         let mut start_data: Vec<f64> = Vec::with_capacity(pre_chrom_data.iter().map(|a| a.1.iter().map(|b| b.len()).sum::<usize>()).sum::<usize>());
@@ -1367,7 +1372,7 @@ impl AllData {
                     //10 Seq block 1, 2032 508 203 4212520 203 2030 2031 2032
                     println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
                     sequence_blocks.push(bases_batch);
-                    which_chromosomes_seq.push(this_id)
+                    which_chromosomes_seq.push(this_id);
                     starting_coords.push(bp_prior % seq_len);
                     positive_window_parts.push(positive_window_part);
                     start_data.append(&mut float_batch);
@@ -1663,7 +1668,7 @@ impl AllData {
         peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.005).next().unwrap().0
     }
 
-    fn lerp(data: &Vec<(usize, f64)>, spacer: usize ) -> Vec<(usize, f64)> {
+    fn lerp(data: &[(usize, f64)], spacer: usize ) -> Vec<(usize, f64)> {
 
         let begins = data[0].0;
         let mut ends = (*(data.last().unwrap())).0;
@@ -2623,7 +2628,7 @@ impl UpgradeToErr for Option<DataFileBadFormat> {
 
         if self.is_none() { *self = Some(DataFileBadFormat::new(false));}
         let inside = self.as_mut().expect("already returned if this was null");
-        if empty_line { inside.empty_lines.push(line);} 
+        if empty { inside.empty_lines.push(line);} 
         if bad_chromosome { inside.bad_chromosome_lines.push(line);} 
         if locationless { inside.no_location_lines.push(line); }
         if dataless { inside.no_data_lines.push(line); }
@@ -2655,7 +2660,7 @@ impl std::fmt::Display for DataFileBadFormat {
         }
 
         if self.location_bad_lines.len() > 0 {
-            write!(f, "You have lines whose locations are too large for the chromosomes they purport to come from. We assume 0 indexing on the chromosome position. Also note that we only validate the starting location. \nThe problems can be found at the following line numbers, using vi numbering: {:?}\n")?;
+            write!(f, "You have lines whose locations are too large for the chromosomes they purport to come from. We assume 0 indexing on the chromosome position. Also note that we only validate the starting location. \nThe problems can be found at the following line numbers, using vi numbering: {:?}\n", self.location_bad_lines.iter().map(|a| a+1).collect::<Vec<_>>())?;
         }
 
         if header_tip {
