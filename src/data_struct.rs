@@ -863,6 +863,12 @@ impl AllData {
 
         if sequence_len_hashmap.len() == 0 { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::NoChromosomes));}
         
+        let unused_chromosomes: Vec<String> = sequence_len_hashmap.keys().filter_map(|a| if collected_chromosomes.contains(a) { Some(a.clone())} else {None}).collect();
+
+        if unused_chromosomes.len() > 0 {
+            warn!("You have some chromosomes in your FASTA file which are unaccounted for in your data! \nThese are the unseen chromosomes: {:?}", unused_chromosomes);
+        }
+
         println!("Normalized data location");
 
         //Compress all data so that locations are unique by taking the mean of the data
@@ -1277,6 +1283,14 @@ impl AllData {
         //the inference of the results, but only if we have like fewer than 2 data
         //points, which doesn't happen with the way we defined data_zone
 
+
+        if try_circle.values().any(|&a| a) { 
+
+            let chromosomes_uncut: Vec<String> = try_circle.iter().filter_map(|(name, uncut)| if *uncut { Some(name.clone())} else {None}).collect();
+
+            warn!("You indicated that your chromosomes are circular, but you have at least one chromosome which is so peaky that we couldn't cut it! We will continue to do inference as though each of them are linear chromosomes, but be aware that this can be wrong. \nThe troublesome chromosomes are {:?}", chromosomes_uncut);
+
+        }
 
         //Send off the kept data with locations in a vec of vecs and the background distribution from the AR model
         Ok((data_blocks, background_dist, min_height, ar_blocks, peak_thresh))
