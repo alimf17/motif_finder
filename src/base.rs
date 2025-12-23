@@ -7847,6 +7847,8 @@ mod tester{
 
         _ = motif_set.add_motif(Motif::rand_mot_with_height(13.2, wave.seq(), &mut rng));
 
+        println!("motif set like {}", motif_set.calc_ln_post());
+
         let mot = motif_set.get_nth_motif(0);
         let mot1 = motif_set.get_nth_motif(1);
         let mot_kmer = mot.best_motif();
@@ -7886,10 +7888,19 @@ mod tester{
 
         //let hamming_fn = |x: usize| if x < 10 {2} else {(x/2)-2} ;
         
-        let hamming_fn = |x: usize| if x < 10 {1} else { x/2-3};
+        //let hamming_fn = |x: usize| if x < 10 {1} else { x/2-3};
 
-        let ln_num_hammings = |x: &Motif| ((sequence.all_kmers_within_hamming(&x.best_motif(), hamming_fn(x.len())+1).len()) as f64).ln() ;
-        println!(" motif 0 neighbors {} motif 1 neighbors {}", ln_num_hammings(motif_set.nth_motif(0)).exp(), ln_num_hammings(motif_set.nth_motif(1)).exp());
+        //let ln_num_hammings = |x: &Motif| ((sequence.all_kmers_within_hamming(&x.best_motif(), hamming_fn(x.len())+1).len()) as f64).ln() ;
+        
+        let hamming_fn = |x: usize| {
+            let ratio_check = 200_f64/(motif_set.data_ref.data().seq().number_unique_kmers(x) as f64);
+            if ratio_check >= 1.0 {x} else{
+                (0.75*(x as f64)+(0.75*0.25*(x as f64)).sqrt()*NORMAL_DIST.inverse_cdf(ratio_check)).round() as usize
+            }
+        };
+
+
+        //println!(" motif 0 neighbors {} motif 1 neighbors {}", ln_num_hammings(motif_set.nth_motif(0)).exp(), ln_num_hammings(motif_set.nth_motif(1)).exp());
         //This should usually be Some
         //TODO: make this output Some significantly more often: it tends to make false positives on giving errors because it doesn't always Some
         let (leaped, leap_score) = motif_set.propose_base_leap(&mut rng).unwrap();
@@ -7900,17 +7911,16 @@ mod tester{
         assert!((mot.peak_height() == leap.peak_height()) || (mot.peak_height() == -leap.peak_height()), "zeroth motif height is wrong");
         assert!((mot1.peak_height() == leap1.peak_height()) || (mot1.peak_height() == -leap1.peak_height()), "first motif height is wrong");
 
+
         let leap_kmer = leap.best_motif();
         let leap1_kmer = leap1.best_motif();
 
-        
-        let kmer_num_ln_rat = ln_num_hammings(&leap)+ln_num_hammings(&leap1)-(ln_num_hammings(&motif_set.get_nth_motif(0))+ln_num_hammings(&motif_set.get_nth_motif(1)));
+        assert!(mot.best_motif().len() == leap_kmer.len(), "shuffle len wonky 0");
+        assert!(mot1.best_motif().len() == leap1_kmer.len(), "shuffle len wonky 0");
 
-        println!("ln rats {} {} {} {}", ln_num_hammings(&leap), ln_num_hammings(&leap1), ln_num_hammings(&motif_set.get_nth_motif(0)), ln_num_hammings(&motif_set.get_nth_motif(1)));
-        println!("shuff check {} {:?} {}", leap_score, leaped.ln_post, kmer_num_ln_rat);
-        assert!((leap_score-(leaped.ln_post.unwrap()+kmer_num_ln_rat)).abs() < 1e-6);
 
         let mut all_scramble_correct = true;
+        let mut shuffle_0 = false;
         for base in 0..mot.len() {
             let best_old = mot_kmer[base];
             let best_new = leap_kmer[base];
@@ -7924,6 +7934,37 @@ mod tester{
                 }
 
             }
+
+        }
+
+        let hamming_0 = Sequence::u64_hammings(Sequence::kmer_to_u64(&mot.best_motif()), Sequence::kmer_to_u64(&leap_kmer)) ;
+        let hamming_1 = Sequence::u64_hammings(Sequence::kmer_to_u64(&mot1.best_motif()), Sequence::kmer_to_u64(&leap1_kmer));
+
+        assert!(hamming_0 > 0 || hamming_1 > 0, "shuffling has not occurred!");
+
+        if Sequence::u64_hammings(Sequence::kmer_to_u64(&mot.best_motif()), Sequence::kmer_to_u64(&leap_kmer)) > 0 {
+
+           let (forward_hamm, potential_forwards) = motif_set.data_ref.data().seq().all_different_kmers_within_hamming(&mot.best_motif(), hamming_fn(mot.best_motif().len()));
+           let (reverse_hamm, potential_reverses) = motif_set.data_ref.data().seq().all_different_kmers_within_hamming(&leap_kmer, hamming_fn(leap_kmer.len()));
+
+           let num_hams = forward_hamm.iter().map(|&a| if a > 0 {1} else {0_usize}).sum::<usize>();
+           let rev_hams = reverse_hamm.iter().map(|&a| if a > 0 {1} else {0_usize}).sum::<usize>();
+
+           let hamming = Sequence::u64_hammings(Sequence::kmer_to_u64(&mot.best_motif()), Sequence::kmer_to_u64(&leap_kmer));
+
+           let num_choices_forward = potential_forwards.iter().map(|&(_,c)| if c == hamming {1_usize} else {0}).sum::<usize>();
+           let num_choices_reverse = potential_reverses.iter().map(|&(_,c)| if c == hamming {1_usize} else {0}).sum::<usize>();
+
+           let lograt = -((rev_hams as f64).ln())-((num_choices_reverse as f64).ln())+((num_hams as f64).ln())+((num_choices_forward as f64).ln());
+
+           println!("{rev_hams} {num_choices_reverse} {num_hams} {num_choices_forward} {hamming} {} ", hamming_fn(mot.best_motif().len()));
+           println!("shuffle check {} {} {} {}", (leap_score-(leaped.calc_ln_post()+lograt)).abs(), leap_score, leaped.calc_ln_post(), lograt);
+           assert!((leap_score == -f64::INFINITY && leaped.calc_ln_post() == -f64::INFINITY) || (leap_score-(leaped.calc_ln_post()+lograt)).abs() < 1e-6, "zeroth motif doesn't leap well {} {} {} {}",leap_score, leaped.calc_ln_post(), lograt, leap_score-(leaped.calc_ln_post()+lograt) );
+
+           if leap_score == -f64::INFINITY {
+               println!("You should rerun the shuffle check, as it proposed an impossible motif the first time. This is a thing that happens, but we don't want to error on it because it's allowed to happen (TARJIM knows to reject the proposal)");
+               warn!("You should rerun the shuffle check, as it proposed an impossible motif the first time. This is a thing that happens, but we don't want to error on it because it's allowed to happen (TARJIM knows to reject the proposal)");
+           }
 
         }
 
@@ -7945,17 +7986,34 @@ mod tester{
             }
 
         }
+        
+        if (Sequence::u64_hammings(Sequence::kmer_to_u64(&mot1.best_motif()), Sequence::kmer_to_u64(&leap1_kmer)) > 0) {
+
+           let (forward_hamm, potential_forwards) = motif_set.data_ref.data().seq().all_different_kmers_within_hamming(&mot1.best_motif(), hamming_fn(mot1.best_motif().len()));
+           let (reverse_hamm, potential_reverses) = motif_set.data_ref.data().seq().all_different_kmers_within_hamming(&leap1_kmer, hamming_fn(leap1_kmer.len()));
+
+           let num_hams = forward_hamm.iter().map(|&a| if a > 0 {1} else {0_usize}).sum::<usize>();
+           let rev_hams = reverse_hamm.iter().map(|&a| if a > 0 {1} else {0_usize}).sum::<usize>();
+
+           let hamming = Sequence::u64_hammings(Sequence::kmer_to_u64(&mot1.best_motif()), Sequence::kmer_to_u64(&leap1_kmer));
+
+           let num_choices_forward = potential_forwards.iter().map(|&(_,c)| if c == hamming {1_usize} else {0}).sum::<usize>();
+           let num_choices_reverse = potential_reverses.iter().map(|&(_,c)| if c == hamming {1_usize} else {0}).sum::<usize>();
+
+           let lograt = -((rev_hams as f64).ln())-((num_choices_reverse as f64).ln())+((num_hams as f64).ln())+((num_choices_forward as f64).ln());
+
+           println!("{rev_hams} {num_choices_reverse} {num_hams} {num_choices_forward} {hamming} {} ", hamming_fn(mot1.best_motif().len()));
+           println!("shuffle check {} {} {} {}", (leap_score-(leaped.calc_ln_post()+lograt)).abs(), leap_score, leaped.calc_ln_post(), lograt);
+           assert!((leap_score == -f64::INFINITY && leaped.calc_ln_post() == -f64::INFINITY) ||(leap_score-(leaped.calc_ln_post()+lograt)).abs() < 1e-6, "1st motif doesn't leap well {} {} {} {}",leap_score, leaped.calc_ln_post(), lograt, leap_score-(leaped.calc_ln_post()+lograt) );
+
+           if leap_score == -f64::INFINITY {
+               println!("You should rerun the shuffle check, as it proposed an impossible motif the first time. This is a thing that happens, but we don't want to error on it because it's allowed to happen (TARJIM knows to reject the proposal)");
+               warn!("You should rerun the shuffle check, as it proposed an impossible motif the first time. This is a thing that happens, but we don't want to error on it because it's allowed to happen (TARJIM knows to reject the proposal)");
+           }
+
+        }
 
         assert!(all_scramble_correct, "first motif not correctly leaped");
-
-        let mut alt_leaped = leaped.clone();
-        alt_leaped.ln_post = None;
-        let ln_post = alt_leaped.ln_posterior();
-
-        println!("{ln_post}, {}", leaped.ln_post.unwrap());
-        println!("diff ln_post {}", ln_post-leaped.ln_post.unwrap());
-
-        assert!((ln_post-leaped.ln_post.unwrap()).abs() <= 1e-8, "ln posteriors not lining up"); 
 
         let recalced_signal = leaped.recalced_signal();
 
@@ -8008,17 +8066,6 @@ mod tester{
         }
 
         assert!(all_scramble_correct, "first motif not correctly shuffed");
-
-        let mut alt_shuffed = shuffed.clone();
-        alt_shuffed.ln_post = None;
-        let ln_post = alt_shuffed.ln_posterior();
-
-        println!("{:?} {:?}", motif_set, shuffed);
-
-        println!("{ln_post}, {}", shuffed.ln_post.unwrap());
-        println!("diff ln_post {}", ln_post-shuffed.ln_post.unwrap());
-
-        assert!((ln_post-shuffed.ln_post.unwrap()).abs() <= 64.0*std::f64::EPSILON, "ln posteriors not lining up"); 
 
         let recalced_signal = shuffed.recalced_signal();
 

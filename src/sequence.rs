@@ -652,7 +652,7 @@ impl Sequence {
 
     }
 
-    fn u64_hammings(kmer_a: u64, kmer_b: u64) -> usize {
+    pub(crate) fn u64_hammings(kmer_a: u64, kmer_b: u64) -> usize {
 
         let mut check: u64 =  kmer_a ^ kmer_b;
 
