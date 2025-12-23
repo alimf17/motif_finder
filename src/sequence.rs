@@ -579,10 +579,14 @@ impl Sequence {
 
         let k = bases.len();
 
-        let mut check_u64 = Self::kmer_to_u64(bases) << BITS_PER_BP;
+        //let mut check_u64 = Self::kmer_to_u64(bases) << BITS_PER_BP;
+
+        let mut check_u64 = Self::kmer_to_u64(bases) & (!U64_BITMASK); 
 
         //There is always at leasst one kmer that neighbors `bases` in its last Bp: itself
-        let mut num: f64 = 1.0;
+        //let mut num: f64 = 1.0;
+
+        let mut num: f64 = 0.0;
 
         for _ in 0..BASE_L {
 
@@ -1494,6 +1498,38 @@ mod tests {
                 for bp in [Bp::A, Bp::C, Bp::G, Bp::T] {
                     let mut other_mot = mot2.clone();
                     other_mot[mot2.len()-1] = bp;
+                    if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
+                }
+
+                //println!("{neighbors}, {neigh} neighbs");
+                assert!(neighbors == neigh);
+
+            }
+            
+            let neighbors = sequence.number_kmers_neighboring_by_first_bp(&mot);
+
+            let mut neigh: f64 = 0.0;
+
+            for bp in [Bp::A, Bp::C, Bp::G, Bp::T] {
+                let mut other_mot = mot.clone();
+                other_mot[0] = bp;
+                if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
+            }
+
+            //println!("{neighbors}, {neigh} neighbs");
+            assert!(neighbors == neigh);
+
+            for _ in 0..100 {
+
+                let mot2 = sequence.random_valid_motif(b_l, &mut rng);
+
+                let neighbors = sequence.number_kmers_neighboring_by_first_bp(&mot2);
+
+                let mut neigh: f64 = 0.0;
+
+                for bp in [Bp::A, Bp::C, Bp::G, Bp::T] {
+                    let mut other_mot = mot2.clone();
+                    other_mot[0] = bp;
                     if sequence.kmer_in_seq(&other_mot) { neigh += 1.0; }
                 }
 

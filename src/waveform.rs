@@ -2117,8 +2117,12 @@ fn prep_drawing_area<'b, DB: DrawingBackend>(big_plot: &'b DrawingArea<DB, Shift
 
             let invented_null: NullSequence =  NullSequence::new(null_makeup);
 
+            let chrom_id: Vec<usize> = vec![0; zeros.len()];
+            let null_chr: Vec<usize> = vec![0; null_zeros.len()];
+            let chr_names: Vec<String> = vec!["".to_string()];
 
-            let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &background, 3.0, 4.126)};
+
+            let data_seq = unsafe{ AllDataUse::new_unchecked_data(base_w, &invented_null, &zeros, &null_zeros, &chrom_id, &null_chr, &chr_names, &background, 3.0, 4.126)};
 
             let noise: Noise = signal.produce_noise(&data_seq);
 

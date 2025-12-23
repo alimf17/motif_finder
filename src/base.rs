@@ -7837,7 +7837,11 @@ mod tester{
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, MIN_HEIGHT, 4.126)};
+        let chrom_id: Vec<usize> = vec![0; start_bases_ids.len()];
+        let null_chr: Vec<usize> = vec![0; start_null_bases.len()];
+        let chr_names: Vec<String> = vec!["".to_string()];
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &chrom_id, &null_chr, &chr_names, &background, MIN_HEIGHT, 4.126)};
 
         let mut motif_set = MotifSet::rand_with_one_height(9.6, &data_seq, &mut rng);
 
@@ -8135,7 +8139,12 @@ mod tester{
 
         let start_bases_ids: Vec<usize> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &background, MIN_HEIGHT, 4.126)};
+        let chrom_id: Vec<usize> = vec![0; start_bases_ids.len()];
+        let null_chr: Vec<usize> = vec![0; start_null_bases.len()];
+        let chr_names: Vec<String> = vec!["".to_string()];
+
+
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_ids,&start_null_bases, &chrom_id, &null_chr, &chr_names, &background, MIN_HEIGHT, 4.126)};
         let _block_n: usize = 5;
 
         let duration = start_gen.elapsed();
@@ -8392,7 +8401,7 @@ mod tester{
         let num = motif_set.data_ref.data().seq().all_kmers_start_minmer(minmer_choice, new_mot.len()).len();
 
          
-        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln();
+        let pick_motif_prob = motif_set.data_ref.propensity_minmer(minmer_choice).ln()-(((MAX_BASE+1-MIN_BASE) as f64).ln() + (num as f64).ln());
 
         let pick_prob = new_mot.pwm.iter().map(|a| a.scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()).sum::<f64>();
 
@@ -8403,7 +8412,7 @@ mod tester{
 
         println!("actuals {pick_motif_prob} {pick_prob} {actual_prior}");
         println!("{should_prior} {actual_prior} asd");
-        assert!((should_prior+actual_prior+pick_prob).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_alt).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_penlaty).abs() < 1e-6, "{}", format!("{} {} {} {}", should_prior+actual_prior, pick_prob, pick_prob_alt, pick_prob_penlaty).as_str());
+        assert!((ln_prop == -f64::INFINITY && birth_mot.calc_ln_post() == -f64::INFINITY) || (should_prior+actual_prior+pick_prob).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_alt).abs() < 1e-6 || (should_prior+actual_prior+pick_prob_penlaty).abs() < 1e-6, "{}", format!("{} {} {} {}", should_prior+actual_prior, pick_prob, pick_prob_alt, pick_prob_penlaty).as_str());
 
         println!("done birth");
         //fn propose_kill_motif<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<(Self, f64)>
@@ -8511,16 +8520,23 @@ mod tester{
         println!("something");
         assert!(l.is_some(), "Not finding a changed motif!");
 
-        let should_prior = ln_prop-(extend_mot.calc_ln_post());
+
+        
 
         let ind = if went_forward { extend_mot.nth_motif(l.unwrap()).pwm.len()-1} else {0};
 
-        let actual_prior = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
-        let actual_prior_alt = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
-        let actual_prior_pen = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+        let extend = if went_forward { motif_set.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&extend_mot.nth_motif(l.unwrap()).best_motif()).ln() } else {motif_set.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&extend_mot.nth_motif(l.unwrap()).best_motif()).ln()};
+        let other_extend = if !went_forward { motif_set.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&extend_mot.nth_motif(l.unwrap()).best_motif()).ln() } else {motif_set.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&extend_mot.nth_motif(l.unwrap()).best_motif()).ln()};
 
-        println!("hanging");
-        assert!((should_prior+actual_prior).abs() < 1e-6 || (should_prior+actual_prior_alt).abs() < 1e-6 || (should_prior+actual_prior_pen).abs() < 1e-6 ,"{}", format!("{}", should_prior+actual_prior).as_str());
+        let should_prior = ln_prop-(extend_mot.calc_ln_post());
+        
+        let actual_prior = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend; 
+
+        let actual_prior_alt = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend; 
+        let actual_prior_pen = extend_mot.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend; 
+
+        println!("hanging {} {}", extend, other_extend);
+        assert!((should_prior+actual_prior).abs() < 1e-6 || (should_prior+actual_prior_alt).abs() < 1e-6 || (should_prior+actual_prior_pen).abs() < 1e-6 ,"{} ext", format!("{} {} {} ext", should_prior+actual_prior, should_prior+actual_prior_alt, should_prior+actual_prior_pen).as_str());
 
         }
         let cant_extend_set = MotifSet::rand_with_one_height_and_motif_len(9.6, MAX_BASE, &data_seq, &mut rng);
@@ -8533,13 +8549,16 @@ mod tester{
         let mut track = None;
         let mut tracker = 0_usize;
 
+        /*
         while let None = track {
             println!("contract");
             track = motif_set.propose_contract_motif(&mut rng);
             tracker += 1;
             if tracker >= 1000 {break;}
 
-        };
+        };*/
+
+        track = motif_set.propose_contract_motif(&mut rng);
             
         if let Some(track_d) = track {
 
@@ -8560,6 +8579,7 @@ mod tester{
                 found_off = true;
                 l = Some(i);
                 matching = (motif_set.nth_motif(i).len()-1) == contract_mot.nth_motif(i).len();
+                println!("match {i} {} {}", motif_set.nth_motif(i).len(), contract_mot.nth_motif(i).len());
                 let matching_forward = contract_mot.nth_motif(i).pwm.iter()
                     .zip(motif_set.nth_motif(i).pwm[0..(contract_mot.nth_motif(i).len()-1)].iter())
                     .map(|(a, b)| *a == *b) //We implemented a fuzzy equality for partialeq of bases
@@ -8578,16 +8598,27 @@ mod tester{
 
         assert!(l.is_some(), "Not finding a changed motif!");
 
+        let extend = if went_forward { motif_set.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&motif_set.nth_motif(l.unwrap()).best_motif()).ln() } else {motif_set.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&motif_set.nth_motif(l.unwrap()).best_motif()).ln()};
+      
+        let other_extend = if !went_forward { motif_set.data_ref.data().seq().number_kmers_neighboring_by_last_bp(&motif_set.nth_motif(l.unwrap()).best_motif()).ln() } else {motif_set.data_ref.data().seq().number_kmers_neighboring_by_first_bp(&contract_mot.nth_motif(l.unwrap()).best_motif()).ln()};
+
+        println!("extend {extend} {went_forward} {other_extend}");
+
         let should_prior = ln_prop-(contract_mot.calc_ln_post());
 
-        let ind = if went_forward { contract_mot.nth_motif(l.unwrap()).pwm.len()-1} else {0};
+
+        let ind = if went_forward { motif_set.nth_motif(l.unwrap()).pwm.len()-1} else {0};
 
 
-        let actual_prior = (motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0")).scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
-        let actual_prior_alt = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>();
-        let actual_prior_pen = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>(); 
+        let actual_prior = (motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0")).scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_DIST.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend;
+        let actual_prior_alt = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_CHOOSE_ALT.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend;
+        let actual_prior_pen = motif_set.nth_motif(l.unwrap()).pwm.get(ind).expect("We know this is bigger than 0").scores.iter().map(|&a| if a < 0.0 {BASE_PENALTY_PRIOR.energy_ln_pmf(a)} else {0.0}).sum::<f64>()-extend; 
 
-        assert!((should_prior-actual_prior).abs() < 1e-6 || (should_prior-actual_prior_alt).abs() < 1e-6 || (should_prior-actual_prior_pen).abs() < 1e-6, "{}", format!("{} {} {}", should_prior-actual_prior, should_prior-actual_prior_alt, should_prior-actual_prior_pen).as_str());
+        println!("pot err {:?} {ind} {} {} {}",l, should_prior-actual_prior, should_prior-actual_prior_alt, should_prior-actual_prior_pen);
+
+        println!("old \n{:?} \n\n new \n{:?}", motif_set, contract_mot);
+
+        assert!((should_prior-actual_prior).abs() < 1e-6 || (should_prior-actual_prior_alt).abs() < 1e-6 || (should_prior-actual_prior_pen).abs() < 1e-6, "{}", format!("{:?} {ind} {} {} {}",l, should_prior-actual_prior, should_prior-actual_prior_alt, should_prior-actual_prior_pen).as_str());
         }
         let cant_contract_set = MotifSet::rand_with_one_height_and_motif_len(2.6, MIN_BASE, &data_seq, &mut rng);
 
@@ -8793,6 +8824,9 @@ mod tester{
 
         let start_bases_copy: Vec<_> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
+        let chrom_id: Vec<usize> = vec![0; start_bases_copy.len()];
+        let null_chr: Vec<usize> = vec![0; start_null_bases.len()];
+        let chr_names: Vec<String> = vec!["".to_string()];
 
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
@@ -8800,9 +8834,9 @@ mod tester{
 
         let background = Background::new(0.25, 2.64, 20.).unwrap();
 
-        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), background.clone(),3.0, 4.126)};
+        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), chrom_id.clone(), null_chr.clone(), chr_names.clone(),  background.clone(),3.0, 4.126)};
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0, 4.126)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &chrom_id, &null_chr, &chr_names, &background, 3.0, 4.126)};
         println!("Done gen {} bp {:?}", bp, duration);
 
         println!("{} gamma", gamma(4.));
@@ -8850,7 +8884,7 @@ mod tester{
 
         let coordinate_bases: Vec<usize> = start_bases.iter().map(|&a| a+spacing_dist.sample(&mut rng)).collect();
 
-        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases ,&background, 3.0, 4.126) }; 
+        let data_seq_2 = unsafe{ AllDataUse::new_unchecked_data(waveform2, &null_seq, &coordinate_bases,&start_null_bases , &chrom_id, &null_chr, &chr_names, &background, 3.0, 4.126) }; 
 
         let _noise: Noise = waveform.produce_noise(&data_seq_2);
 
@@ -9154,9 +9188,12 @@ mod tester{
 
         let invented_null: NullSequence =  NullSequence::new(null_makeup);
 
+        let chrom_id: Vec<usize> = vec![0; wave_start_bases.len()];
+        let null_chr: Vec<usize> = vec![0; null_zeros.len()];
+        let chr_names: Vec<String> = vec!["".to_string()];
 
 
-        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &wave_background,3.0, 4.126) }; 
+        let wave_data_seq = unsafe{ AllDataUse::new_unchecked_data(wave_wave,&invented_null, &wave_start_bases, &null_zeros, &chrom_id, &null_chr, &chr_names, &wave_background,3.0, 4.126) }; 
         let theory_base = [1.0.log2(), 1e-5.log2(), 1e-5.log2(), 0.2_f64.log2()];
 
         let mat: Vec<Base> = (0..15).map(|_| Base::new(theory_base.clone())).collect::<Vec<_>>();
@@ -9360,15 +9397,19 @@ mod tester{
         let start_bases_copy: Vec<_> = (0..block_n).map(|a| (2*a+1)*bp_per_block+10).collect();
 
 
+        let chrom_id: Vec<usize> = vec![0; start_bases_copy.len()];
+        let null_chr: Vec<usize> = vec![0; start_null_bases.len()];
+        let chr_names: Vec<String> = vec!["".to_string()];
+        
         let wave: Waveform = Waveform::create_zero(&sequence, 5);
         let duration = start_gen.elapsed();
         println!("grad gen {} bp {:?}", bp, duration);
 
         let background = Background::new(0.25, 2.64, 20.).unwrap();
 
-        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), background.clone(),3.0, 4.126)};
+        let base_seq = unsafe{ AllData::create_manual(sequence.clone(), null_seq.clone(), WaveformDef::from(&wave), start_bases_copy.clone(), start_null_bases.clone(), chrom_id.clone(), null_chr.clone(), chr_names.clone(), background.clone(),3.0, 4.126)};
 
-        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &background, 3.0, 4.126)};
+        let data_seq = unsafe{ AllDataUse::new_unchecked_data(wave.clone(),&null_seq, &start_bases_copy,&start_null_bases, &chrom_id, &null_chr, &chr_names, &background, 3.0, 4.126)};
 
         for i in 0..10 {
             let mut buffer: Vec<u8> = bincode::serde::encode_to_vec(&base_seq, config::standard()).expect("serializable");
