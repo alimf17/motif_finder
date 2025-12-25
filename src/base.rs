@@ -5596,12 +5596,12 @@ impl<'a> MotifSet<'a> {
             let best_hit = potential_tf_list.get(0);
 
             let hit_string = match best_hit {
-                Some(hit) => format!("is most likely {}, with log2 fold enrichment {} ({} site(s) vs an expected {} site(s)) and p_value {}\n", hit.0, hit.2, hit.3, hit.4, hit.1),
+                Some(hit) => format!("is most likely {}, with log2 fold enrichment {} ({} site(s) vs an expected {} site(s)) and p_value {:.3e}\n", hit.0, hit.2, hit.3, hit.4, hit.1),
                 None => format!("has no hits!\n"),
             };
 
 
-            let header_string = format!("\nMotif_{i} ({}) with peak height {} {}\n", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
+            let header_string = format!("\nMotif {i} ({}) with peak height {} {}\n", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
 
             if let Err(file_write_err) = file_handle.write(&header_string.into_bytes()) {
                     return Err(Box::new(file_write_err));
@@ -5651,6 +5651,60 @@ impl<'a> MotifSet<'a> {
            Ok(()) 
         }).collect();
 
+        let res: Result<(), Box<dyn Error+Send+Sync>> = match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        };
+
+        return (bindings, ided_loci, potential_tfs, res)
+
+    }
+    pub fn output_pretty_tf_assignment<'b, W: Write>(&self, file_handle: &mut W, data_ref: &AllDataUse, annotations: &'b GenomeAnnotations, regulatory_distance: u64, tfs_to_compare: &TFAnalyzer, p_val_thresh: f64) -> (Vec<Vec<(usize, bool, f64)>>, Vec<Vec<&'b Locus>>, Vec<Vec<(String, f64, f64, usize, f64)>>, Result<(), Box<dyn Error+Send+Sync>>) {
+
+        let (bindings, ided_loci, potential_tfs) = self.assign_tfs(data_ref, annotations, regulatory_distance, tfs_to_compare, p_val_thresh);
+
+        println!("Assigned TFs");
+        if let Err(file_write_err) = file_handle.write(b" \n") { 
+                return (bindings, ided_loci, potential_tfs, Err(Box::new(file_write_err)));
+        };
+
+        let result: Result<Vec<()>, _> = self.set.iter().zip(bindings.iter()).zip(ided_loci.iter()).zip(potential_tfs.iter()).enumerate().map(|(i, (((motif_and_nulls, binding_vec), ided_loci), potential_tf_list))| {
+
+            let best_hit = potential_tf_list.get(0);
+
+            let hit_string = match best_hit {
+                Some(hit) => format!("is most likely {}, with log2 fold enrichment {:.3e} ({} site(s) vs an expected {:.3} site(s)) and p_value {:.3e}\n", hit.0, hit.2, hit.3, hit.4, hit.1),
+                None => format!("has no hits!\n"),
+            };
+
+
+            let header_string = format!("\nMotif {i} ({}) with peak height {} {}\n", motif_and_nulls.0.best_motif_string(), motif_and_nulls.0.peak_height(), hit_string);
+
+            if let Err(file_write_err) = file_handle.write(&header_string.into_bytes()) {
+                    return Err(Box::new(file_write_err));
+            };
+            
+
+
+            if potential_tf_list.len() > 0 {
+                if let Err(file_write_err) = file_handle.write(b"Factor    \tlog2 enrichment\tp_value \tnumber of hits\texpected number of hits in null distribution\n") {
+                    return Err(Box::new(file_write_err));
+                };
+            }
+            //This autoskips if potential_tf_list has less than two suggestions
+            for i in 0..potential_tf_list.len() {
+                let registered_tf = format!("{:<10}\t{:<14.3e}\t{:<8.3e}\t{:<14} \t{:.3}\n", potential_tf_list[i].0, potential_tf_list[i].2, potential_tf_list[i].1, potential_tf_list[i].3, potential_tf_list[i].4);
+                if let Err(file_write_err) = file_handle.write(&registered_tf.into_bytes()) {
+                    return Err(Box::new(file_write_err));
+                };
+
+            }
+            println!("\n");
+
+            Ok(())
+
+        }).collect();
+        
         let res: Result<(), Box<dyn Error+Send+Sync>> = match result {
             Ok(_) => Ok(()),
             Err(e) => Err(e),

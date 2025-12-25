@@ -54,9 +54,8 @@ fn main() {
 
     let mut std = std::io::stdout();
     
-    let (poses_and_scores,_, _, a) = activated.output_tf_assignment(&mut std, &data_ref, &annotations, 200, &tf_analyzer, 0.05);
-    println!("{:?}", poses_and_scores);
-    let _ = a.unwrap();
+    let (poses_and_scores,_, _, a) = activated.output_pretty_tf_assignment(&mut std, &data_ref, &annotations, 200, &tf_analyzer, 0.05);
+    /*let _ = a.unwrap();
     let activated_ref = &activated;
     //motif id, peak height, start position, reverse complement or no, score
     let mut fimo_like_prep: Vec<(usize, f64, usize, bool, f64)> = poses_and_scores.iter().enumerate().map(|(id, vec_of_scores)| vec_of_scores.iter().map(move |(pos, rev, score)| (id, activated_ref.nth_motif(id).peak_height(), *pos, *rev, *score))).flatten().collect();
@@ -79,7 +78,7 @@ fn main() {
 
 
     }
-
+*/
 
 
 }

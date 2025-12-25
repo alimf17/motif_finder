@@ -459,7 +459,6 @@ impl TFAnalyzer {
             let collection: Vec<_> = confirm_line.split('\t').collect();
             let Some(tf_name_str) = collection.get(index_tf_name) else {return Err(Box::new(TsvColumnError::TFNameOOB));};
             let Some(start_str) = collection.get(index_chr_start) else { return Err(Box::new(TsvColumnError::ChrStartOOB));};
-            println!("{start_str} start");
             if *start_str == "" {continue;}
             let Ok(mut start): Result<usize,_> = start_str.parse() else { return Err(Box::new(TsvColumnError::ChrStartNotInt));};
             let Some(end_str) = collection.get(index_chr_end) else { return Err(Box::new(TsvColumnError::ChrEndOOB));};
@@ -550,7 +549,7 @@ impl TFAnalyzer {
  
         let mut tests: Vec<_> = tf_vs_counts.into_iter().filter_map(|(tf, count)| self.tf_props.get(&tf).map(|&p| (tf, p, count))).map(|(tf, p, count)| {
             let prob = ((p+motif_size*loc_info.len()) as f64)/(self.sequence_length as f64);
-            println!("{prob} prob");
+            //println!("{prob} prob");
             let binom = Binomial::new(prob, loc_info.len() as u64).unwrap();
             (tf, binom.sf(count as u64), ((count as f64)/(prob*(loc_info.len() as f64))).log2(), count, prob*(loc_info.len() as f64))
         }).collect();
