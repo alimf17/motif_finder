@@ -1416,7 +1416,7 @@ impl AllData {
                     if spacing > 1 {
                         _ = positive_window_part.pop();
                         _ = float_batch.pop(); // We keep the data within the bp window generally by removing once..
-                        if (spacing == 2) && (((target_bp-bp_prior) % BP_PER_U8) == 1) { //But need to remove twice if this condition is fulfilled
+                        if (spacing == 2) { //&& (((target_bp-bp_prior) % BP_PER_U8) == 1) { //But need to remove twice if this condition is fulfilled
                             _ = float_batch.pop();
                             _ = positive_window_part.pop();
                         } 
@@ -2491,9 +2491,23 @@ impl<'a> AllDataUse<'a> {
 
     }
 
+    pub fn retain_only_named_chrs(&self, retained_chrs: &[&str]) -> Option<AllData> {
+
+        let remove_chr_indices: Vec<usize> = self.chr_names.iter().map(|a| !(retained_chrs.iter().any(|b| b == a))).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+
+        let remove_genome_vec: Vec<usize> = self.genome_block_chrs.iter().map(|a| remove_chr_indices.iter().any(|b| b == a)).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+        let remove_nullbp_vec: Vec<usize> = self.nullbp_block_chrs.iter().map(|a| remove_chr_indices.iter().any(|b| b == a)).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+
+        let remove_pos = self.with_removed_blocks(&remove_genome_vec)?;
+
+        let to_remove_neg = AllDataUse::new(&remove_pos, 0.0).expect("This would have panicked already if it was invalid");
+
+        to_remove_neg.with_removed_null_blocks(&remove_nullbp_vec)
+    }
+
     /// This creates an `[AllData]` from `self` which omits the blocks indexed by `remove`. 
     /// We ignore any duplicated elements of `remove` as well as any elements 
-    /// that are at least the number of blocks in `self`. Returns `Ok(None)` if `remove` 
+    /// that are at least the number of blocks in `self`. Returns `None` if `remove` 
     /// contains all blocks. The AllData that comes out retains all data about the null sequence. 
     pub fn with_removed_blocks(&self, remove: &[usize]) -> Option<AllData> {
 
@@ -2532,6 +2546,55 @@ impl<'a> AllDataUse<'a> {
             start_nullbp_coordinates: self.start_nullbp_coordinates.clone(),
             genome_block_chrs: new_chrs,
             nullbp_block_chrs: self.nullbp_block_chrs.clone(),
+            chr_names: self.chr_names.clone(),
+            background: self.background.clone(), 
+            min_height: self.min_height,
+            credibility: self.credibility,
+        };
+
+        _ = AllDataUse::new(&to_return, 0.0).expect("AllData should always produce a legal AllDataUse");
+
+        Some(to_return)
+
+    }
+    
+    pub fn with_removed_null_blocks(&self, remove: &[usize]) -> Option<AllData> {
+
+        let new_seq = self.null_seq.with_removed_blocks(remove)?;
+        let new_wave: WaveformDef = (&self.data).into();
+
+        let mut new_coords = self.start_nullbp_coordinates.clone();
+
+        let mut new_chrs = self.nullbp_block_chrs.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a < self.start_nullbp_coordinates.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.start_nullbp_coordinates.len() { return None;}
+
+        for ind in remove_descend {
+            new_coords.remove(ind);
+            new_chrs.remove(ind);
+        }
+
+        let to_return = AllData{
+
+            seq: self.data.seq().clone(),
+            null_seq: new_seq, 
+            data: new_wave,
+            start_genome_coordinates:self.start_genome_coordinates.clone(), 
+            start_nullbp_coordinates: new_coords,
+            genome_block_chrs: self.genome_block_chrs.clone(),
+            nullbp_block_chrs: new_chrs,
             chr_names: self.chr_names.clone(),
             background: self.background.clone(), 
             min_height: self.min_height,
