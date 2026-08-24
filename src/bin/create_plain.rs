@@ -31,18 +31,22 @@ fn main() {
 
 //    let file_out_trp = "/expanse/lustre/scratch/alimf/temp_project/ProcessedData/IPOD_HR_min_height_1.0_try_again.bin";
 
-    let file_out_trp = "/work/hdd/bbgs/alimf/AlterProcessedData/IPOD_HR_unstat_omit_neg_wind.bin";
+
+    let file_out_trp = "/Users/afarhat/Downloads/StormoYeastLog2BedGraphs/GCN4_WT_1_data.gz";
 
     let mut try_bincode : ParDecompress<Mgzip> = ParDecompressBuilder::new().from_reader( File::open(file_out_trp).expect("You initialization file must be valid for inference to work!"));
 
     let mut buffer: Vec<u8> = Vec::new();
     let _ = try_bincode.read_to_end(&mut buffer);//We don't need to handle this specially, because this will create a different warning later
-    let (pre_data, _bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
+    let (pre_data, bytes): (AllData, usize) = bincode::serde::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
 
+    println!("{bytes}");
     let data = AllDataUse::new(&pre_data, 0.0).unwrap();
 
-    buffer.clear();
+    let wave = Waveform::create_zero(data.data().seq(), data.data().spacer());
 
-    data.save_data_to_directory("/work/hdd/bbgs/alimf", "IPOD_HR_unstat_no_neg_plain");
+    buffer.clear();
+ 
+    wave.save_waveform_to_directory(&data, "/Users/afarhat/Downloads/first_stormo", "first_stormo", &BLUE, false,None, None, &[]);
 
 }

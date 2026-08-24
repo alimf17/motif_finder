@@ -1230,6 +1230,81 @@ impl NullSequence {
         println!("block_lens {:?}", &self.block_lens);
 
     }
+    
+    // Makes a copy of `self`, with the blocks in `remove` removed
+    // Any element of `remove` which is at least the size of the number of blocks
+    // is simply ignored. Returns `None` if remove contains all legal blocks
+    pub(crate) fn with_removed_blocks(&self, remove: &[usize]) -> Option<Self> {
+        
+        let mut new_blocks = self.seq_blocks.clone();
+        let mut new_lens = self.block_lens.clone();
+        let mut new_starts = self.block_u8_starts.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a < self.block_u8_starts.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.block_lens.len() { return None;}
+
+        let mut i = 0;
+
+        //Ok, this is a slightly weird thing we're doing
+        //Basically, we're treating the last blocks specially, because they 
+        //don't have a boundary to stop at
+        //BUT, we have to iteratitively check new_starts because
+        //each following block to remove could also end up needing to be treated
+        //like an end block, until we know we have at least one block in front of
+        //block i. The first guard is a guard against a panic, in case we completely
+        //drain remove_descend doing this
+        while (i < remove_descend.len()) && (remove_descend[i] == new_starts.len()-1) {
+
+            let ind = remove_descend[i];
+            _ = new_blocks.drain(new_starts[ind]..).collect::<Vec<_>>();
+            _ = new_starts.pop();
+            _ = new_lens.pop();
+            i += 1;
+        }
+
+        while (i < remove_descend.len()) {
+            let ind = remove_descend[i];
+            let (start, stop) = (new_starts[ind], new_starts[ind+1]);
+            let len_u8 = stop-start;
+            _ = new_blocks.drain(start..stop).collect::<Vec<_>>();
+            _ = new_starts[(ind+1)..].iter_mut().map(|a| *a -= len_u8).collect::<Vec<_>>();
+            _ = new_starts.remove(ind);
+            _ = new_lens.remove(ind);
+            i += 1;
+        }
+
+        //We already know we shouldn't return None, but ? is easy
+        let max_len = *new_lens.iter().max()?;
+
+        let orig_kmer_count: [HashMap<u64, usize, WyHash>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| HashMap::with_hasher(WyHash::with_seed(0)));
+        let orig_kmer_lists: [Vec<u64>; MAX_BASE+1-MIN_BASE] = core::array::from_fn(|a| Vec::new());
+        
+        let mut seq = NullSequence{
+            seq_blocks: new_blocks,
+            block_u8_starts: new_starts,
+            block_lens: new_lens,
+            max_len: max_len,
+            kmer_counts: orig_kmer_count,
+            kmer_lists: orig_kmer_lists,
+        };
+
+        seq.initialize_kmer_count();
+        Some(seq)
+
+
+    }
 }
 
 impl Serialize for NullSequence {

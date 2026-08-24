@@ -474,7 +474,7 @@ impl AllData {
         let pre_seq_len = sequence_len_or_fasta_error.expect("already returned if this was an error");
 
         
-        let test_sync = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing, thresh);
+        let test_sync = Self::synchronize_sequence_and_data(pre_seq, pre_data, pre_noise, pre_seq_len, spacing, thresh, fragment_length);
        
         if test_sync.is_err() { return Err(AllProcessingError::Synchronization(BadDataSequenceSynchronization::PoorSynchronize(test_sync.unwrap_err()))); }
 
@@ -698,6 +698,9 @@ impl AllData {
 
         let length_checking = |x: &str| if check_chromosome { chromosome_check.as_ref().ok().map(|a| a.get(x).copied()).flatten() } else if ensure_only_one_chromosome { chromosome_check.as_ref().ok().map(|a| a.values().next()).flatten().copied() } else {None};
         let Some(split_line): Option<[&str; 4]> = line.1.split('\t').collect::<Vec<_>>().try_into().ok() else { potential_error.add_problem_line(line_number, true, false, false, false, false); return None;};
+
+        //println!("split {:?} {:?}", split_line, check_chromosome);
+        //println!("{:?}", &chromosome_check.as_ref().unwrap().keys().collect::<Vec<_>>());
 
         if check_chromosome { 
             if !(chromosome_check.as_ref().is_ok_and(|a| a.get(split_line[0]).is_some())) { 
@@ -1096,8 +1099,10 @@ impl AllData {
                                 check_ind += 1;
                             }
 
+
                             if spacing < BASE_L {
 
+                                //TODO: This needs fixing for a particular edge case where it ends up wrapping backwards for usize (probably some kind of 0-1 operation)
                                 next_ar_ind -= ((next_ar_ind+1-curr_data_start) % BASE_L);
 
                             }
@@ -1261,7 +1266,7 @@ impl AllData {
         //is always compatible with the sequence to be synchronized, the data Waveform, and all other Waveforms 
         //derived from the data. The invariant is upheld because (fragment_length as f64)/(2.0*WIDE)
         //never rounds down
-        data_blocks = data_blocks.into_iter().map(|(c, mut b)| { b.retain(|a| (a.len()+1)*spacing > fragment_length); (c, b)}).collect();
+        data_blocks = data_blocks.into_iter().map(|(c, mut b)| { b.retain(|a| (a.len()+1)*spacing > 2*fragment_length + 1); (c, b)}).collect();
 
 
        
@@ -1344,7 +1349,7 @@ impl AllData {
     //      But these are on the edge between being positive and negative data,
     //      so they're in a little bit of a grey area to classify, and saving 
     //      them isn't my highest priority anyway.
-    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_sequence_lens: HashMap<String, usize>, spacing: usize, peak_thresh: f64) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
+    fn synchronize_sequence_and_data(pre_sequence_map: HashMap<String, Vec<Option<usize>>>, pre_chrom_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_chrom_null_data: Vec<(String, Vec<Vec<(usize, f64)>>)>, pre_sequence_lens: HashMap<String, usize>, spacing: usize, peak_thresh: f64, fragment_length: usize) -> Result<(Sequence, NullSequence, WaveformDef, Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, Vec<String>), WaveCreationError> {
         let data_block_num = pre_chrom_data.iter().map(|a| a.1.len()).sum::<usize>();
         let null_block_num = pre_chrom_null_data.iter().map(|a| a.1.len()).sum::<usize>();
         let mut sequence_blocks: Vec<Vec<usize>> = Vec::with_capacity(data_block_num);
@@ -1391,23 +1396,56 @@ impl AllData {
                 //let window_is_positive = float_batch.iter().any(|&b| b >= peak_thresh);
                 //let min_target_bp = (*(pre_data[i].last().unwrap())).0+1;//We include the +1 here because we want to include the bp corresponding to the last location
 
-                let positive_window_part = float_batch.iter().enumerate().filter_map(|(i, &f)| if f >= peak_thresh { Some(i*spacing)} else {None}).collect::<Vec<usize>>();
+                let mut positive_window_part = float_batch.iter().enumerate().filter_map(|(i, &f)| if f >= peak_thresh { Some(i*spacing)} else {None}).collect::<Vec<usize>>();
                 //This needs to be float_batch.len()-1 because we need the bp that matches
                 //the last INDEX of float_batch, not its length. We handle this slightly 
                 //differently if spacing is small, because that edge case needs special care
-                let min_target_bp = if spacing >= BP_PER_U8 {bp_prior + (float_batch.len()-1)*spacing + 1} else {bp_prior + float_batch.len()*spacing +1};
+                //Similarly, we special case the situation in which have a spacing = 1
+                let min_target_bp = if spacing >= BP_PER_U8 {bp_prior + (float_batch.len()-1)*spacing + 1} else if spacing > 1 {bp_prior + float_batch.len()*spacing +1} else {bp_prior + float_batch.len()};
 
                 //SAFETY: This line, in conjunction with the previous checks on pre_data
                 //        necessary to call this function, upholds our safety invariants 
                 //        when we actually generate the occupancy signals with Waveform::place_peak
-                let target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+                let mut target_bp = if ((min_target_bp-bp_prior) % BP_PER_U8) == 0 {min_target_bp} else {min_target_bp+BP_PER_U8-((min_target_bp-bp_prior) % BP_PER_U8)};
+
+
+                
+                //If we have to deal with an edge case on the end of the chromosome, we contract the block slightly. We use skip_block to avoid situations where we now violate the safety
+                //invariants for place_peak
+                if min_target_bp/(sequence_len+1) < target_bp/(sequence_len+1) {
+                    if spacing > 1 {
+                        _ = positive_window_part.pop();
+                        _ = float_batch.pop(); // We keep the data within the bp window generally by removing once..
+                        if (spacing == 2) { //&& (((target_bp-bp_prior) % BP_PER_U8) == 1) { //But need to remove twice if this condition is fulfilled
+                            _ = float_batch.pop();
+                            _ = positive_window_part.pop();
+                        } 
+                    } else { //But we handle the spacing = 1 case separately 
+                        //for _ in 0..((target_bp-bp_prior) % BP_PER_U8) { //}
+                        for _ in 0..(BP_PER_U8) {
+                            _ = float_batch.pop();
+                            _ = positive_window_part.pop();
+                        }
+                    }
+                    target_bp -= BP_PER_U8;
+                }
+
+
+                let skip_block: bool = (target_bp-bp_prior) <= 2*fragment_length+1;
+
 
                 let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
 
-                //println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % (sequence_len+1))]);
+                
+                if !skip_block {
+                    if bp_ind/sequence_len < target_bp/sequence_len {
+                        println!("sample base {} {target_bp} {} {:?} {:?}", bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..], &pre_sequence[0..(target_bp % (sequence_len)+1)]);
+                    } else{
+                        println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % (sequence_len+1))]);
+                    }
+                }
 
-
-                while no_null_base && (bp_ind < target_bp){ 
+                while !skip_block && no_null_base && (bp_ind < target_bp){ 
                     match pre_sequence[bp_ind % sequence_len] { //I don't need to explicitly check for circularity: process_data handled this for me already
                         Some(bp) => bases_batch.push(bp),
                         None => no_null_base = false,
@@ -1415,7 +1453,7 @@ impl AllData {
                     bp_ind+=1;
                 }
 
-                if no_null_base {
+                if no_null_base && !skip_block {
                     //10 Seq block 0, 1104 276 110 4210650 110 1100 1101 1104
                     //10 Seq block 1, 2032 508 203 4212520 203 2030 2031 2032
                     println!("{spacing} Seq block {i}, {} {} {} {} {} {} {} {}", bases_batch.len(), bases_batch.len()/BASE_L, bases_batch.len()/(spacing), bp_prior, float_batch.len(), float_batch.len()*spacing, min_target_bp-bp_prior, target_bp-bp_prior);
@@ -1426,7 +1464,12 @@ impl AllData {
                     start_data.append(&mut float_batch);
                 } else {
                     //This gives the 1-indexed position of the null base in vim
-                    warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
+                    if !no_null_base {
+                        warn!("You have a null base in position {} of your sequence in a position with data relevant to a possible peak. We are discarding this data for inference purposes.",bp_ind);
+                    }
+                    if skip_block {
+                        warn!("You have a peak looking window which is of length {} when the safety threshold for kernel width compatibility is {}. We are discard this data for inference purposes.", target_bp-bp_prior, 2*fragment_length+1 ) 
+                    }
                 }
 
 
@@ -1721,17 +1764,21 @@ impl AllData {
         //peak_scale.unwrap_or(1.0)*sorted_data.iter().enumerate().map(|(i, &a)| (a, len*normal_dist.sf(a)/((sorted_data.len()-i) as f64)))
           //                                        .filter(|a| a.1 <= 0.0001).next().unwrap().0
         let m: Vec<_> = sorted_data.iter().enumerate().map(|(i, &a)| (a, len*normal_dist.sf(a)/((sorted_data.len()-i) as f64))).collect();
-        println!("m {:?}", m);
-        peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.005).next().unwrap().0
+        let last_m = if m.len() < 10 {m.clone()} else {m[m.len()-10..].to_vec()};
+        println!("last m {:?}", last_m);
+        peak_scale.unwrap_or(1.0)*m.iter().filter(|a| a.1 <= 0.05).next().unwrap().0
     }
 
     fn lerp(data: &[(usize, f64)], spacer: usize ) -> Vec<(usize, f64)> {
+
+        if(data.len() < 2) { return data.iter().map(|&a| a).collect();}
 
         let begins = data[0].0;
         let mut ends = (*(data.last().unwrap())).0;
         
 
         let capacity = 1+((ends-begins)/spacer);
+
 
         let mut locs_to_fill: Vec<usize> = Vec::with_capacity(capacity);
 
@@ -2375,6 +2422,7 @@ impl<'a> AllDataUse<'a> {
         let derived_color = DerivedColorMap::new(&[WHITE, ORANGE, RED]);
 
 
+        println!("blocks {}", blocked_locs_and_data.len());
         for i in 0..blocked_locs_and_data.len() {
 
             let loc_block = &blocked_locs_and_data[i].0;
@@ -2452,9 +2500,23 @@ impl<'a> AllDataUse<'a> {
 
     }
 
+    pub fn retain_only_named_chrs(&self, retained_chrs: &[&str]) -> Option<AllData> {
+
+        let remove_chr_indices: Vec<usize> = self.chr_names.iter().map(|a| !(retained_chrs.iter().any(|b| b == a))).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+
+        let remove_genome_vec: Vec<usize> = self.genome_block_chrs.iter().map(|a| remove_chr_indices.iter().any(|b| b == a)).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+        let remove_nullbp_vec: Vec<usize> = self.nullbp_block_chrs.iter().map(|a| remove_chr_indices.iter().any(|b| b == a)).enumerate().filter_map(|c| if c.1 { Some(c.0)} else {None}).collect();
+
+        let remove_pos = self.with_removed_blocks(&remove_genome_vec)?;
+
+        let to_remove_neg = AllDataUse::new(&remove_pos, 0.0).expect("This would have panicked already if it was invalid");
+
+        to_remove_neg.with_removed_null_blocks(&remove_nullbp_vec)
+    }
+
     /// This creates an `[AllData]` from `self` which omits the blocks indexed by `remove`. 
     /// We ignore any duplicated elements of `remove` as well as any elements 
-    /// that are at least the number of blocks in `self`. Returns `Ok(None)` if `remove` 
+    /// that are at least the number of blocks in `self`. Returns `None` if `remove` 
     /// contains all blocks. The AllData that comes out retains all data about the null sequence. 
     pub fn with_removed_blocks(&self, remove: &[usize]) -> Option<AllData> {
 
@@ -2493,6 +2555,55 @@ impl<'a> AllDataUse<'a> {
             start_nullbp_coordinates: self.start_nullbp_coordinates.clone(),
             genome_block_chrs: new_chrs,
             nullbp_block_chrs: self.nullbp_block_chrs.clone(),
+            chr_names: self.chr_names.clone(),
+            background: self.background.clone(), 
+            min_height: self.min_height,
+            credibility: self.credibility,
+        };
+
+        _ = AllDataUse::new(&to_return, 0.0).expect("AllData should always produce a legal AllDataUse");
+
+        Some(to_return)
+
+    }
+    
+    pub fn with_removed_null_blocks(&self, remove: &[usize]) -> Option<AllData> {
+
+        let new_seq = self.null_seq.with_removed_blocks(remove)?;
+        let new_wave: WaveformDef = (&self.data).into();
+
+        let mut new_coords = self.start_nullbp_coordinates.clone();
+
+        let mut new_chrs = self.nullbp_block_chrs.clone();
+
+        let mut remove_descend: Vec<usize> = remove.to_vec();
+
+        // We always want to remove blocks in descending order
+        // Otherwise, previously remove blocks screw with the remaining blocks
+        remove_descend.sort_unstable();
+        remove_descend.reverse();
+        remove_descend.dedup();
+
+        remove_descend = remove_descend.into_iter().filter(|a| *a < self.start_nullbp_coordinates.len()).collect();
+
+        //This is only possible if we have all blocks listed in remove_descend,
+        //thanks to sorting and dedup().
+        if remove_descend.len() == self.start_nullbp_coordinates.len() { return None;}
+
+        for ind in remove_descend {
+            new_coords.remove(ind);
+            new_chrs.remove(ind);
+        }
+
+        let to_return = AllData{
+
+            seq: self.data.seq().clone(),
+            null_seq: new_seq, 
+            data: new_wave,
+            start_genome_coordinates:self.start_genome_coordinates.clone(), 
+            start_nullbp_coordinates: new_coords,
+            genome_block_chrs: self.genome_block_chrs.clone(),
+            nullbp_block_chrs: new_chrs,
             chr_names: self.chr_names.clone(),
             background: self.background.clone(), 
             min_height: self.min_height,

@@ -316,9 +316,9 @@ impl<'a> Waveform<'a> {
         //println!("{} {} pl {:?}\n sd {:?}", start_data.len(), point_lens.len(), point_lens, start_dats);
         
         if (point_lens.last().unwrap() + start_dats.last().unwrap()) != start_data.len() {
-            println!("{:?} {:?} {:?} {}", point_lens, start_dats, start_dats.iter().zip(point_lens.iter()).map(|(a,b)| *a+*b).collect::<Vec<_>>(), start_data.len());
+            warn!("{:?} {:?} {:?} {}", point_lens, start_dats, start_dats.iter().zip(point_lens.iter()).map(|(a,b)| *a+*b).collect::<Vec<_>>(), start_data.len());
 
-            panic!("IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER")
+            panic!(" {:?} {:?} {:?} {} \n IMPOSSIBLE DATA FOR THIS SEQUENCE AND SPACER", point_lens, start_dats, start_dats.iter().zip(point_lens.iter()).map(|(a,b)| *a+*b).collect::<Vec<_>>(), start_data.len())
         }
  
         //This check needs to be point_lens[i]-1 because we need the last INDEX of point_lens
