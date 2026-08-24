@@ -579,14 +579,14 @@ impl Sequence {
 
         let k = bases.len();
 
-        //let mut check_u64 = Self::kmer_to_u64(bases) << BITS_PER_BP;
+        let mut check_u64 = Self::kmer_to_u64(bases) << BITS_PER_BP;
 
-        let mut check_u64 = Self::kmer_to_u64(bases) & (!U64_BITMASK); 
+        //let mut check_u64 = Self::kmer_to_u64(bases) & (!U64_BITMASK); 
 
         //There is always at leasst one kmer that neighbors `bases` in its last Bp: itself
-        //let mut num: f64 = 1.0;
+        let mut num: f64 = 1.0;
 
-        let mut num: f64 = 0.0;
+        //let mut num: f64 = 0.0;
 
         for _ in 0..BASE_L {
 
@@ -1007,7 +1007,7 @@ impl NullSequence {
 
             //SAFETY: We have unsafe code that relies on these invariants being upheld
             if block.len() % BP_PER_U8 != 0 {
-                panic!("All blocks must have a number of base pairs divisible by {}.", BP_PER_U8);
+                panic!("All blocks must have a number of base pairs divisible by {}. {} {} {:?}", BP_PER_U8, block_is.len(), block.len(), block_ls);
             }
 
             if block.len() <= MAX_BASE {

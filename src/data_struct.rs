@@ -1404,7 +1404,7 @@ impl AllData {
 
                 let mut bases_batch: Vec<usize> = Vec::with_capacity(pre_data[i].len()*spacing);
 
-                println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % (sequence_len+1))]);
+                //println!("sample base {} {target_bp} {} {:?}",bp_ind, sequence_len, &pre_sequence[(bp_ind % sequence_len)..(target_bp % (sequence_len+1))]);
 
 
                 while no_null_base && (bp_ind < target_bp){ 
@@ -1467,9 +1467,12 @@ impl AllData {
                             //println!("In None Case");
                             let final_prev_bp = bp_ind-((bp_ind-bp_prior) % BP_PER_U8);//This keeps our number of bases in each block divisible by BP_PER_U8
 
+
                             let previous_batch: Vec<usize> = bases_batch.drain(0..(final_prev_bp-bp_prior)).collect();
 
+
                             if previous_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                                println!("null {final_prev_bp} {}", previous_batch.len());
                                 null_starts_bps.push(bp_prior);
                                 null_sequence_blocks.push(previous_batch);
                                 which_chromosomes_null.push(this_id);
@@ -1481,7 +1484,13 @@ impl AllData {
                     bp_ind += 1;
                 }
 
+
+
                 if bases_batch.len() >= MAX_BASE { //we don't need little blocks that can't having binding in them anyway, but we don't need to uphold any place_peak invariants like we do for the positive sequence and data
+                    let modulus = bases_batch.len() % BP_PER_U8;
+                    if modulus > 0 {
+                        bases_batch = bases_batch.drain(0..(bases_batch.len()-modulus)).collect();
+                    }
                     null_sequence_blocks.push(bases_batch);
                     null_starts_bps.push(bp_prior % sequence_len);
                     which_chromosomes_null.push(this_id);
