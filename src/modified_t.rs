@@ -1,4 +1,5 @@
 use crate::base::{BASE_L, SCORE_THRESH, Base, LN_2};
+use deepsize::*;
 
 use rand::Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal, Gamma};
@@ -7,6 +8,7 @@ use statrs::statistics::{Min, Max, Distribution};
 use num_traits::Float;
 use serde::{Serialize, Deserialize};
 
+use std::mem::*;
 use std::f64;
 use std::error::Error;
 
@@ -100,6 +102,14 @@ impl BackgroundDist {
             BackgroundDist::FastT(fast) => (fast.scale, fast.freedom)
         }
     }
+}
+
+impl DeepSizeOf for BackgroundDist {
+
+    fn deep_size_of_children(&self, context: &mut Context) -> usize {
+        (2*size_of_val(&1f64))
+    }
+
 }
 
 impl ContinuousCDF<f64, f64> for BackgroundDist {
@@ -197,7 +207,7 @@ impl std::fmt::Display for FastTError {
 impl std::error::Error for FastTError {}
 
 /// This is a reimplementation of the T distribution from the backend of R.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, DeepSizeOf)]
 pub struct FastT {
     scale: f64,
     freedom: f64,
@@ -453,7 +463,7 @@ fn ln_beta_half(a: f64) -> f64 {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, DeepSizeOf)]
 #[serde(remote = "Normal")]
 struct NormalDef {
     #[serde(getter = "Normal::get_mean")]

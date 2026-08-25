@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 //use std::time::{Duration, Instant};
 
+use deepsize::DeepSizeOf;
+
 use core::f64::consts::PI;
 use std::error::Error;
 
@@ -57,7 +59,7 @@ static GET_BASE_USIZE: Lazy<HashMap<char, usize>> = Lazy::new(|| {
     map
 });
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DeepSizeOf)]
 pub struct AllData {
 
     seq: Sequence,

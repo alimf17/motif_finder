@@ -21,6 +21,9 @@ use log::warn;
 use statrs::distribution::{StudentsT, Continuous, ContinuousCDF};
 use enum_dispatch::enum_dispatch;
 
+use deepsize::DeepSizeOf;
+
+
 use aberth;
 use num_complex::Complex;
 
@@ -77,7 +80,7 @@ pub const LABEL_FONT_SIZE: i32 = 80;
 /// It's a unit type in my code: I go with fragment length
 /// determining a single width. But if you are editing this code, 
 /// it's an option
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq, DeepSizeOf)]
 pub enum KernelWidth {
      Wide = 0,
 }
@@ -92,7 +95,7 @@ impl Distribution<KernelWidth> for Standard {
 }
 
 /// This is an enum denoting the shape of the Kernel should be
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, VariantArray, EnumCountMacro, EnumIter, PartialEq, Eq, DeepSizeOf)]
 #[non_exhaustive]
 pub enum KernelVariety {
     Gaussian = 0,
@@ -113,7 +116,7 @@ impl Distribution<KernelVariety> for Standard {
 }
 
 /// This specifies the shape of a binding kernel
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, DeepSizeOf)]
 pub struct Kernel{
 
     peak_height: f64,
@@ -267,7 +270,7 @@ impl Error for BadLength {}
 /// This is the struct which holds occupancy traces. 
 /// This needs to uphold a lot of invariants, and thus initialization and usage
 /// are both quite finicky. 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub struct Waveform<'a> {
     wave: Vec<f64>,
     spacer: usize,
@@ -1536,7 +1539,7 @@ impl<'a> Mul<f64> for &'a Waveform<'a> {
 }
 
 /// This is simply a `Waveform` in a form that can be serialized.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, DeepSizeOf)]
 pub struct WaveformDef {
     wave: Vec<f64>,
     spacer: usize,
@@ -1592,7 +1595,7 @@ impl From<StudentsTDef> for StudentsT {
 }
 
 /// This holds both the background distribution of binding and the prototype Kernel shapes
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, DeepSizeOf)]
 pub struct Background {
     pub dist: BackgroundDist,
     pub kernel: [Kernel; KernelWidth::COUNT * KernelVariety::COUNT],

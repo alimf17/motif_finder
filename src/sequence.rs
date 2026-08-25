@@ -1,5 +1,6 @@
 
 use serde::{Serialize,Deserialize, Serializer, ser::SerializeStruct, Deserializer, de::Visitor, de::SeqAccess, de::MapAccess};
+use deepsize::DeepSizeOf;
 
 use std::fmt;
 use std::collections::{HashMap, HashSet};
@@ -35,7 +36,7 @@ pub(crate) const U64_BITMASK: u64 = 3;
 //   4) I still screw it up when I have to do it manually. 
 //   5) Save yourself. 
 /// This is the struct which holds the sequence blocks with significant amounts of binding
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub struct Sequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,
@@ -963,7 +964,7 @@ impl<'de> Deserialize<'de> for Sequence {
 }
 
 /// This is the struct which holds the sequence blocks with no notable binding
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub struct NullSequence {
     seq_blocks: Vec<u8>,
     block_u8_starts: Vec<usize>,

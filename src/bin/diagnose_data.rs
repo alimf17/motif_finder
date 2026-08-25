@@ -6,11 +6,14 @@ use motif_finder::base::*;
 use motif_finder::sequence::*;
 use motif_finder::data_struct::*;
 
+use std::mem::*;
 use std::path::*;
 use std::time::{Instant};
 use std::env;
 use std::fs::File;
 use std::io::Read;
+
+use deepsize::DeepSizeOf;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -36,14 +39,20 @@ fn main() {
 
 
 
-    println!("have all data");
+    //println!("have all data");
 
     let data_ref = AllDataUse::new(&total_data, 0.0).unwrap();
 
-    println!("{}", data_ref.data().seq().kmer_in_seq(&vec![Bp::G, Bp::T, Bp::A, Bp::C, Bp::C, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::C, Bp::G, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::A]));
+    //println!("{}", data_ref.data().seq().kmer_in_seq(&vec![Bp::G, Bp::T, Bp::A, Bp::C, Bp::C, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::C, Bp::G, Bp::A, Bp::G, Bp::T, Bp::A, Bp::C, Bp::A, Bp::A]));
     //println!("{:?}", data_ref.data().seq().diagnose_hamming_optimum());
-    println!("{}", data_ref.credibility());
+    //println!("{}", data_ref.credibility());
 
-    data_ref.print_this_out();
 
+   // data_ref.print_this_out();
+
+    //println!("size of data {:?} {:?} {:?} {:?} {:?} {:?}", size_of_val(&data_ref), size_of_val(&total_data), size_of_val(data_ref.data()), size_of_val(data_ref.data().seq()), size_of_val(data_ref.null_seq()), size_of_val(&data_ref.data().raw_wave()));
+    //
+
+  
+    println!("{:?}: {:?} {:?} {:?}", &data_file, total_data.deep_size_of(), data_ref.data().deep_size_of(), total_data.deep_size_of()+data_ref.data().deep_size_of());
 }
