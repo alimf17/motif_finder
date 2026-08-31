@@ -963,6 +963,9 @@ impl<'de> Deserialize<'de> for Sequence {
     }
 }
 
+//TODO: I'm pretty sure I can just yeet the kmer_counts with minimal impact on efficiency while greatly reducing RAM use. 
+//      I can also do something analogous with the Sequence struct: I would instead be finding kmers with binary searches, 
+//      rather than hashes. This is based on the fact that kmer lists is ordered: I should be able to just add the kmer counts to it. 
 /// This is the struct which holds the sequence blocks with no notable binding
 #[derive(Clone, Debug, DeepSizeOf)]
 pub struct NullSequence {
@@ -1224,6 +1227,10 @@ impl NullSequence {
     
     }
 
+    pub fn print_size(&self) {
+
+        println!("{:?} {:?}", self.kmer_counts.deep_size_of(), self.kmer_lists.deep_size_of());
+    }
 
     pub fn print_seq(&self)  {
 

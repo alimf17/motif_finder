@@ -55,4 +55,5 @@ fn main() {
 
   
     println!("{:?}: {:?} {:?} {:?}", &data_file, total_data.deep_size_of(), data_ref.data().deep_size_of(), total_data.deep_size_of()+data_ref.data().deep_size_of());
+    data_ref.null_seq().print_size();
 }
